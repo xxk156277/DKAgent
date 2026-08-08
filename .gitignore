@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Build output
+dist/
+build/
+out/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Test coverage
+coverage/

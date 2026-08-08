@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/config.ts",
+    "src/index.ts",
+    "src/agent/run.ts",
+    "src/agent/loop.ts",
+    "src/agent/dispatcher.ts",
+    "src/query-engine/provider.ts",
+    "src/query-engine/stream.ts",
+    "src/query-engine/queryEngine.ts",
+    "src/query-engine/providers/openai.ts",
+    "src/tools/types.ts",
+    "src/tools/registry.ts",
+    "src/tools/index.ts",
+    "src/tools/tool-item/split.ts",
+    "test/phase1/**/*.test.ts"
+  ]
+}
