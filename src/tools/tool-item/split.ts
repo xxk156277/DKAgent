@@ -37,16 +37,16 @@ export const splitQaTool: Tool<SplitQaInput, SplitQaOutput> = {
                 description: "labeled=有角色标签，auto=自动检测",
             },
         },
-        required: ["transcript"],
+        required: ["transcriptPath"],
         additionalProperties: false,
     },
     execute: async (input): Promise<ToolResult<SplitQaOutput>> => {
         const { transcriptPath, format = "auto" } = input;
 
-        const transcript = await readFile(
+        const transcript = normalizeTranscript(await readFile(
             transcriptPath,
             "utf8"
-        );
+        ));
 
         console.log('tool', transcript);
 
@@ -96,6 +96,49 @@ export const splitQaTool: Tool<SplitQaInput, SplitQaOutput> = {
         };
     },
 };
+
+function normalizeTranscript(text: string): string {
+    return text
+        .replace(/\r\n?/g, "\n")
+        .replace(/[\u00a0\u2007\u202f]/g, " ")
+        .split("\n")
+        .map(normalizeSpeakerLine)
+        .join("\n");
+}
+
+function normalizeSpeakerLine(line: string): string {
+    const interviewerWithColon = line.match(
+        /^\s*(?:面试官|Q|Interviewer|发言人\s*1)\s*[：:]\s*(.*)$/i,
+    );
+    if (interviewerWithColon) {
+        return formatSpeakerLine("面试官", interviewerWithColon[1]);
+    }
+
+    if (/^\s*(?:面试官|Q|Interviewer|发言人\s*1)\s+\d{1,2}:\d{2}\s*$/i.test(line)) {
+        return "面试官:";
+    }
+
+    const candidateWithColon = line.match(
+        /^\s*(?:候选人|求职者|A|Candidate|发言人\s*2)\s*[：:]\s*(.*)$/i,
+    );
+    if (candidateWithColon) {
+        return formatSpeakerLine("候选人", candidateWithColon[1]);
+    }
+
+    if (/^\s*(?:候选人|求职者|A|Candidate|发言人\s*2)\s+\d{1,2}:\d{2}\s*$/i.test(line)) {
+        return "候选人:";
+    }
+
+    return line;
+}
+
+function formatSpeakerLine(
+    speaker: "面试官" | "候选人",
+    content: string | undefined,
+): string {
+    const trimmedContent = content?.trim() ?? "";
+    return trimmedContent ? `${speaker}: ${trimmedContent}` : `${speaker}:`;
+}
 
 function detectFormat(text: string): "labeled" | "raw" {
     const questionPattern = /(?:面试官|Q|Interviewer|发言人1)[：:]/i;
