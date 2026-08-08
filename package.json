@@ -11,7 +11,7 @@
     "plan": "tsx src/index.ts plan",
     "reflection": "tsx src/index.ts reflection",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/*.test.ts",
+    "test": "tsx --test test/**/*.test.ts",
     "test:phase1": "tsx --test test/phase1/*.test.ts",
     "typecheck:phase1": "tsc -p tsconfig.phase1.json --noEmit"
   },

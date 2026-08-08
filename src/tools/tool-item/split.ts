@@ -48,9 +48,6 @@ export const splitQaTool: Tool<SplitQaInput, SplitQaOutput> = {
             "utf8"
         ));
 
-        console.log('tool', transcript);
-
-
         if (!transcript || transcript.length < 50) {
             return {
                 success: false,

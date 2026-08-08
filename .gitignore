@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+project-desgin/
+learn-agent-interview/
+docs/
 
 # Environment / secrets
 .env
@@ -23,6 +26,7 @@ out/
 .vscode/
 .idea/
 *.swp
+
 
 # Test coverage
 coverage/

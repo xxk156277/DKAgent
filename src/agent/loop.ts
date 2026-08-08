@@ -3,20 +3,7 @@ import type { QueryEngine } from "../query-engine/queryEngine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { AgentMessage } from "../query-engine/provider.js";
 
-interface TargetContent {
-    content: string,
-    path: string
-}
-
-export interface AgentRun {
-    targetContent: TargetContent;
-    messages: AgentMessage[];
-    step: number;
-    maxSteps: number;
-    abortSignal: AbortSignal;
-}
-
-export interface RunAgentOptions {
+export interface AgentLoopOptions {
     queryEngine: QueryEngine;
     toolRegistry: ToolRegistry;
     model: string;
@@ -26,80 +13,87 @@ export interface RunAgentOptions {
     onTextDelta?: (text: string) => void;
 }
 
-export async function runAgent(
-    targetContent: TargetContent,
-    options: RunAgentOptions,
-): Promise<string> {
-    const run: AgentRun = {
-        targetContent,
-        messages: [{
-            role: 'user',
-            content: `请帮我分析问文稿，路径:${targetContent.path}`
-        }],
-        step: 0,
-        maxSteps: options.maxSteps ?? 4,
-        abortSignal: options.abortSignal ?? new AbortController().signal,
-    };
-    while (run.step < run.maxSteps) {
-        console.log(`------------第${run.step}轮--------------- \n`);
+export class AgentLoop {
+    private readonly messages: AgentMessage[] = [];
+    private readonly abortSignal: AbortSignal;
 
-        if (run.abortSignal.aborted) {
-            throw new Error("Agent Run 已中止");
-        }
-
-        run.step += 1;
-        console.log(`\n[Agent] step=${run.step} model`);
-
-        const response = await options.queryEngine.query({
-            model: options.model,
-            messages: run.messages,
-            tools: options.toolRegistry.getSchemas(),
-            temperature: 0,
-            abortSignal: run.abortSignal,
-            ...(options.systemPrompt !== undefined
-                ? { systemPrompt: options.systemPrompt }
-                : {}),
-            ...(options.onTextDelta !== undefined
-                ? { onTextDelta: options.onTextDelta }
-                : {}),
-        });
-
-        if (response.type === "text") {
-            const answer = response.content.trim();
-            if (!answer) throw new Error("模型返回空文本");
-            run.messages.push({
-                role: "assistant",
-                content: answer
-            });
-            return answer;
-        }
-
-        run.messages.push({
-            role: "assistant",
-            ...(response.content !== undefined ? { content: response.content } : {}),
-            toolCalls: response.toolCalls,
-        });
-
-        for (const call of response.toolCalls) {
-            console.log(`[Agent] tool=${call.name} id=${call.id}`);
-            const dispatched = await dispatchToolCall(
-                options.toolRegistry,
-                call,
-                {
-                    queryEngine: options.queryEngine,
-                    abortSignal: run.abortSignal,
-                },
-            );
-            console.log(
-                `[Agent] tool_result=${dispatched.result.success ? "success" : "failed"}`,
-            );
-            run.messages.push({
-                role: "tool",
-                toolCallId: dispatched.toolCallId,
-                content: JSON.stringify(dispatched.result),
+    constructor(private readonly options: AgentLoopOptions) {
+        if (options.systemPrompt) {
+            this.messages.push({
+                role: "system",
+                content: options.systemPrompt
             });
         }
+        this.abortSignal = options.abortSignal ?? new AbortController().signal;
     }
 
-    throw new Error(`Agent 超出最大循环次数：${run.maxSteps}`);
+    getMessages(): readonly AgentMessage[] {
+        return [...this.messages];
+    }
+
+    async run(userInput: string): Promise<string> {
+
+
+        this.messages.push({
+            role: "user",
+            content: userInput
+        });
+
+        const maxSteps = this.options.maxSteps ?? 4;
+        for (let step = 1; step <= maxSteps; step += 1) {
+            if (this.abortSignal.aborted) {
+                throw new Error("Agent Run 已中止");
+            }
+
+            const response = await this.options.queryEngine.query({
+                model: this.options.model,
+                // 每次模型请求使用消息快照，避免后续追加内容污染本次请求。
+                messages: [...this.messages],
+                tools: this.options.toolRegistry.getSchemas(),
+                temperature: 0,
+                abortSignal: this.abortSignal,
+                ...(this.options.onTextDelta !== undefined
+                    ? { onTextDelta: this.options.onTextDelta }
+                    : {}),
+            });
+
+            console.log('\n -------返回的结果--------', response)
+
+            if (response.type === "text") {
+                const answer = response.content.trim();
+                if (!answer) throw new Error("模型返回空文本");
+                this.messages.push({
+                    role: "assistant",
+                    content: answer
+                });
+                return answer;
+            }
+
+            this.messages.push({
+                role: "assistant",
+                ...(response.content !== undefined
+                    ? { content: response.content }
+                    : {}),
+                toolCalls: response.toolCalls,
+            });
+
+            for (const call of response.toolCalls) {
+                const dispatched = await dispatchToolCall(
+                    this.options.toolRegistry,
+                    call,
+                    {
+                        queryEngine: this.options.queryEngine,
+                        abortSignal: this.abortSignal,
+                    },
+                );
+                this.messages.push({
+                    role: "tool",
+                    toolCallId: dispatched.toolCallId,
+                    content: JSON.stringify(dispatched.result),
+                });
+            }
+        }
+
+        throw new Error(`Agent 超出最大循环次数：${maxSteps}`);
+    }
 }

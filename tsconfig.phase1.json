@@ -3,9 +3,10 @@
   "include": [
     "src/config.ts",
     "src/index.ts",
-    "src/agent/run.ts",
     "src/agent/loop.ts",
     "src/agent/dispatcher.ts",
+    "src/agent/prompt.ts",
+    "src/cli/safe-prompt.ts",
     "src/query-engine/provider.ts",
     "src/query-engine/stream.ts",
     "src/query-engine/queryEngine.ts",

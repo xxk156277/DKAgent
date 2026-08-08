@@ -51,8 +51,8 @@ export function toOpenAIMessages(
             content: message.content,
         });
     }
-    console.log('messages', result)
 
+    console.log('message', result)
     return result;
 }
 
