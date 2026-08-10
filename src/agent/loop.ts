@@ -18,12 +18,6 @@ export class AgentLoop {
     private readonly abortSignal: AbortSignal;
 
     constructor(private readonly options: AgentLoopOptions) {
-        if (options.systemPrompt) {
-            this.messages.push({
-                role: "system",
-                content: options.systemPrompt
-            });
-        }
         this.abortSignal = options.abortSignal ?? new AbortController().signal;
     }
 
@@ -52,6 +46,9 @@ export class AgentLoop {
                 tools: this.options.toolRegistry.getSchemas(),
                 temperature: 0,
                 abortSignal: this.abortSignal,
+                ...(this.options.systemPrompt !== undefined
+                    ? { systemPrompt: this.options.systemPrompt }
+                    : {}),
                 ...(this.options.onTextDelta !== undefined
                     ? { onTextDelta: this.options.onTextDelta }
                     : {}),

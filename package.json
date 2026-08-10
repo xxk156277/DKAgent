@@ -12,6 +12,9 @@
     "reflection": "tsx src/index.ts reflection",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/**/*.test.ts",
+    "kb:build": "tsx src/knowledge/cli.ts",
+    "test:knowledge": "tsx --test test/knowledge/*.test.ts",
+    "typecheck:knowledge": "tsc -p tsconfig.knowledge.json --noEmit",
     "test:phase1": "tsx --test test/phase1/*.test.ts",
     "typecheck:phase1": "tsc -p tsconfig.phase1.json --noEmit"
   },
@@ -27,6 +30,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.1.2",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2"

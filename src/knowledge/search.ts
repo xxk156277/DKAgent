@@ -1,152 +1,178 @@
-import { KnowledgeStore } from './store';
-import { SearchOptions, SearchResult, KnowledgeEntry } from './types';
-import OpenAI from 'openai';
+import type { EmbeddingProvider } from "./embedding.js";
+import type { KnowledgeRepository } from "./repository.js";
+import type {
+    KnowledgeSearchOptions,
+    KnowledgeSearchResult,
+} from "./types.js";
 
+interface RankedCandidate extends KnowledgeSearchResult {
+    rank: number;
+}
+
+/**
+ * 提供 FTS、Embedding 和 RRF 混合检索的统一入口。
+ */
 export class KnowledgeSearch {
-    private store: KnowledgeStore;
-    private openai: OpenAI;
+    public constructor(
+        private readonly repository: KnowledgeRepository,
+        private readonly embeddingProvider?: EmbeddingProvider,
+    ) {}
 
-    constructor(store: KnowledgeStore, openaiApiKey: string) {
-        this.store = store;
-        this.openai = new OpenAI({ apiKey: openaiApiKey });
-    }
-
-    async search(query: string, opts: SearchOptions = {}): Promise<SearchResult[]> {
-        const { dimension, limit = 3, threshold = 0.5 } = opts;
-
-        // 通道 1: FTS5 全文检索
-        const ftsResults = this.searchFTS(query, { dimension, limit: limit * 3 });
-
-        // 通道 2: Embedding 语义检索
-        const embeddingResults = await this.searchEmbedding(query, { dimension, limit: limit * 3, threshold });
-
-        // 合并 + 重排序
-        return this.mergeResults(ftsResults, embeddingResults, limit);
-    }
-
-    searchFTS(query: string, opts: { dimension?: string; limit: number }): SearchResult[] {
-        // 构造 FTS5 查询（分词 + OR 连接）
-        const tokens = this.tokenize(query);
-        const ftsQuery = tokens.map(t => `"${t}"`).join(' OR ');
-
-        let sql = `
-      SELECT k.*, rank
-      FROM knowledge_fts fts
-      JOIN knowledge k ON k.id = fts.id
-      WHERE knowledge_fts MATCH ?
-    `;
-        const params: any[] = [ftsQuery];
-
-        if (opts.dimension) {
-            sql += ' AND k.dimension = ?';
-            params.push(opts.dimension);
+    /** 根据 method 执行检索，默认使用混合检索。 */
+    public async search(
+        options: KnowledgeSearchOptions,
+    ): Promise<KnowledgeSearchResult[]> {
+        const query = options.query.trim();
+        const method = options.method ?? "hybrid";
+        const limit = options.limit ?? 10;
+        if (!query || limit <= 0) {
+            return [];
         }
 
-        sql += ' ORDER BY rank LIMIT ?';
-        params.push(opts.limit);
+        if (method === "fts") {
+            return this.searchFts(query, limit, options.dimension).map(
+                ({ rank: _rank, ...result }) => result,
+            );
+        }
+        if (method === "embedding") {
+            return (
+                await this.searchEmbedding(query, limit, options.dimension)
+            ).map(({ rank: _rank, ...result }) => result);
+        }
 
-        const rows = this.store.db.prepare(sql).all(...params);
-        return rows.map((row: any) => ({
-            ...this.store.rowToEntry(row),
-            similarity: this.normalizeRank(row.rank),
-            matchType: 'fts' as const,
-        }));
+        // 两路多召回一些候选，再用排名融合，避免直接比较不同量纲的分数。
+        const candidateLimit = Math.max(limit * 4, 20);
+        const [ftsCandidates, embeddingCandidates] = await Promise.all([
+            Promise.resolve(this.searchFts(query, candidateLimit, options.dimension)),
+            this.searchEmbedding(query, candidateLimit, options.dimension),
+        ]);
+        return fuseWithRrf(ftsCandidates, embeddingCandidates, limit);
     }
 
-    async searchEmbedding(
+    private searchFts(
         query: string,
-        opts: { dimension?: string; limit: number; threshold: number }
-    ): Promise<SearchResult[]> {
-        // 生成 query embedding
-        const response = await this.openai.embeddings.create({
-            model: 'text-embedding-3-small',
-            input: query,
-        });
-        const queryVec = new Float32Array(response.data[0].embedding);
-
-        // 从 DB 取出所有候选（有 embedding 的行）
-        let sql = 'SELECT * FROM knowledge WHERE embedding IS NOT NULL';
-        const params: any[] = [];
-
-        if (opts.dimension) {
-            sql += ' AND dimension = ?';
-            params.push(opts.dimension);
-        }
-
-        const rows = this.store.db.prepare(sql).all(...params);
-
-        // 计算余弦相似度 + 排序
-        const scored: Array<{ entry: KnowledgeEntry; similarity: number }> = [];
-
-        for (const row of rows) {
-            const entry = this.store.rowToEntry(row);
-            if (!entry.embedding) continue;
-            const sim = cosineSimilarity(queryVec, entry.embedding);
-            if (sim >= opts.threshold) {
-                scored.push({ entry, similarity: sim });
-            }
-        }
-
-        scored.sort((a, b) => b.similarity - a.similarity);
-
-        return scored.slice(0, opts.limit).map(s => ({
-            ...s.entry,
-            similarity: s.similarity,
-            matchType: 'embedding' as const,
-        }));
-    }
-
-    private mergeResults(
-        fts: SearchResult[],
-        embedding: SearchResult[],
         limit: number,
-    ): SearchResult[] {
-        const merged = new Map<string, SearchResult>();
+        dimension?: string,
+    ): RankedCandidate[] {
+        return this.repository
+            .searchFts(query, limit, dimension)
+            .map((hit, index) => ({
+                entry: hit.entry,
+                matchType: "fts" as const,
+                // BM25 越小越相关，取负数后统一成“越大越相关”。
+                score: -hit.rank,
+                ftsRank: hit.rank,
+                rank: index + 1,
+            }));
+    }
 
-        // embedding 结果优先（语义匹配通常更准）
-        for (const r of embedding) {
-            merged.set(r.id, r);
+    private async searchEmbedding(
+        query: string,
+        limit: number,
+        dimension?: string,
+    ): Promise<RankedCandidate[]> {
+        if (!this.embeddingProvider) {
+            throw new Error("Embedding 检索需要配置 Embedding Provider");
         }
 
-        // FTS 结果补充（可能捕获精确匹配）
-        for (const r of fts) {
-            if (merged.has(r.id)) {
-                // 两个通道都命中——提升分数
-                const existing = merged.get(r.id)!;
-                existing.similarity = Math.min(1.0, existing.similarity * 1.2);
-                existing.matchType = 'both';
-            } else {
-                merged.set(r.id, r);
+        const [queryVector] = await this.embeddingProvider.embedBatch([query]);
+        if (!queryVector) {
+            throw new Error("Embedding Provider 未返回查询向量");
+        }
+
+        const vectors = this.repository.listStoredVectors(
+            this.embeddingProvider.model,
+            dimension,
+        );
+        const ranked = vectors.map(({ entry, vector }) => {
+            if (vector.length !== queryVector.length) {
+                throw new Error(
+                    `查询向量维度不一致：查询 ${queryVector.length}，知识 ${vector.length}`,
+                );
             }
-        }
+            return { entry, similarity: cosineSimilarity(queryVector, vector) };
+        });
 
-        // 按 similarity 排序
-        return Array.from(merged.values())
-            .sort((a, b) => b.similarity - a.similarity)
-            .slice(0, limit);
-    }
-
-    private tokenize(text: string): string[] {
-        // 简单分词：按空格 + 中文字符边界切
-        const tokens = text
-            .replace(/[，。？！、；：""''（）《》【】]/g, ' ')
-            .split(/\s+/)
-            .filter(t => t.length >= 2);
-        return [...new Set(tokens)];
-    }
-
-    private normalizeRank(rank: number): number {
-        // FTS5 rank 是负数（越小越好），转成 0-1
-        return Math.min(1.0, Math.max(0, 1 + rank / 10));
+        return ranked
+            .sort(
+                (left, right) =>
+                    right.similarity - left.similarity ||
+                    left.entry.id.localeCompare(right.entry.id),
+            )
+            .slice(0, limit)
+            .map((item, index) => ({
+                entry: item.entry,
+                matchType: "embedding" as const,
+                score: item.similarity,
+                similarity: item.similarity,
+                rank: index + 1,
+            }));
     }
 }
 
-function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-    let dot = 0, normA = 0, normB = 0;
-    for (let i = 0; i < a.length; i++) {
-        dot += a[i] * b[i];
-        normA += a[i] * a[i];
-        normB += b[i] * b[i];
+/** 计算两个同维向量的余弦相似度。 */
+export function cosineSimilarity(left: number[], right: number[]): number {
+    if (left.length !== right.length || left.length === 0) {
+        throw new Error("余弦相似度要求两个非空且维度一致的向量");
     }
-    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+
+    let dotProduct = 0;
+    let leftSquared = 0;
+    let rightSquared = 0;
+    for (let index = 0; index < left.length; index += 1) {
+        const leftValue = left[index]!;
+        const rightValue = right[index]!;
+        dotProduct += leftValue * rightValue;
+        leftSquared += leftValue * leftValue;
+        rightSquared += rightValue * rightValue;
+    }
+
+    const denominator = Math.sqrt(leftSquared) * Math.sqrt(rightSquared);
+    return denominator === 0 ? 0 : dotProduct / denominator;
+}
+
+/**
+ * Reciprocal Rank Fusion：只融合各路名次，不混合 BM25 与余弦原始分数。
+ */
+function fuseWithRrf(
+    ftsCandidates: RankedCandidate[],
+    embeddingCandidates: RankedCandidate[],
+    limit: number,
+): KnowledgeSearchResult[] {
+    const fused = new Map<string, KnowledgeSearchResult>();
+
+    for (const candidate of [...ftsCandidates, ...embeddingCandidates]) {
+        const existing = fused.get(candidate.entry.id);
+        const rrfScore = 1 / (60 + candidate.rank);
+        if (!existing) {
+            fused.set(candidate.entry.id, {
+                entry: candidate.entry,
+                matchType: candidate.matchType,
+                score: rrfScore,
+                ...(candidate.ftsRank === undefined
+                    ? {}
+                    : { ftsRank: candidate.ftsRank }),
+                ...(candidate.similarity === undefined
+                    ? {}
+                    : { similarity: candidate.similarity }),
+            });
+            continue;
+        }
+
+        existing.score += rrfScore;
+        existing.matchType = "hybrid";
+        if (candidate.ftsRank !== undefined) {
+            existing.ftsRank = candidate.ftsRank;
+        }
+        if (candidate.similarity !== undefined) {
+            existing.similarity = candidate.similarity;
+        }
+    }
+
+    return [...fused.values()]
+        .sort(
+            (left, right) =>
+                right.score - left.score || left.entry.id.localeCompare(right.entry.id),
+        )
+        .slice(0, limit);
 }

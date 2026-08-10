@@ -1,28 +1,24 @@
-import { importAll } from './import';
-import { generateEmbeddings } from './embed';
-import { KnowledgeStore } from './store';
+import "dotenv/config";
+import { resolve } from "node:path";
+import { buildKnowledgeBase } from "./build.js";
+import { createEmbeddingProviderFromEnv } from "./embedding.js";
 
-export async function buildKnowledgeBase(opts: {
-    interviewDir: string;
-    dbPath: string;
-    openaiApiKey: string;
-}): Promise<void> {
-    console.log('Step 1/3: Parsing Markdown files...');
-    const entries = importAll(opts.interviewDir);
-    console.log(`  → Parsed ${entries.length} questions`);
+const sourceDir = process.env.KNOWLEDGE_SOURCE_DIR ?? "learn-agent-interview";
+const databasePath = process.env.KNOWLEDGE_DATABASE_PATH ?? "data/knowledge.db";
 
-    console.log('Step 2/3: Generating embeddings...');
-    const withEmbeddings = await generateEmbeddings(entries, opts.openaiApiKey);
-    console.log(`  → Generated ${withEmbeddings.length} embeddings`);
+try {
+    const stats = await buildKnowledgeBase({
+        sourceDir,
+        databasePath,
+        embeddingProvider: createEmbeddingProviderFromEnv(),
+    });
 
-    console.log('Step 3/3: Storing to SQLite...');
-    const store = new KnowledgeStore(opts.dbPath);
-    store.insertBatch(withEmbeddings);
-
-    const stats = store.getStats();
-    console.log(`\nDone! Knowledge base ready:`);
-    console.log(`  Total entries: ${stats.totalEntries}`);
-    console.log(`  Dimensions: ${stats.dimensions}`);
-    console.log(`  With embedding: ${stats.withEmbedding}`);
-    console.log(`  Database: ${opts.dbPath}`);
+    // 只输出构建统计，不打印 API Key 等敏感配置。
+    console.log("知识库构建完成", {
+        ...stats,
+        databasePath: resolve(stats.databasePath),
+    });
+} catch (error) {
+    console.error("知识库构建失败：", error instanceof Error ? error.message : error);
+    process.exitCode = 1;
 }
