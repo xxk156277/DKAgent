@@ -2,12 +2,16 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { RuntimeEvent, RuntimeEventSink } from "../runtime/events.js";
 
-type Listener = (event: RuntimeEvent) => void;
+type Listener = (event: RuntimeEvent) => void | Promise<void>;
+
+const sensitiveFieldPattern = /api[-_]?key|authorization|headers?|env(?:ironment)?/i;
 
 /** 将不可序列化的事件降级为可诊断的 JSONL 记录。 */
 function serializeEvent(event: RuntimeEvent): string {
   try {
-    return JSON.stringify(event);
+    return JSON.stringify(event, (key, value) =>
+      sensitiveFieldPattern.test(key) ? "[REDACTED]" : value,
+    );
   } catch (error: unknown) {
     return JSON.stringify({
       ...event,
@@ -31,7 +35,9 @@ export class TapRecorder implements RuntimeEventSink {
   emit(event: RuntimeEvent): void {
     for (const listener of this.listeners) {
       try {
-        listener(event);
+        void Promise.resolve(listener(event)).catch(() => {
+          // 隔离异步 Viewer 订阅者拒绝。
+        });
       } catch {
         // 隔离 Viewer 订阅者，不能影响写入或 Agent Core。
       }
@@ -43,10 +49,17 @@ export class TapRecorder implements RuntimeEventSink {
         await appendFile(this.filePath, `${serializeEvent(event)}\n`, "utf8");
       })
       .catch((error: unknown) => {
-        this.onWarning(
-          `Tap trace 写入失败：${error instanceof Error ? error.message : String(error)}`,
-        );
+        this.warn(`Tap trace 写入失败：${error instanceof Error ? error.message : String(error)}`);
       });
+  }
+
+  /** 告警回调同属观测端，不能破坏后续队列。 */
+  private warn(message: string): void {
+    try {
+      this.onWarning(message);
+    } catch {
+      // 隔离告警消费者自身的异常。
+    }
   }
 
   subscribe(listener: Listener): () => void {
