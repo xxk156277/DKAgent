@@ -1,3 +1,5 @@
+import { createViewerEventFeed, mergeViewerEvents } from "./viewer-state.js";
+
 /** 本地 Tap Viewer 的自包含页面，不依赖前端框架或外部资源。 */
 export const VIEWER_HTML = `<!doctype html>
 <html lang="zh-CN">
@@ -26,11 +28,8 @@ export const VIEWER_HTML = `<!doctype html>
     const state = { events: [], activeTurnId: null, selectedId: null };
     const stable = (value) => JSON.stringify(value);
     const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-    const mergeEvents = (incoming) => {
-      const byId = new Map(state.events.map((event) => [event.id, event]));
-      for (const event of incoming) byId.set(event.id, event);
-      return [...byId.values()].sort((left, right) => left.sequence - right.sequence);
-    };
+    const mergeViewerEvents = ${mergeViewerEvents.toString()};
+    const createViewerEventFeed = ${createViewerEventFeed.toString()};
     const summary = (event) => {
       if (event.type === 'turn.start') return event.payload.input;
       if (event.type === 'tool.call') return event.payload.name;
@@ -82,13 +81,15 @@ export const VIEWER_HTML = `<!doctype html>
       if (turnId) { state.activeTurnId = turnId; state.selectedId = null; render(); }
       if (eventId) { state.selectedId = eventId; render(); }
     });
-    fetch('/api/events').then((response) => response.json()).then((events) => { state.events = mergeEvents(events); render(); }).catch(() => {
-      document.querySelector('#status').textContent = '读取失败';
+    const feed = createViewerEventFeed({
+      loadHistory: () => fetch('/api/events').then((response) => response.json()),
+      updateEvents: (events) => { state.events = events; render(); },
+      updateStatus: (status) => { document.querySelector('#status').textContent = status; },
     });
     const stream = new EventSource('/api/events/stream');
-    stream.onopen = () => document.querySelector('#status').textContent = '实时连接';
-    stream.onmessage = (message) => { state.events = mergeEvents([JSON.parse(message.data)]); render(); };
-    stream.onerror = () => document.querySelector('#status').textContent = '重连中';
+    stream.onopen = () => { void feed.onOpen(); };
+    stream.onmessage = (message) => feed.onMessage(JSON.parse(message.data));
+    stream.onerror = () => feed.onError();
   </script>
 </body>
 </html>`;

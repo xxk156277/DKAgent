@@ -95,10 +95,45 @@ test("监听端口失败时取消 Tap 订阅", async (t) => {
   assert.equal(recorder.unsubscribeCount, 1);
 });
 
-test("Viewer 转义动态 step 并合并历史与实时事件", () => {
+test("Viewer 转义动态内容且客户端脚本可独立启动", async () => {
   assert.match(VIEWER_HTML, /<small> step ' \+ escapeHtml\(event\.step \?\? '-'\)/);
-  assert.match(VIEWER_HTML, /const mergeEvents = \(incoming\) =>/);
-  assert.match(VIEWER_HTML, /state\.events = mergeEvents\(events\)/);
-  assert.match(VIEWER_HTML, /state\.events = mergeEvents\(\[JSON\.parse\(message\.data\)\]\)/);
   assert.match(VIEWER_HTML, /const remaining = new Map\(\)/);
+  assert.doesNotMatch(VIEWER_HTML, /__name/);
+
+  const script = VIEWER_HTML.match(/<script>([\s\S]*)<\/script>/)?.[1];
+  assert.ok(script);
+  const nodes = new Map<string, { innerHTML: string; textContent: string }>();
+  const document = {
+    addEventListener: () => undefined,
+    querySelector: (selector: string) => {
+      let node = nodes.get(selector);
+      if (!node) {
+        node = { innerHTML: "", textContent: "" };
+        nodes.set(selector, node);
+      }
+      return node;
+    },
+  };
+  let stream: {
+    onopen?(): void;
+    onmessage?(message: { data: string }): void;
+    onerror?(): void;
+  } | undefined;
+  class FakeEventSource {
+    constructor(_url: string) {
+      stream = this;
+    }
+  }
+  const runViewer = new Function("document", "EventSource", "fetch", script);
+  runViewer(
+    document,
+    FakeEventSource,
+    async () => ({ json: async () => [event] }),
+  );
+
+  stream?.onopen?.();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(nodes.get("#status")?.textContent, "实时连接");
+  assert.match(nodes.get("#flow")?.innerHTML ?? "", /event-1/);
 });

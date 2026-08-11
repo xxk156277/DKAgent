@@ -34,6 +34,15 @@ test("按顺序写入 JSONL 并通知订阅者", async () => {
   assert.equal((await readFile(filePath, "utf8")).trim().split("\n").length, 2);
 });
 
+test("读取事件会等待已经入队的写入", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dkagent-tap-"));
+  const recorder = new TapRecorder(join(directory, "trace.jsonl"));
+
+  recorder.emit(event);
+
+  assert.deepEqual((await recorder.readEvents()).map((item) => item.id), [event.id]);
+});
+
 test("写入失败会被隔离并发出警告", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dkagent-tap-"));
   const parentFile = join(directory, "parent-file");

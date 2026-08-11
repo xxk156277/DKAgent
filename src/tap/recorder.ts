@@ -68,6 +68,8 @@ export class TapRecorder implements RuntimeEventSink {
   }
 
   async readEvents(): Promise<RuntimeEvent[]> {
+    // 补读必须排在已入队写入之后，避免重连窗口丢事件。
+    await this.writeQueue;
     try {
       const content = await readFile(this.filePath, "utf8");
       return content
