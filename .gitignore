@@ -27,6 +27,9 @@ out/
 .idea/
 *.swp
 
+# Local Git worktrees
+.worktrees/
+
 
 # Test coverage
 coverage/
