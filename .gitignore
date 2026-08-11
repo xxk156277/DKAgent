@@ -33,3 +33,6 @@ out/
 
 # Test coverage
 coverage/
+
+# Local Agent traces
+.traces/

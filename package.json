@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "agent": "tsx src/index.ts",
+    "observe": "tsx src/observe.ts",
     "dev": "tsx src/index.ts",
     "react": "tsx src/index.ts react",
     "plan": "tsx src/index.ts plan",
