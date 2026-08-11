@@ -26,6 +26,11 @@ export const VIEWER_HTML = `<!doctype html>
     const state = { events: [], activeTurnId: null, selectedId: null };
     const stable = (value) => JSON.stringify(value);
     const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+    const mergeEvents = (incoming) => {
+      const byId = new Map(state.events.map((event) => [event.id, event]));
+      for (const event of incoming) byId.set(event.id, event);
+      return [...byId.values()].sort((left, right) => left.sequence - right.sequence);
+    };
     const summary = (event) => {
       if (event.type === 'turn.start') return event.payload.input;
       if (event.type === 'tool.call') return event.payload.name;
@@ -59,7 +64,7 @@ export const VIEWER_HTML = `<!doctype html>
       state.activeTurnId ??= turns.at(-1) ?? null;
       document.querySelector('#turns').innerHTML = turns.map((id, index) => '<button class="' + (id === state.activeTurnId ? 'active' : '') + '" data-turn="' + escapeHtml(id) + '">第 ' + (index + 1) + ' 轮</button>').join('');
       const visible = state.events.filter((event) => event.turnId === state.activeTurnId);
-      document.querySelector('#flow').innerHTML = visible.map((event) => '<article data-id="' + escapeHtml(event.id) + '"><strong>' + escapeHtml(event.type) + '</strong><small> step ' + (event.step ?? '-') + '</small><p>' + escapeHtml(summary(event)) + '</p></article>').join('');
+      document.querySelector('#flow').innerHTML = visible.map((event) => '<article data-id="' + escapeHtml(event.id) + '"><strong>' + escapeHtml(event.type) + '</strong><small> step ' + escapeHtml(event.step ?? '-') + '</small><p>' + escapeHtml(summary(event)) + '</p></article>').join('');
       const selected = state.events.find((event) => event.id === state.selectedId) ?? visible.at(-1);
       if (!selected) {
         document.querySelector('#diff').innerHTML = '';
@@ -77,12 +82,12 @@ export const VIEWER_HTML = `<!doctype html>
       if (turnId) { state.activeTurnId = turnId; state.selectedId = null; render(); }
       if (eventId) { state.selectedId = eventId; render(); }
     });
-    fetch('/api/events').then((response) => response.json()).then((events) => { state.events = events; render(); }).catch(() => {
+    fetch('/api/events').then((response) => response.json()).then((events) => { state.events = mergeEvents(events); render(); }).catch(() => {
       document.querySelector('#status').textContent = '读取失败';
     });
     const stream = new EventSource('/api/events/stream');
     stream.onopen = () => document.querySelector('#status').textContent = '实时连接';
-    stream.onmessage = (message) => { state.events.push(JSON.parse(message.data)); render(); };
+    stream.onmessage = (message) => { state.events = mergeEvents([JSON.parse(message.data)]); render(); };
     stream.onerror = () => document.querySelector('#status').textContent = '重连中';
   </script>
 </body>

@@ -15,7 +15,10 @@ export async function startTapServer(options: {
   host?: string;
   port?: number;
 }): Promise<TapServerHandle> {
-  const host = options.host ?? "127.0.0.1";
+  if (options.host !== undefined && options.host !== "127.0.0.1") {
+    throw new Error("Tap Viewer 仅支持监听 127.0.0.1");
+  }
+  const host = "127.0.0.1";
   const clients = new Set<ServerResponse>();
   const unsubscribe = options.recorder.subscribe((event) => {
     let frame: string;
@@ -37,14 +40,20 @@ export async function startTapServer(options: {
     void handleRequest(request.url, response, options.recorder, clients);
   });
 
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error) => reject(error);
-    server.once("error", onError);
-    server.listen(options.port ?? 4319, host, () => {
-      server.off("error", onError);
-      resolve();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => reject(error);
+      server.once("error", onError);
+      server.listen(options.port ?? 4319, host, () => {
+        server.off("error", onError);
+        resolve();
+      });
     });
-  });
+  } catch (error: unknown) {
+    // 启动失败时撤销 Tap 订阅，但保留 reject 给组合根处理。
+    unsubscribe();
+    throw error;
+  }
   const address = server.address() as AddressInfo;
 
   return {
