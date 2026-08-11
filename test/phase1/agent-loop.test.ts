@@ -12,6 +12,10 @@ import type {
     ContextSnapshot,
 } from "../../src/context/types.js";
 import type {
+    RuntimeEvent,
+    RuntimeEventSink,
+} from "../../src/runtime/events.js";
+import type {
     LLMProvider,
     StreamEvent,
     StreamParams,
@@ -54,6 +58,7 @@ function createAgent(
     contextManager: ContextBuilder = new ContextManager(
         new ProviderTokenCounter(provider),
     ),
+    runtimeEventSink?: RuntimeEventSink,
 ): AgentLoop {
     return new AgentLoop({
         queryEngine: new QueryEngine(provider),
@@ -63,6 +68,7 @@ function createAgent(
         maxContextTokens: 1_000,
         maxOutputTokens: 100,
         systemPrompt: "test prompt",
+        ...(runtimeEventSink === undefined ? {} : { runtimeEventSink }),
     });
 }
 
@@ -119,10 +125,15 @@ test("模型使用 Context 快照，但 AgentLoop 保留完整历史", async () 
         textResponse("第一轮回答"),
         textResponse("第二轮回答"),
     ]);
+    const contextEvents: RuntimeEvent[] = [];
+    const contextSink: RuntimeEventSink = {
+        emit: (event) => contextEvents.push(event),
+    };
     const agent = createAgent(
         provider,
         new ToolRegistry(),
         new LatestMessageContextBuilder(),
+        contextSink,
     );
 
     await agent.run("第一轮问题");
@@ -137,6 +148,13 @@ test("模型使用 Context 快照，但 AgentLoop 保留完整历史", async () 
         { role: "user", content: "第二轮问题" },
         { role: "assistant", content: "第二轮回答" },
     ]);
+    const secondAfter = contextEvents.filter(
+        (event) => event.type === "context.after",
+    ).at(-1);
+    assert.equal(
+        (secondAfter?.payload as ContextSnapshot).droppedMessageCount,
+        2,
+    );
 });
 
 test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
@@ -166,7 +184,16 @@ test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
     };
     const registry = new ToolRegistry();
     registry.register(fakeSplitTool);
-    const agent = createAgent(provider, registry);
+    const toolEvents: RuntimeEvent[] = [];
+    const toolSink: RuntimeEventSink = {
+        emit: (event) => toolEvents.push(event),
+    };
+    const agent = createAgent(
+        provider,
+        registry,
+        new ContextManager(new ProviderTokenCounter(provider)),
+        toolSink,
+    );
 
     const answer = await agent.run("帮我诊断 test/test-short.md");
 
@@ -176,6 +203,11 @@ test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
         "user",
         "assistant",
         "tool",
+    ]);
+    assert.deepEqual(toolEvents.map((event) => event.type), [
+        "turn.start", "context.before", "context.after", "model.response",
+        "tool.call", "tool.result", "context.before", "context.after",
+        "model.response", "turn.end",
     ]);
 });
 
