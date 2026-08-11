@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AgentLoop } from "../../src/agent/loop.js";
 import { AGENT_SYSTEM_PROMPT } from "../../src/agent/prompt.js";
+import {
+    ContextManager,
+    ProviderTokenCounter,
+} from "../../src/context/index.js";
+import type {
+    ContextBuilder,
+    ContextBuildInput,
+    ContextSnapshot,
+} from "../../src/context/types.js";
 import type {
     LLMProvider,
     StreamEvent,
@@ -39,13 +48,40 @@ function textResponse(content: string): StreamEvent[] {
     ];
 }
 
-function createAgent(provider: FakeProvider, registry = new ToolRegistry()): AgentLoop {
+function createAgent(
+    provider: FakeProvider,
+    registry = new ToolRegistry(),
+    contextManager: ContextBuilder = new ContextManager(
+        new ProviderTokenCounter(provider),
+    ),
+): AgentLoop {
     return new AgentLoop({
         queryEngine: new QueryEngine(provider),
         toolRegistry: registry,
+        contextManager,
         model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
         systemPrompt: "test prompt",
     });
+}
+
+/** 测试用 ContextBuilder：模型每次只能看到最新一条消息。 */
+class LatestMessageContextBuilder implements ContextBuilder {
+    async build(input: ContextBuildInput): Promise<ContextSnapshot> {
+        const latestMessage = input.messages.at(-1);
+        return {
+            ...(input.systemPrompt === undefined
+                ? {}
+                : { systemPrompt: input.systemPrompt }),
+            messages: latestMessage ? [latestMessage] : [],
+            tools: [...input.tools],
+            estimatedInputTokens: latestMessage ? 1 : 0,
+            availableInputTokens:
+                input.maxContextTokens - input.reservedOutputTokens,
+            droppedMessageCount: Math.max(input.messages.length - 1, 0),
+        };
+    }
 }
 
 test("普通聊天直接返回文本，不执行 Tool", async () => {
@@ -75,6 +111,31 @@ test("连续调用时保留之前的对话消息", async () => {
         { role: "user", content: "第一轮问题" },
         { role: "assistant", content: "第一轮回答" },
         { role: "user", content: "第二轮问题" },
+    ]);
+});
+
+test("模型使用 Context 快照，但 AgentLoop 保留完整历史", async () => {
+    const provider = new FakeProvider([
+        textResponse("第一轮回答"),
+        textResponse("第二轮回答"),
+    ]);
+    const agent = createAgent(
+        provider,
+        new ToolRegistry(),
+        new LatestMessageContextBuilder(),
+    );
+
+    await agent.run("第一轮问题");
+    await agent.run("第二轮问题");
+
+    assert.deepEqual(provider.requests[1]?.messages, [
+        { role: "user", content: "第二轮问题" },
+    ]);
+    assert.deepEqual(agent.getMessages(), [
+        { role: "user", content: "第一轮问题" },
+        { role: "assistant", content: "第一轮回答" },
+        { role: "user", content: "第二轮问题" },
+        { role: "assistant", content: "第二轮回答" },
     ]);
 });
 

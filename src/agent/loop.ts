@@ -1,17 +1,7 @@
 import { dispatchToolCall } from "./dispatcher.js";
-import type { QueryEngine } from "../query-engine/queryEngine.js";
-import type { ToolRegistry } from "../tools/registry.js";
+import type { AgentLoopOptions } from "./types.js";
 import type { AgentMessage } from "../query-engine/provider.js";
 
-export interface AgentLoopOptions {
-    queryEngine: QueryEngine;
-    toolRegistry: ToolRegistry;
-    model: string;
-    systemPrompt?: string;
-    maxSteps?: number;
-    abortSignal?: AbortSignal;
-    onTextDelta?: (text: string) => void;
-}
 
 export class AgentLoop {
     private readonly messages: AgentMessage[] = [];
@@ -27,32 +17,62 @@ export class AgentLoop {
 
     async run(userInput: string): Promise<string> {
 
-
         this.messages.push({
             role: "user",
             content: userInput
         });
 
         const maxSteps = this.options.maxSteps ?? 4;
+
         for (let step = 1; step <= maxSteps; step += 1) {
+
             if (this.abortSignal.aborted) {
                 throw new Error("Agent Run 已中止");
             }
 
-            const response = await this.options.queryEngine.query({
+            /**
+             * 在调用模型前，组织Context，生成快照
+             *
+             * this.messages 是完整会话历史。
+             * ContextManager 只基于它生成本次请求快照，
+             * 不会删除或修改完整历史。
+             */
+            const contextSnapshot =
+                await this.options.contextManager.build({
+                    ...(this.options.systemPrompt === undefined
+                        ? {}
+                        : { systemPrompt: this.options.systemPrompt }),
+                    messages: this.messages,
+                    tools: this.options.toolRegistry.getSchemas(),
+                    maxContextTokens: this.options.maxContextTokens,
+                    // 输出上限同时也是上下文需要预留的空间。
+                    reservedOutputTokens: this.options.maxOutputTokens,
+                });
+
+            /**
+             * 根据 context 快照，生成模型调用入参
+             */
+            const queryParams = {
                 model: this.options.model,
-                // 每次模型请求使用消息快照，避免后续追加内容污染本次请求。
-                messages: [...this.messages],
-                tools: this.options.toolRegistry.getSchemas(),
+                messages: contextSnapshot.messages,
+                tools: contextSnapshot.tools,
+                maxTokens:
+                    this.options.maxOutputTokens,
                 temperature: 0,
                 abortSignal: this.abortSignal,
-                ...(this.options.systemPrompt !== undefined
-                    ? { systemPrompt: this.options.systemPrompt }
-                    : {}),
-                ...(this.options.onTextDelta !== undefined
-                    ? { onTextDelta: this.options.onTextDelta }
-                    : {}),
-            });
+                ...(contextSnapshot.systemPrompt === undefined
+                    ? {}
+                    : { systemPrompt: contextSnapshot.systemPrompt }),
+
+                ...(this.options.onTextDelta === undefined
+                    ? {}
+                    : { onTextDelta: this.options.onTextDelta }),
+            }
+
+            /**
+             * 调用模型
+             */
+            const response = await this.options.queryEngine.query(queryParams);
 
             console.log('\n -------返回的结果--------', response)
 

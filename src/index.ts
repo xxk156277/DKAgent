@@ -7,6 +7,10 @@ import { loadConfig } from "./config.js";
 import { OpenAIProvider } from "./query-engine/providers/openai.js";
 import { QueryEngine } from "./query-engine/queryEngine.js";
 import { createToolRegistry } from "./tools/index.js";
+import {
+    ContextManager,
+    ProviderTokenCounter,
+} from "./context/index.js";
 
 async function main(): Promise<void> {
     const config = loadConfig();
@@ -14,15 +18,26 @@ async function main(): Promise<void> {
         config.apiKey,
         config.baseURL
     );
-    // 初始化 - 模型请求中心
+
+    /** -------- 初始化 ----------- */
+    // 模型请求中心
     const queryEngine = new QueryEngine(provider);
-    // 初始化 - 工具模块
+    // 工具模块
     const toolRegistry = createToolRegistry();
+    // token计算适配器
+    const tokenCounter = new ProviderTokenCounter(provider);
+    // 上下文管理中心
+    const contextManager = new ContextManager(tokenCounter);
+
+
     // 初始化 - AgentLoop
     const agent = new AgentLoop({
         queryEngine,
         toolRegistry,
+        contextManager,
         model: config.model,
+        maxContextTokens: config.maxContextTokens,
+        maxOutputTokens: config.maxOutputTokens,
         maxSteps: 4,
         systemPrompt: AGENT_SYSTEM_PROMPT,
         onTextDelta: (text) => process.stdout.write(text),
