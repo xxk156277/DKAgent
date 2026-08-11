@@ -23,7 +23,7 @@ export interface RuntimeEvent<TPayload = unknown> {
 
 /** 可选观测端口；其失败不会影响 Agent 核心执行。 */
 export interface RuntimeEventSink {
-  emit(event: RuntimeEvent): void;
+  emit(event: RuntimeEvent): void | Promise<void>;
 }
 
 export class RuntimeEventPublisher {
@@ -56,7 +56,9 @@ export class RuntimeEventPublisher {
     };
 
     try {
-      this.sink.emit(event);
+      void Promise.resolve(this.sink.emit(event)).catch(() => {
+        // 异步观测器失败同样不能影响 Agent。
+      });
     } catch {
       // 观测器失败不能影响 Agent。
     }

@@ -127,7 +127,9 @@ test("模型使用 Context 快照，但 AgentLoop 保留完整历史", async () 
     ]);
     const contextEvents: RuntimeEvent[] = [];
     const contextSink: RuntimeEventSink = {
-        emit: (event) => contextEvents.push(event),
+        emit: (event) => {
+            contextEvents.push(event);
+        },
     };
     const agent = createAgent(
         provider,
@@ -186,7 +188,9 @@ test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
     registry.register(fakeSplitTool);
     const toolEvents: RuntimeEvent[] = [];
     const toolSink: RuntimeEventSink = {
-        emit: (event) => toolEvents.push(event),
+        emit: (event) => {
+            toolEvents.push(event);
+        },
     };
     const agent = createAgent(
         provider,
@@ -209,6 +213,38 @@ test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
         "tool.call", "tool.result", "context.before", "context.after",
         "model.response", "turn.end",
     ]);
+});
+
+test("Agent 失败时发布 turn.error 后原样抛出错误", async () => {
+    const expectedError = new Error("context failed");
+    const failedContextBuilder: ContextBuilder = {
+        async build() {
+            throw expectedError;
+        },
+    };
+    const events: RuntimeEvent[] = [];
+    const agent = createAgent(
+        new FakeProvider([]),
+        new ToolRegistry(),
+        failedContextBuilder,
+        {
+            emit: (event) => {
+                events.push(event);
+            },
+        },
+    );
+
+    await assert.rejects(agent.run("你好"), (error: unknown) => {
+        assert.equal(error, expectedError);
+        return true;
+    });
+    assert.deepEqual(events.map((event) => event.type), [
+        "turn.start", "context.before", "turn.error",
+    ]);
+    assert.equal(
+        (events.at(-1)?.payload as { message: string }).message,
+        "context failed",
+    );
 });
 
 test("System Prompt 约束普通聊天和诊断 Tool 的使用边界", () => {
