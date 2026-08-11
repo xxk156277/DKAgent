@@ -1,4 +1,4 @@
-import type { QueryEngine } from "../query-engine/queryEngine.js";
+import type { QueryEngine } from "../query-engine/query-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ContextBuilder } from "../context/types.js";
 

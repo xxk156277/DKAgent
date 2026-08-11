@@ -4,6 +4,40 @@ import type {
 } from "../query-engine/provider.js";
 
 /**
+ * 当前会话的历史压缩状态。
+ *
+ * 该状态由 AgentLoop 持有，只在当前进程、当前会话中有效；
+ * ContextManager 只读取或返回新状态，不负责跨进程持久化。
+ */
+export interface ConversationContextState {
+    /** 已被压缩的旧对话生成的结构化摘要；尚未压缩时为空字符串。 */
+    summary: string;
+    /**
+     * 完整 messages 中第一条仍需保留原文的消息下标。
+     * 该下标之前的消息已经包含在 summary 中。
+     */
+    firstKeptMessageIndex: number;
+    /** 最近一次执行历史压缩前，完整模型输入预计占用的 Token 数。 */
+    tokensBefore: number;
+    /** 当前会话已经成功执行历史压缩的次数。 */
+    compactionCount: number;
+}
+
+/** 历史摘要与内容压缩使用的配置。 */
+export interface ContextCompactionOptions {
+    /** 是否启用历史摘要；关闭后继续使用 Context V1 的直接裁剪策略。 */
+    enabled: boolean;
+    /** 输入占可用预算的比例达到该值时，触发历史压缩。 */
+    triggerRatio: number;
+    /** 压缩后期望把输入占用降低到可用预算的该比例。 */
+    targetRatio: number;
+    /** 单次历史摘要允许模型输出的最大 Token 数。 */
+    maxSummaryTokens: number;
+    /** Tool Result 进入摘要请求前允许保留的最大字符数。 */
+    maxToolResultChars: number;
+}
+
+/**
  * ContextBuildInput
  * 构建单次模型上下文所需的完整输入：
  */

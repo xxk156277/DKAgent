@@ -1,6 +1,6 @@
 // skills/types.ts
 import type { ToolRegistry } from '../tools/registry.js';
-import type { QueryEngine } from '../query-engine/queryEngine.js';
+import type { QueryEngine } from '../query-engine/query-engine.js';
 
 // skill 定义
 export interface Skill {

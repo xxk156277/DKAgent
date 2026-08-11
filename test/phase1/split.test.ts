@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
-import type { QueryEngine } from "../../src/query-engine/queryEngine.js";
+import type { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { splitQaTool } from "../../src/tools/tool-item/split.js";
 
 const context = {

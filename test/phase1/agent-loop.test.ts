@@ -16,7 +16,7 @@ import type {
     StreamEvent,
     StreamParams,
 } from "../../src/query-engine/provider.js";
-import { QueryEngine } from "../../src/query-engine/queryEngine.js";
+import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { ToolRegistry } from "../../src/tools/registry.js";
 import type { Tool } from "../../src/tools/types.js";
 
@@ -142,9 +142,13 @@ test("模型使用 Context 快照，但 AgentLoop 保留完整历史", async () 
 test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
     const provider = new FakeProvider([
         [
-            { type: "tool_use_start", id: "call-1", name: "split_qa_pairs" },
-            { type: "tool_use_delta", input: '{"transcriptPath":"test/test-short.md"}' },
-            { type: "tool_use_end" },
+            { type: "tool_call_start", index: 0, id: "call-1", name: "split_qa_pairs" },
+            {
+                type: "tool_call_delta",
+                index: 0,
+                argumentsDelta: '{"transcriptPath":"test/test-short.md"}',
+            },
+            { type: "tool_call_end", index: 0 },
             { type: "message_end", usage, stopReason: "tool_use" },
         ],
         textResponse("已拆分 1 组问答"),

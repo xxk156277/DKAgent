@@ -4,8 +4,8 @@ import { AgentLoop } from "./agent/loop.js";
 import { AGENT_SYSTEM_PROMPT } from "./agent/prompt.js";
 import { createSafePrompt } from "./cli/safe-prompt.js";
 import { loadConfig } from "./config.js";
-import { OpenAIProvider } from "./query-engine/providers/openai.js";
-import { QueryEngine } from "./query-engine/queryEngine.js";
+import { OpenAICompatibleProvider } from "./query-engine/providers/openai-compatible.js";
+import { QueryEngine } from "./query-engine/query-engine.js";
 import { createToolRegistry } from "./tools/index.js";
 import {
     ContextManager,
@@ -14,7 +14,7 @@ import {
 
 async function main(): Promise<void> {
     const config = loadConfig();
-    const provider = new OpenAIProvider(
+    const provider = new OpenAICompatibleProvider(
         config.apiKey,
         config.baseURL
     );

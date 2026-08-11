@@ -1,4 +1,4 @@
-import type { QueryEngine } from "../query-engine/queryEngine.js";
+import type { QueryEngine } from "../query-engine/query-engine.js";
 
 export interface Tool<TInput = unknown, TOutput = unknown> {
     readonly name: string;
