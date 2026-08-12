@@ -1,65 +1,66 @@
-import { Collapse, Descriptions, Empty, Layout, Typography } from "antd";
+import { App as AntdApp, ConfigProvider } from "antd";
 import { useEffect } from "react";
+import { useStore } from "zustand";
+import type { StoreApi } from "zustand/vanilla";
 import { connectEventFeed } from "../api/event-feed.js";
-import { tapStore, useTapStore } from "../store/tap-store.js";
+import { NodeDetail } from "../features/node-detail/NodeDetail.js";
+import { NodeNav } from "../features/timeline/NodeNav.js";
+import { TurnList } from "../features/turns/TurnList.js";
+import {
+  selectNodes,
+  selectTurns,
+  tapStore,
+  type TapState,
+} from "../store/tap-store.js";
 
-const { Content, Sider } = Layout;
+interface TapAppProps {
+  store?: StoreApi<TapState>;
+}
 
-/**
- * TAP 三栏入口；生命周期仅在顶层建立一次事件连接。
- */
-export function TapApp() {
-  const connectionStatus = useTapStore((state) => state.connectionStatus);
+const tapTheme = {
+  cssVar: { key: "tap" },
+  token: {
+    borderRadius: 6,
+  },
+} as const;
 
-  useEffect(() => connectEventFeed(tapStore), []);
+/** TAP 三栏入口；Store 可注入，事件连接仍只在顶层建立一次。 */
+export function TapApp({ store = tapStore }: TapAppProps) {
+  const turns = useStore(store, selectTurns);
+  const nodes = useStore(store, selectNodes);
+  const connectionStatus = useStore(store, (state) => state.connectionStatus);
+  const selectedTurnId = useStore(store, (state) => state.selectedTurnId);
+  const selectedNodeId = useStore(store, (state) => state.selectedNodeId);
+  const selectTurn = useStore(store, (state) => state.selectTurn);
+  const selectNode = useStore(store, (state) => state.selectNode);
+
+  useEffect(() => connectEventFeed(store), [store]);
+
+  const selectedTurnIndex = turns.findIndex((turn) => turn.id === selectedTurnId);
+  const selectedTurn = selectedTurnIndex >= 0 ? turns[selectedTurnIndex] : undefined;
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
 
   return (
-    <Layout className="tap-app">
-      <Sider className="tap-sidebar" theme="light" width={280}>
-        <aside aria-labelledby="turn-list-heading">
-          <Typography.Title id="turn-list-heading" level={2}>
-            对话轮次
-          </Typography.Title>
-          <Typography.Text aria-live="polite" type="secondary">
-            连接状态：{connectionStatus}
-          </Typography.Text>
-          <Empty description="暂无对话轮次" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        </aside>
-      </Sider>
-
-      <Content className="tap-content">
-        <main aria-labelledby="node-detail-heading">
-          <Typography.Title id="node-detail-heading" level={2}>
-            节点详情
-          </Typography.Title>
-          <Descriptions
-            bordered
-            column={1}
-            items={[
-              { key: "selection", label: "当前节点", children: "尚未选择节点" },
-            ]}
+    <ConfigProvider theme={tapTheme}>
+      <AntdApp>
+        <div className="tap-app-shell">
+          <TurnList
+            turns={turns}
+            selectedTurnId={selectedTurnId}
+            connectionStatus={connectionStatus}
+            onSelect={selectTurn}
           />
-          <Collapse
-            className="tap-node-payload"
-            items={[
-              {
-                key: "payload",
-                label: "节点数据",
-                children: <Empty description="暂无节点数据" />,
-              },
-            ]}
+          <main className="tap-region tap-detail-region">
+            <NodeDetail node={selectedNode} />
+          </main>
+          <NodeNav
+            turn={selectedTurn}
+            turnIndex={selectedTurnIndex + 1}
+            selectedNodeId={selectedNodeId}
+            onSelect={selectNode}
           />
-        </main>
-      </Content>
-
-      <Sider className="tap-sidebar" theme="light" width={320}>
-        <aside aria-labelledby="node-navigation-heading">
-          <Typography.Title id="node-navigation-heading" level={2}>
-            节点导航
-          </Typography.Title>
-          <Empty description="暂无可导航节点" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        </aside>
-      </Sider>
-    </Layout>
+        </div>
+      </AntdApp>
+    </ConfigProvider>
   );
 }

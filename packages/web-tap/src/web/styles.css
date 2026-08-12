@@ -1,32 +1,293 @@
 :root {
   font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
-  color: #1f1f1f;
-  background: #f5f5f5;
+  color: var(--ant-color-text, #1f1f1f);
+  background: var(--ant-color-bg-layout, #f5f5f5);
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  min-width: 960px;
+  min-width: 320px;
+}
+
+button {
+  font: inherit;
 }
 
 #root,
-.tap-app {
+.tap-app-shell {
   min-height: 100vh;
 }
 
-.tap-sidebar,
-.tap-content {
+.tap-app-shell {
+  display: grid;
+  grid-template-areas: "turn detail node";
+  grid-template-columns: 240px minmax(420px, 1fr) 280px;
+  align-items: stretch;
+  background: var(--ant-color-bg-layout, #f5f5f5);
+}
+
+.tap-region {
+  min-width: 0;
   padding: 24px;
+  background: var(--ant-color-bg-container, #fff);
 }
 
-.tap-sidebar {
-  border-inline-end: 1px solid #f0f0f0;
+.tap-region-header {
+  margin-bottom: 16px;
 }
 
-.tap-content {
-  background: #f5f5f5;
+.tap-region-header .ant-typography,
+.tap-detail-header .ant-typography {
+  margin-block: 0 4px;
 }
 
-.tap-node-payload {
+.tap-turn-region {
+  grid-area: turn;
+  border-inline-end: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}
+
+.tap-detail-region {
+  grid-area: detail;
+  background: var(--ant-color-bg-layout, #f5f5f5);
+}
+
+.tap-node-detail {
+  max-width: 960px;
+  margin-inline: auto;
+}
+
+.tap-node-region {
+  grid-area: node;
+  border-inline-start: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}
+
+.tap-turn-list .ant-list-item {
+  padding-block: 4px;
+  border-block-end: 0;
+}
+
+.tap-turn-button,
+.tap-node-button {
+  width: 100%;
+  color: var(--ant-color-text, #1f1f1f);
+  text-align: start;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--ant-border-radius, 6px);
+}
+
+.tap-turn-button {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.tap-turn-button:hover,
+.tap-node-button:hover {
+  background: var(--ant-color-fill-tertiary, rgba(0, 0, 0, 0.04));
+}
+
+.tap-turn-button.is-selected,
+.tap-node-button.is-selected {
+  color: var(--ant-color-primary-text, #0958d9);
+  background: var(--ant-color-primary-bg, #e6f4ff);
+  border-color: var(--ant-color-primary-border, #91caff);
+}
+
+.tap-turn-button:focus-visible,
+.tap-node-button:focus-visible {
+  outline: 3px solid var(--ant-color-primary-border, #91caff);
+  outline-offset: 2px;
+}
+
+.tap-turn-title,
+.tap-node-title {
+  font-weight: 600;
+}
+
+.tap-turn-input {
+  overflow: hidden;
+  color: var(--ant-color-text-secondary, #595959);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tap-turn-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+  font-size: 12px;
+}
+
+.tap-turn-status.is-completed,
+.tap-node-button.is-completed .tap-node-status {
+  color: var(--ant-color-success, #52c41a);
+}
+
+.tap-turn-status.is-running,
+.tap-node-button.is-running .tap-node-status {
+  color: var(--ant-color-primary, #1677ff);
+}
+
+.tap-turn-status.is-error,
+.tap-node-button.is-error .tap-node-status {
+  color: var(--ant-color-error, #ff4d4f);
+}
+
+.tap-step + .tap-step {
+  margin-top: 24px;
+}
+
+.tap-step .ant-typography {
+  margin-block: 0 8px;
+  font-size: 14px;
+}
+
+.tap-node-list {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding-inline-start: 16px;
+}
+
+.tap-node-list::before {
+  position: absolute;
+  inset-block: 8px;
+  inset-inline-start: 5px;
+  width: 1px;
+  content: "";
+  background: var(--ant-color-border, #d9d9d9);
+}
+
+.tap-node-button {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+}
+
+.tap-node-button::before {
+  position: absolute;
+  inset-block-start: 15px;
+  inset-inline-start: -15px;
+  width: 7px;
+  height: 7px;
+  content: "";
+  background: currentColor;
+  border-radius: 50%;
+}
+
+.tap-node-status,
+.tap-tool-call-id {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.tap-tool-call-id {
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+}
+
+.tap-node-button.is-tool-node {
+  border-inline-start-color: var(--ant-color-border, #d9d9d9);
+}
+
+.tap-detail-body,
+.tap-context-detail,
+.tap-error-detail,
+.tap-compaction-detail,
+.tap-removed-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.tap-detail-body {
   margin-top: 16px;
+}
+
+.tap-compaction-detail > .ant-typography {
+  margin-block: 8px 0;
+  font-size: 16px;
+}
+
+.tap-data-card,
+.tap-removed-groups > .ant-card,
+.tap-raw-json {
+  margin-top: 16px;
+}
+
+.tap-message-list .ant-card-body {
+  padding: 0;
+}
+
+.tap-json-panel {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+}
+
+.tap-json-block {
+  width: 100%;
+  max-width: 100%;
+  max-height: 420px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: var(--ant-color-text, #1f1f1f);
+  font: 12px/1.6 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.02));
+  border-radius: var(--ant-border-radius-sm, 4px);
+}
+
+@media (max-width: 959px) {
+  .tap-app-shell {
+    grid-template-areas:
+      "turn detail"
+      "node node";
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .tap-node-region {
+    border-block-start: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+    border-inline-start: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  .tap-app-shell {
+    grid-template-areas:
+      "turn"
+      "detail"
+      "node";
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tap-region {
+    padding: 16px;
+  }
+
+  .tap-turn-region {
+    border-block-end: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+    border-inline-end: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
