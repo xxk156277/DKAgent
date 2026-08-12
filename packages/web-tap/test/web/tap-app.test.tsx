@@ -58,6 +58,19 @@ describe("TapApp", () => {
     expect(mobileStyles).toMatch(/\.tap-node-region\s*\{[^}]*order:\s*0;/s);
   });
 
+  it("uses one desktop divider and clears obsolete dividers when wrapping", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
+    const desktopStyles = styles.slice(0, styles.indexOf("@media"));
+    const tabletStyles = getMediaBlock(styles, 959);
+    const mobileStyles = getMediaBlock(styles, 639);
+
+    expect(desktopStyles).toMatch(/\.tap-node-region\s*\{[^}]*border-inline-end:\s*1px\s+solid/s);
+    expect(desktopStyles).not.toMatch(/\.tap-node-region\s*\{[^}]*border-inline-start:/s);
+    expect(tabletStyles).toMatch(/\.tap-node-region\s*\{[^}]*border-inline-end:\s*0;/s);
+    expect(mobileStyles).toMatch(/\.tap-turn-region\s*\{[^}]*border-inline-end:\s*0;/s);
+    expect(mobileStyles).toMatch(/\.tap-node-region\s*\{[^}]*border-block-start:\s*0;/s);
+  });
+
   it("renders three Turns without Session navigation or breadcrumbs", () => {
     const { container } = renderFixture();
 

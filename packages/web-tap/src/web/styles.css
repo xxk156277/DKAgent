@@ -61,7 +61,7 @@ button {
 
 .tap-node-region {
   flex: 0 0 280px;
-  border-inline-start: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-inline-end: 1px solid var(--ant-color-border-secondary, #f0f0f0);
 }
 
 .tap-turn-list .ant-list-item {
@@ -275,6 +275,7 @@ button {
     order: 3;
     flex-basis: 100%;
     border-block-start: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+    border-inline-end: 0;
     border-inline-start: 0;
   }
 }
@@ -298,6 +299,7 @@ button {
   .tap-node-region {
     order: 0;
     border-block-start: 0;
+    border-inline-end: 0;
   }
 }
 
