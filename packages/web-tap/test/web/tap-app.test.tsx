@@ -105,6 +105,44 @@ describe("TapApp", () => {
     expect(screen.getByText(/"traceMarker": "unknown-fixture"/)).toBeVisible();
   });
 
+  it("keeps both navigations visible when the selected node renderer throws", () => {
+    const circularDetail: Record<string, unknown> = { marker: "circular-fixture" };
+    circularDetail.self = circularDetail;
+    const brokenEvent = {
+      id: "turn-broken-event",
+      sessionId: "session-fixture",
+      turnId: "turn-broken",
+      sequence: 2,
+      timestamp: "2026-08-12T00:02:00.000Z",
+      type: "custom.circular",
+      payload: circularDetail,
+    } as unknown as RuntimeEvent;
+    const startEvent = {
+      ...brokenEvent,
+      id: "turn-broken-start",
+      sequence: 1,
+      timestamp: "2026-08-12T00:01:59.000Z",
+      type: "turn.start",
+      payload: { input: "仍可切换节点" },
+    } as RuntimeEvent;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      renderFixture([startEvent, brokenEvent]);
+
+      expect(screen.getByRole("button", { name: /^第 1 轮/ })).toBeVisible();
+      expect(screen.getByRole("complementary", { name: "第 1 轮节点" })).toBeVisible();
+      expect(screen.getByText("节点详情展示失败")).toBeVisible();
+      expect(screen.getByText(/"self": "\[Circular\]"/)).toBeVisible();
+
+      fireEvent.click(screen.getByRole("button", { name: /对话开始/ }));
+      expect(screen.getByRole("heading", { name: "对话开始" })).toBeVisible();
+      expect(screen.queryByText("节点详情展示失败")).not.toBeInTheDocument();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("subscribes to later Store updates and marks the latest active node current", () => {
     const { store } = renderFixture();
 

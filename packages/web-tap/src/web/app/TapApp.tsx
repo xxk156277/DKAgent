@@ -4,6 +4,7 @@ import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 import { connectEventFeed } from "../api/event-feed.js";
 import { NodeDetail } from "../features/node-detail/NodeDetail.js";
+import { NodeDetailBoundary } from "../features/node-detail/NodeDetailBoundary.js";
 import { NodeNav } from "../features/timeline/NodeNav.js";
 import { TurnList } from "../features/turns/TurnList.js";
 import {
@@ -51,7 +52,9 @@ export function TapApp({ store = tapStore }: TapAppProps) {
             onSelect={selectTurn}
           />
           <main className="tap-region tap-detail-region">
-            <NodeDetail node={selectedNode} />
+            <NodeDetailBoundary key={selectedNodeId ?? "empty"} node={selectedNode}>
+              <NodeDetail node={selectedNode} />
+            </NodeDetailBoundary>
           </main>
           <NodeNav
             turn={selectedTurn}
