@@ -166,7 +166,7 @@ test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
             {
                 type: "tool_call_delta",
                 index: 0,
-                argumentsDelta: '{"transcriptPath":"test/test-short.md"}',
+                argumentsDelta: '{"transcriptPath":"packages/agent/test/test-short.md"}',
             },
             { type: "tool_call_end", index: 0 },
             { type: "message_end", usage, stopReason: "tool_use" },
@@ -180,7 +180,7 @@ test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
         parameters: { type: "object" },
         async execute(input) {
             executeCount += 1;
-            assert.equal(input.transcriptPath, "test/test-short.md");
+            assert.equal(input.transcriptPath, "packages/agent/test/test-short.md");
             return { success: true, data: { totalQuestions: 1 } };
         },
     };
@@ -199,7 +199,7 @@ test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
         toolSink,
     );
 
-    const answer = await agent.run("帮我诊断 test/test-short.md");
+    const answer = await agent.run("帮我诊断 packages/agent/test/test-short.md");
 
     assert.equal(answer, "已拆分 1 组问答");
     assert.equal(executeCount, 1);

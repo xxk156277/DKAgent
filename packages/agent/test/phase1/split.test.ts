@@ -11,7 +11,7 @@ const context = {
 
 test("splits interviewer and job-seeker timestamp headings", async () => {
     const result = await splitQaTool.execute({
-        transcriptPath: resolve("test/test-short.md"),
+        transcriptPath: resolve("packages/agent/test/test-short.md"),
         format: "auto",
     }, context);
 
@@ -23,7 +23,7 @@ test("splits interviewer and job-seeker timestamp headings", async () => {
 
 test("keeps colon-labeled transcripts working", async () => {
     const result = await splitQaTool.execute({
-        transcriptPath: resolve("test/fixtures/labeled-interview.txt"),
+        transcriptPath: resolve("packages/agent/test/fixtures/labeled-interview.txt"),
         format: "auto",
     }, context);
 
