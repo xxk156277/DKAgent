@@ -140,7 +140,9 @@ export class Tracer {
       data,
     };
     try {
-      this.sink.emit(event);
+      void Promise.resolve(this.sink.emit(event)).catch(() => {
+        // 异步 Sink 拒绝也必须与 Agent 隔离。
+      });
     } catch {
       // Trace 是被动能力，失败不能影响 Agent。
     }

@@ -35,7 +35,7 @@ export type TraceListener = (event: TraceEvent) => void | Promise<void>;
 
 /** 被动观测出口；实现失败不得影响 Agent。 */
 export interface TraceSink {
-  emit(event: TraceEvent): void;
+  emit(event: TraceEvent): void | Promise<void>;
 }
 
 export interface TraceStore extends TraceSink {
