@@ -86,6 +86,42 @@ class LatestMessageContextBuilder implements ContextBuilder {
             availableInputTokens:
                 input.maxContextTokens - input.reservedOutputTokens,
             droppedMessageCount: Math.max(input.messages.length - 1, 0),
+            compacted: false,
+            compressionFallbackUsed: false,
+        };
+    }
+}
+
+/** 测试用 ContextBuilder：每次构建都推进一次会话摘要状态。 */
+class AdvancingContextBuilder implements ContextBuilder {
+    public readonly receivedCompactionCounts: number[] = [];
+
+    async build(input: ContextBuildInput): Promise<ContextSnapshot> {
+        const state = input.compaction?.state;
+        if (!state) {
+            throw new Error("测试期望 AgentLoop 传入压缩状态");
+        }
+
+        this.receivedCompactionCounts.push(state.compactionCount);
+
+        return {
+            ...(input.systemPrompt === undefined
+                ? {}
+                : { systemPrompt: input.systemPrompt }),
+            messages: [...input.messages],
+            tools: [...input.tools],
+            estimatedInputTokens: input.messages.length,
+            availableInputTokens:
+                input.maxContextTokens - input.reservedOutputTokens,
+            droppedMessageCount: 0,
+            compacted: true,
+            compressionFallbackUsed: false,
+            nextContextState: {
+                summary: `第 ${state.compactionCount + 1} 次摘要`,
+                firstKeptMessageIndex: state.firstKeptMessageIndex,
+                tokensBefore: input.messages.length,
+                compactionCount: state.compactionCount + 1,
+            },
         };
     }
 }
@@ -157,6 +193,44 @@ test("模型使用 Context 快照，但 AgentLoop 保留完整历史", async () 
         (secondAfter?.payload as ContextSnapshot).droppedMessageCount,
         2,
     );
+});
+
+test("AgentLoop 每轮传入并保存 ContextManager 返回的摘要状态", async () => {
+    const provider = new FakeProvider([
+        textResponse("第一轮回答"),
+        textResponse("第二轮回答"),
+    ]);
+    const contextManager = new AdvancingContextBuilder();
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: new ToolRegistry(),
+        contextManager,
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        contextCompaction: {
+            enabled: true,
+            triggerRatio: 0.8,
+            targetRatio: 0.6,
+            maxSummaryTokens: 100,
+            maxToolResultChars: 2_000,
+        },
+    });
+
+    await agent.run("第一轮问题");
+    await agent.run("第二轮问题");
+
+    assert.deepEqual(
+        contextManager.receivedCompactionCounts,
+        [0, 1],
+    );
+    assert.deepEqual(agent.getContextState(), {
+        summary: "第 2 次摘要",
+        firstKeptMessageIndex: 0,
+        tokensBefore: 3,
+        compactionCount: 2,
+    });
+    assert.equal(agent.getMessages().length, 4);
 });
 
 test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {

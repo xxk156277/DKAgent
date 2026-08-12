@@ -1,11 +1,22 @@
 import { dispatchToolCall } from "./dispatcher.js";
 import type { AgentLoopOptions } from "./types.js";
 import type { AgentMessage } from "../query-engine/provider.js";
+import type {
+    ContextBuildInput,
+    ConversationContextState,
+} from "../context/types.js";
 import { RuntimeEventPublisher } from "../runtime/events.js";
 
 
 export class AgentLoop {
     private readonly messages: AgentMessage[] = [];
+    /** 当前进程、当前会话的摘要状态；不会写入 messages。 */
+    private contextState: ConversationContextState = {
+        summary: "",
+        firstKeptMessageIndex: 0,
+        tokensBefore: 0,
+        compactionCount: 0,
+    };
     private readonly abortSignal: AbortSignal;
     private readonly runtimeEvents: RuntimeEventPublisher;
 
@@ -16,6 +27,11 @@ export class AgentLoop {
 
     getMessages(): readonly AgentMessage[] {
         return [...this.messages];
+    }
+
+    /** 返回摘要状态副本，供调试和后续观测模块读取。 */
+    getContextState(): Readonly<ConversationContextState> {
+        return { ...this.contextState };
     }
 
     async run(userInput: string): Promise<string> {
@@ -43,25 +59,47 @@ export class AgentLoop {
              * ContextManager 只基于它生成本次请求快照，
              * 不会删除或修改完整历史。
              */
-                this.runtimeEvents.emit("context.before", turnId, {
-                    systemPrompt: this.options.systemPrompt,
+                const contextBuildInput: ContextBuildInput = {
+                    ...(this.options.systemPrompt === undefined
+                        ? {}
+                        : { systemPrompt: this.options.systemPrompt }),
                     messages: [...this.messages],
                     tools: this.options.toolRegistry.getSchemas(),
                     maxContextTokens: this.options.maxContextTokens,
                     reservedOutputTokens: this.options.maxOutputTokens,
-                }, step);
+                    ...(this.options.contextCompaction === undefined
+                        ? {}
+                        : {
+                            compaction: {
+                                state: { ...this.contextState },
+                                options: this.options.contextCompaction,
+                                summaryModel:
+                                    this.options.summaryModel ??
+                                    this.options.model,
+                                abortSignal: this.abortSignal,
+                            },
+                        }),
+                };
+
+                this.runtimeEvents.emit(
+                    "context.before",
+                    turnId,
+                    contextBuildInput,
+                    step,
+                );
 
                 const contextSnapshot =
-                    await this.options.contextManager.build({
-                    ...(this.options.systemPrompt === undefined
-                        ? {}
-                        : { systemPrompt: this.options.systemPrompt }),
-                    messages: this.messages,
-                    tools: this.options.toolRegistry.getSchemas(),
-                    maxContextTokens: this.options.maxContextTokens,
-                    // 输出上限同时也是上下文需要预留的空间。
-                    reservedOutputTokens: this.options.maxOutputTokens,
-                    });
+                    await this.options.contextManager.build(
+                        contextBuildInput,
+                    );
+
+                // ContextManager 无状态，新的摘要边界由 AgentLoop 持有。
+                if (contextSnapshot.nextContextState) {
+                    this.contextState = {
+                        ...contextSnapshot.nextContextState,
+                    };
+                }
+
                 this.runtimeEvents.emit("context.after", turnId, contextSnapshot, step);
 
             /**

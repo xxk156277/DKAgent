@@ -6,6 +6,28 @@ import type {
 } from "../query-engine/provider.js";
 
 /**
+ * ContextCompactionInput - 压缩器入参
+ *      1.ConversationContextState - 历史压缩状态
+ *          摘要、上次压缩的位置、上次压缩前预估token、上次压缩后token
+ *      2.ContextCompactionOptions - 压缩配置
+ *          开关、触发阈值、目标阈值、摘要阈值、ToolResult阈值
+ *      3.压缩模型ID
+ *      4.压缩停止器 AbortSignal
+ * 
+ * HistorySummaryInput - 生成历史摘要 - 喂给模型的入参定义
+ *      当前摘要Summary
+ *      新加入摘要的历史会话
+ *      摘要模型ID
+ *      摘要的最大Token
+ *      摘要前处理ToolResult的最大token
+ *      摘要停止器
+ * 
+ * HistorySummaryEngine - 摘要模型Provider
+ *      query 请求方法
+ * 
+ * ContextBuildInput - 构建上下文方法入参
+ */
+/**
  * 当前会话的历史压缩状态。
  *
  * 该状态由 AgentLoop 持有，只在当前进程、当前会话中有效；
@@ -38,6 +60,19 @@ export interface ContextCompactionOptions {
     /** Tool Result 进入摘要请求前允许保留的最大字符数。 */
     maxToolResultChars: number;
 }
+
+/** ContextManager 压缩前的入参 */
+export interface ContextCompactionInput {
+    /** 当前 AgentLoop 持有的会话压缩状态。 */
+    state: ConversationContextState;
+    /** 本次构建使用的压缩阈值和内容上限。 */
+    options: ContextCompactionOptions;
+    /** 执行历史摘要任务使用的模型 ID。 */
+    summaryModel: string;
+    /** 用于中止摘要模型请求。 */
+    abortSignal?: AbortSignal;
+}
+
 
 /** 生成一次历史摘要所需的输入。 */
 export interface HistorySummaryInput {
@@ -76,6 +111,8 @@ export interface ContextBuildInput {
     maxContextTokens: number;
     /** 为模型本轮回答预留的 Token 数 */
     reservedOutputTokens: number;
+    /** 可选的历史压缩配置；未传入时保持 Context V1 的直接裁剪行为。 */
+    compaction?: ContextCompactionInput;
 }
 
 /**
@@ -91,6 +128,17 @@ export interface ContextSnapshot {
     availableInputTokens: number;
     /** 因 Token 预算不足而丢弃的历史消息数量。 */
     droppedMessageCount: number;
+
+    /** 本次构建是否成功生成了新的历史摘要。 */
+    compacted: boolean;
+    /** 本次摘要或裁剪失败后，是否启用了 Context V1 删除兜底。 */
+    compressionFallbackUsed: boolean;
+    /** 执行历史压缩前，模型输入预计占用的 Token 数。 */
+    tokensBeforeCompaction?: number;
+    /** 执行历史压缩后，最终快照预计占用的 Token 数。 */
+    tokensAfterCompaction?: number;
+    /** 本次构建完成后的会话压缩状态，供 AgentLoop 保存。 */
+    nextContextState?: ConversationContextState;
 }
 
 /** 一组必须一起保留或一起删除的消息。 */

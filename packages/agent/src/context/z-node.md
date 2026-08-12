@@ -532,3 +532,67 @@ flowchart LR
 ```
 
 这就是上下文模块第一阶段最重要的边界。
+
+
+
+# 问题
+### 如何理解每轮计算前，都需要「模型最大TOKEN-本轮预留TOKEN」
+
+假设：
+模型最大TOKEN = 10_000;
+本轮预留TOKEN = 2_000;
+那么：
+可用TOKEN = 10_000 - 2_000;
+
+整体容量分配：
+```text
+模型最大上下文：10000 Token
+├── 本次输入最多：8000 Token
+│   ├── System Prompt
+│   ├── 历史摘要
+│   ├── 对话消息
+│   └── Tool Schema
+└── 本轮输出预留：2000 Token
+```
+
+### 为什么必须预留输出
+假如不减：
+输入已经占用 10000 Token
+模型最大容量 10000 Token
+模型就没有空间生成回答，可能出现：
+1.上下文超限。
+2.输出被严重截断。
+3.Provider 直接拒绝请求。
+4.Tool Call 参数生成到一半停止。
+
+### 不同Token阈值之间的关系和结构
+
+```text
+主体结构：
+maxContextTokens                         模型总容量，硬上限
+│
+├── reservedOutputTokens                 输出预留
+│   └── 当前等于 maxOutputTokens
+│
+└── availableInputTokens                 输入硬上限
+    │
+    ├── triggerTokens                    80% 压缩触发线
+    │   └── availableInputTokens × triggerRatio
+    │
+    └── targetTokens                     60% 压缩目标线
+        └── availableInputTokens × targetRatio
+            │
+            ├── fixedTokens              System + Tool Schema
+            ├── maxSummaryTokens         摘要最大预算
+            └── rawMessageBudget         最近原始消息预算
+
+旁路结构：
+maxToolResultChars
+└── Tool Result 进入摘要前的字符上限
+
+Compressor maxTokens
+└── 某段文本或某次摘要的局部 Token 上限
+
+0.9
+└── 文本截断算法内部的 10% 误差缓冲
+```

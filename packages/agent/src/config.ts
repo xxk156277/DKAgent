@@ -1,3 +1,17 @@
+import type { ContextCompactionOptions } from "./context/types.js";
+
+/**
+ * Context V2 首版统一压缩策略。
+ * 模型容量属于部署配置；这些比例和局部上限属于 Agent 的上下文策略。
+ */
+export const DEFAULT_CONTEXT_COMPACTION_OPTIONS: ContextCompactionOptions = {
+    enabled: true,
+    triggerRatio: 0.8,
+    targetRatio: 0.6,
+    maxSummaryTokens: 1_000,
+    maxToolResultChars: 2_000,
+};
+
 export interface AgentConfig {
     /** 调用模型服务的 API Key。 */
     apiKey: string;
@@ -9,6 +23,10 @@ export interface AgentConfig {
     maxContextTokens: number;
     /** 单轮模型允许输出的最大 Token 数。 */
     maxOutputTokens: number;
+    /** 历史摘要与内容压缩使用的统一策略。 */
+    contextCompaction: ContextCompactionOptions;
+    /** 历史摘要使用的模型 ID；首版默认复用主模型。 */
+    summaryModel: string;
 }
 
 export function loadConfig(
@@ -47,11 +65,18 @@ export function loadConfig(
         );
     }
 
+    const model = env.LLM_MODEL_ID?.trim() || "gpt-4.1-mini";
+
     return {
         apiKey,
-        model: env.LLM_MODEL_ID?.trim() || "gpt-4.1-mini",
+        model,
         maxContextTokens,
         maxOutputTokens,
+        contextCompaction: {
+            ...DEFAULT_CONTEXT_COMPACTION_OPTIONS,
+        },
+        summaryModel:
+            env.LLM_SUMMARY_MODEL_ID?.trim() || model,
         ...(baseURL ? { baseURL } : {}),
     };
 }

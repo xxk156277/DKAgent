@@ -22,17 +22,18 @@ export interface MessageTokenCounterPort {
 export class ProviderTokenCounter implements ContextTokenCounter {
     public constructor(
         private readonly port: MessageTokenCounterPort,
-    ) {}
+    ) { }
 
     /** 计算包含 System Prompt 的完整上下文输入 Token。 */
     public async count(input: ContextTokenCountInput): Promise<number> {
         // Provider 旧接口没有 systemPrompt 参数，计数时临时转为 System 消息。
-        const messages: AgentMessage[] = input.systemPrompt === undefined
-            ? [...input.messages]
-            : [
-                { role: "system", content: input.systemPrompt },
-                ...input.messages,
-            ];
+        const messages: AgentMessage[] =
+            input.systemPrompt === undefined
+                ? [...input.messages]
+                : [
+                    { role: "system", content: input.systemPrompt },
+                    ...input.messages,
+                ];
 
         const tokenCount = await this.port.countTokens(
             messages,

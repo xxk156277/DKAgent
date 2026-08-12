@@ -1,6 +1,9 @@
 import type { QueryEngine } from "../query-engine/query-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type { ContextBuilder } from "../context/types.js";
+import type {
+    ContextBuilder,
+    ContextCompactionOptions,
+} from "../context/types.js";
 import type { RuntimeEventSink } from "../runtime/events.js";
 
 
@@ -17,6 +20,10 @@ export interface AgentLoopOptions {
     maxContextTokens: number;
     /** 模型本轮最多可以输出的 Token 数。 */
     maxOutputTokens: number;
+    /** 可选的历史压缩策略；未提供时继续使用 Context V1 裁剪。 */
+    contextCompaction?: ContextCompactionOptions;
+    /** 摘要任务使用的模型 ID；未提供时复用主模型。 */
+    summaryModel?: string;
     /** Agent 的固定系统提示词。 */
     systemPrompt?: string;
     /** 一次 Agent Run 最多执行多少轮模型或 Tool。 */

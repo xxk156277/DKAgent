@@ -7,6 +7,7 @@ export type {
     ConversationContextState,
     ContextBuilder,
     ContextBuildInput,
+    ContextCompactionInput,
     ContextCompactionOptions,
     ContextMessageGroup,
     ContextSnapshot,
