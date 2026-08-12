@@ -43,6 +43,21 @@ describe("TapApp", () => {
     expect(styles).toMatch(/\.tap-detail-region\s*\{[^}]*min-width:\s*0;/s);
   });
 
+  it("keeps Flex wrapping and visual order responsive at each breakpoint", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
+    const tabletStyles = getMediaBlock(styles, 959);
+    const mobileStyles = getMediaBlock(styles, 639);
+
+    expect(tabletStyles).toMatch(/\.tap-app-shell\s*\{[^}]*flex-wrap:\s*wrap;/s);
+    expect(tabletStyles).toMatch(/\.tap-detail-region\s*\{[^}]*flex:\s*0\s+0\s+calc\(100%\s*-\s*240px\);/s);
+    expect(tabletStyles).toMatch(/\.tap-node-region\s*\{[^}]*order:\s*3;/s);
+    expect(tabletStyles).toMatch(/\.tap-node-region\s*\{[^}]*flex-basis:\s*100%;/s);
+    expect(mobileStyles).toMatch(
+      /\.tap-turn-region,\s*\.tap-node-region,\s*\.tap-detail-region\s*\{[^}]*flex:\s*0\s+0\s+100%;/s,
+    );
+    expect(mobileStyles).toMatch(/\.tap-node-region\s*\{[^}]*order:\s*0;/s);
+  });
+
   it("renders three Turns without Session navigation or breadcrumbs", () => {
     const { container } = renderFixture();
 
@@ -225,6 +240,16 @@ function renderFixture(events = fixtureEvents()) {
   const store = createTapStore();
   store.getState().replaceHistory(events);
   return { store, ...render(<TapApp store={store} />) };
+}
+
+/** 仅截取指定断点，避免 CSS 契约跨媒体查询误匹配。 */
+function getMediaBlock(styles: string, maxWidth: number) {
+  const start = styles.indexOf(`@media (max-width: ${maxWidth}px) {`);
+  if (start === -1) return "";
+
+  const nextMedia = styles.indexOf("@media", start + 1);
+
+  return styles.slice(start, nextMedia === -1 ? undefined : nextMedia);
 }
 
 function fixtureEvents(): RuntimeEvent[] {
