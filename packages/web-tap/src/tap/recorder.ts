@@ -9,19 +9,34 @@ type Listener = (event: RuntimeEvent) => void | Promise<void>;
 
 const sensitiveFieldPattern = /api[-_]?key|authorization|headers?|env(?:ironment)?/i;
 
-/** 将不可序列化的事件降级为可诊断的 JSONL 记录。 */
-function serializeEvent(event: RuntimeEvent): string {
+interface SanitizedEvent {
+  event: RuntimeEvent;
+  serialized: string;
+}
+
+/** 一次性生成落盘和实时推送共用的脱敏事件。 */
+function sanitizeEvent(event: RuntimeEvent): SanitizedEvent {
   try {
-    return JSON.stringify(event, (key, value) =>
+    const serialized = JSON.stringify(event, (key, value) =>
       sensitiveFieldPattern.test(key) ? "[REDACTED]" : value,
     );
+    if (serialized === undefined) throw new Error("事件无法序列化");
+    return {
+      // JSON round-trip 同时完成深拷贝，避免修改 Agent Core 的原始事件。
+      event: JSON.parse(serialized) as RuntimeEvent,
+      serialized,
+    };
   } catch (error: unknown) {
-    return JSON.stringify({
+    const sanitized = {
       ...event,
       payload: {
         serializationError: error instanceof Error ? error.message : String(error),
       },
-    });
+    } satisfies RuntimeEvent;
+    return {
+      event: sanitized,
+      serialized: JSON.stringify(sanitized),
+    };
   }
 }
 
@@ -36,9 +51,10 @@ export class TapRecorder implements RuntimeEventSink {
   ) {}
 
   emit(event: RuntimeEvent): void {
+    const sanitized = sanitizeEvent(event);
     for (const listener of this.listeners) {
       try {
-        void Promise.resolve(listener(event)).catch(() => {
+        void Promise.resolve(listener(sanitized.event)).catch(() => {
           // 隔离异步 Viewer 订阅者拒绝。
         });
       } catch {
@@ -49,7 +65,7 @@ export class TapRecorder implements RuntimeEventSink {
     this.writeQueue = this.writeQueue
       .then(async () => {
         await mkdir(dirname(this.filePath), { recursive: true });
-        await appendFile(this.filePath, `${serializeEvent(event)}\n`, "utf8");
+        await appendFile(this.filePath, `${sanitized.serialized}\n`, "utf8");
       })
       .catch((error: unknown) => {
         this.warn(`Tap trace 写入失败：${error instanceof Error ? error.message : String(error)}`);

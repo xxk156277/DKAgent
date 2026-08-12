@@ -140,6 +140,43 @@ test("向 SSE 客户端推送新事件", async (t) => {
   controller.abort();
 });
 
+test("SSE 与历史 API 返回一致的脱敏事件", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "dkagent-tap-server-"));
+  const webRoot = await createWebRoot(directory);
+  const recorder = new TapRecorder(join(directory, "trace.jsonl"));
+  const server = await startTapServer({ recorder, webRoot, port: 0 });
+  t.after(() => server.close());
+
+  const controller = new AbortController();
+  const streamResponse = await fetch(`${server.url}api/events/stream`, {
+    signal: controller.signal,
+  });
+  const reader = streamResponse.body?.getReader();
+  assert.ok(reader);
+
+  const secrets = ["sse-api-key", "sse-authorization", "sse-header", "sse-env"];
+  recorder.emit({
+    ...event,
+    id: "event-secret",
+    payload: {
+      apiKey: secrets[0],
+      authorization: secrets[1],
+      headers: { authorization: secrets[2] },
+      env: { OPENAI_API_KEY: secrets[3] },
+    },
+  });
+
+  const chunk = new TextDecoder().decode((await reader.read()).value);
+  for (const secret of secrets) assert.doesNotMatch(chunk, new RegExp(secret));
+  const liveEvent = JSON.parse(chunk.match(/^data: (.+)$/m)?.[1] ?? "null") as RuntimeEvent;
+  const history = await fetch(`${server.url}api/events`).then(
+    (response) => response.json() as Promise<RuntimeEvent[]>,
+  );
+  assert.deepEqual(liveEvent, history[0]);
+  assert.equal(liveEvent.sequence, event.sequence);
+  controller.abort();
+});
+
 test("监听端口失败时取消 Tap 订阅", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "dkagent-tap-server-"));
   const webRoot = await createWebRoot(directory);

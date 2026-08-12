@@ -69,7 +69,7 @@ test("循环 payload 会记录序列化错误", async () => {
   assert.equal(typeof (saved.at(-1)?.payload as { serializationError: string }).serializationError, "string");
 });
 
-test("敏感字段会在写入 JSONL 前脱敏", async () => {
+test("敏感字段在订阅与历史中使用同一脱敏事件且不修改输入", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dkagent-tap-"));
   const filePath = join(directory, "trace.jsonl");
   const recorder = new TapRecorder(filePath);
@@ -81,7 +81,11 @@ test("敏感字段会在写入 JSONL 前脱敏", async () => {
     "secret-environment-value",
   ];
 
-  recorder.emit({
+  const received: RuntimeEvent[] = [];
+  recorder.subscribe((item) => {
+    received.push(item);
+  });
+  const inputEvent = {
     ...event,
     payload: {
       apiKey: secrets[0],
@@ -92,12 +96,18 @@ test("敏感字段会在写入 JSONL 前脱敏", async () => {
         environment: secrets[4],
       },
     },
-  });
+  } satisfies RuntimeEvent;
+
+  recorder.emit(inputEvent);
   await recorder.flush();
 
   const content = await readFile(filePath, "utf8");
   for (const secret of secrets) assert.doesNotMatch(content, new RegExp(secret));
-  const saved = (await recorder.readEvents())[0]?.payload as {
+  const historyEvent = (await recorder.readEvents())[0];
+  assert.deepEqual(received, [historyEvent]);
+  assert.equal(received[0]?.sequence, inputEvent.sequence);
+
+  const saved = historyEvent?.payload as {
     apiKey: string;
     nested: Record<string, string>;
   };
@@ -106,6 +116,8 @@ test("敏感字段会在写入 JSONL 前脱敏", async () => {
   assert.equal(saved.nested.headers, "[REDACTED]");
   assert.equal(saved.nested.env, "[REDACTED]");
   assert.equal(saved.nested.environment, "[REDACTED]");
+  // Recorder 不得反向修改 Agent Core 交入的原始事件。
+  assert.equal((inputEvent.payload as { apiKey: string }).apiKey, secrets[0]);
 });
 
 test("异步订阅者拒绝不会产生未处理拒绝或阻断写入", async () => {
