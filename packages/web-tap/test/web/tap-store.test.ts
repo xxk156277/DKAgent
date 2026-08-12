@@ -95,6 +95,41 @@ describe("createTapStore", () => {
     });
   });
 
+  it("restores live following when the latest Turn is selected again", () => {
+    const store = createTapStore();
+    store.getState().replaceHistory([
+      event("first", "turn-1", 1),
+      event("latest", "turn-2", 2),
+    ]);
+
+    store.getState().selectTurn("turn-1");
+    expect(store.getState().followLive).toBe(false);
+
+    store.getState().selectTurn("turn-2");
+    expect(store.getState().followLive).toBe(true);
+
+    store.getState().appendEvent(event("next", "turn-3", 3));
+    expect(store.getState()).toMatchObject({
+      selectedTurnId: "turn-3",
+      selectedNodeId: "turn-3:1:turn_start:next",
+      followLive: true,
+    });
+  });
+
+  it("pauses on a historical node and resumes from the latest node", () => {
+    const store = createTapStore();
+    store.getState().replaceHistory([
+      event("started", "turn-1", 1),
+      event("finished", "turn-1", 2, "turn.end"),
+    ]);
+
+    store.getState().selectNode("turn-1:1:turn_start:started");
+    expect(store.getState().followLive).toBe(false);
+
+    store.getState().selectNode("turn-1:1:turn_end:finished");
+    expect(store.getState().followLive).toBe(true);
+  });
+
   it("follows the newest node while the user is already following live state", () => {
     const store = createTapStore();
     store.getState().replaceHistory([event("first", "turn-1", 1)]);

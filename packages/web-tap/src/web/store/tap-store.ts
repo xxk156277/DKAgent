@@ -41,11 +41,24 @@ export function createTapStore() {
     },
     selectTurn(turnId) {
       const selection = findTurnSelection(get().events, turnId);
-      if (selection) set({ ...selection, followLive: false });
+      if (selection) {
+        const latest = findLatestSelection(get().events);
+        set({
+          ...selection,
+          // 重新选择最新 Turn 时恢复自动跟随；历史 Turn 则保持用户视角。
+          followLive: latest?.selectedTurnId === selection.selectedTurnId,
+        });
+      }
     },
     selectNode(nodeId) {
       const selection = findNodeSelection(get().events, nodeId);
-      if (selection) set({ ...selection, followLive: false });
+      if (selection) {
+        const latest = findLatestSelection(get().events);
+        set({
+          ...selection,
+          followLive: latest?.selectedNodeId === selection.selectedNodeId,
+        });
+      }
     },
     setConnectionStatus(connectionStatus) {
       set({ connectionStatus });
