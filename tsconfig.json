@@ -11,8 +11,6 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "types": ["node"],
-    "outDir": "dist",
-    "rootDir": "."
-  },
-  "include": ["helloAgentSrc/**/*.ts", "src/**/*.ts", "test/**/*.ts"]
+    "outDir": "dist"
+  }
 }

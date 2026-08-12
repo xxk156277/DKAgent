@@ -1,0 +1,13 @@
+{
+  "name": "@dkagent/web-tap",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "observe": "cd ../.. && tsx packages/web-tap/src/observe.ts",
+    "test": "cd ../.. && tsx --test packages/web-tap/test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dkagent/agent": "*"
+  }
+}
