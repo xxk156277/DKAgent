@@ -4,7 +4,7 @@ import type {
     ContextBuilder,
     ContextCompactionOptions,
 } from "../context/types.js";
-import type { RuntimeEventSink } from "../runtime/events.js";
+import type { Tracer } from "@dkagent/trace";
 
 
 export interface AgentLoopOptions {
@@ -32,6 +32,6 @@ export interface AgentLoopOptions {
     abortSignal?: AbortSignal;
     /** 模型流式文本回调。 */
     onTextDelta?: (text: string) => void;
-    /** 可选运行事件出口；未提供时不产生观测副作用。 */
-    runtimeEventSink?: RuntimeEventSink;
+    /** 可选被动追踪器；未提供时使用无副作用空追踪器。 */
+    tracer?: Tracer;
 }

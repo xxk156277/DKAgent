@@ -41,10 +41,6 @@ export interface ConversationContextState {
      * 该下标之前的消息已经包含在 summary 中。
      */
     firstKeptMessageIndex: number;
-    /** 最近一次执行历史压缩前，完整模型输入预计占用的 Token 数。 */
-    tokensBefore: number;
-    /** 当前会话已经成功执行历史压缩的次数。 */
-    compactionCount: number;
 }
 
 /** 历史摘要与内容压缩使用的配置。 */
@@ -122,21 +118,6 @@ export interface ContextSnapshot {
     systemPrompt?: string;
     messages: AgentMessage[];
     tools: ToolSchema[];
-    /** 当前快照预计占用的输入 Token 数。 */
-    estimatedInputTokens: number;
-    /** 本次允许输入内容使用的最大 Token 数。 */
-    availableInputTokens: number;
-    /** 因 Token 预算不足而丢弃的历史消息数量。 */
-    droppedMessageCount: number;
-
-    /** 本次构建是否成功生成了新的历史摘要。 */
-    compacted: boolean;
-    /** 本次摘要或裁剪失败后，是否启用了 Context V1 删除兜底。 */
-    compressionFallbackUsed: boolean;
-    /** 执行历史压缩前，模型输入预计占用的 Token 数。 */
-    tokensBeforeCompaction?: number;
-    /** 执行历史压缩后，最终快照预计占用的 Token 数。 */
-    tokensAfterCompaction?: number;
     /** 本次构建完成后的会话压缩状态，供 AgentLoop 保存。 */
     nextContextState?: ConversationContextState;
 }

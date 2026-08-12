@@ -3,7 +3,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./runtime-events": "./src/runtime/events.ts",
     "./cli": "./src/cli/run.ts"
   },
   "scripts": {
@@ -19,6 +18,7 @@
     "kb:build": "cd ../.. && tsx packages/agent/src/knowledge/cli.ts"
   },
   "dependencies": {
+    "@dkagent/trace": "*",
     "@ai-sdk/anthropic": "^4.0.34",
     "@ai-sdk/deepseek": "^3.0.24",
     "@ai-sdk/openai": "^4.0.34",

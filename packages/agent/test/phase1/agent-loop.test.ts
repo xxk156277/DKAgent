@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { AgentLoop } from "../../src/agent/loop.js";
 import { AGENT_SYSTEM_PROMPT } from "../../src/agent/prompt.js";
 import {
@@ -11,10 +12,6 @@ import type {
     ContextBuildInput,
     ContextSnapshot,
 } from "../../src/context/types.js";
-import type {
-    RuntimeEvent,
-    RuntimeEventSink,
-} from "../../src/runtime/events.js";
 import type {
     LLMProvider,
     StreamEvent,
@@ -58,7 +55,7 @@ function createAgent(
     contextManager: ContextBuilder = new ContextManager(
         new ProviderTokenCounter(provider),
     ),
-    runtimeEventSink?: RuntimeEventSink,
+    tracer?: Tracer,
 ): AgentLoop {
     return new AgentLoop({
         queryEngine: new QueryEngine(provider),
@@ -68,7 +65,7 @@ function createAgent(
         maxContextTokens: 1_000,
         maxOutputTokens: 100,
         systemPrompt: "test prompt",
-        ...(runtimeEventSink === undefined ? {} : { runtimeEventSink }),
+        ...(tracer === undefined ? {} : { tracer }),
     });
 }
 
@@ -82,19 +79,13 @@ class LatestMessageContextBuilder implements ContextBuilder {
                 : { systemPrompt: input.systemPrompt }),
             messages: latestMessage ? [latestMessage] : [],
             tools: [...input.tools],
-            estimatedInputTokens: latestMessage ? 1 : 0,
-            availableInputTokens:
-                input.maxContextTokens - input.reservedOutputTokens,
-            droppedMessageCount: Math.max(input.messages.length - 1, 0),
-            compacted: false,
-            compressionFallbackUsed: false,
         };
     }
 }
 
 /** 测试用 ContextBuilder：每次构建都推进一次会话摘要状态。 */
 class AdvancingContextBuilder implements ContextBuilder {
-    public readonly receivedCompactionCounts: number[] = [];
+    public readonly receivedSummaries: string[] = [];
 
     async build(input: ContextBuildInput): Promise<ContextSnapshot> {
         const state = input.compaction?.state;
@@ -102,7 +93,8 @@ class AdvancingContextBuilder implements ContextBuilder {
             throw new Error("测试期望 AgentLoop 传入压缩状态");
         }
 
-        this.receivedCompactionCounts.push(state.compactionCount);
+        this.receivedSummaries.push(state.summary);
+        const nextNumber = this.receivedSummaries.length;
 
         return {
             ...(input.systemPrompt === undefined
@@ -110,17 +102,9 @@ class AdvancingContextBuilder implements ContextBuilder {
                 : { systemPrompt: input.systemPrompt }),
             messages: [...input.messages],
             tools: [...input.tools],
-            estimatedInputTokens: input.messages.length,
-            availableInputTokens:
-                input.maxContextTokens - input.reservedOutputTokens,
-            droppedMessageCount: 0,
-            compacted: true,
-            compressionFallbackUsed: false,
             nextContextState: {
-                summary: `第 ${state.compactionCount + 1} 次摘要`,
+                summary: `第 ${nextNumber} 次摘要`,
                 firstKeptMessageIndex: state.firstKeptMessageIndex,
-                tokensBefore: input.messages.length,
-                compactionCount: state.compactionCount + 1,
             },
         };
     }
@@ -161,17 +145,10 @@ test("模型使用 Context 快照，但 AgentLoop 保留完整历史", async () 
         textResponse("第一轮回答"),
         textResponse("第二轮回答"),
     ]);
-    const contextEvents: RuntimeEvent[] = [];
-    const contextSink: RuntimeEventSink = {
-        emit: (event) => {
-            contextEvents.push(event);
-        },
-    };
     const agent = createAgent(
         provider,
         new ToolRegistry(),
         new LatestMessageContextBuilder(),
-        contextSink,
     );
 
     await agent.run("第一轮问题");
@@ -186,13 +163,6 @@ test("模型使用 Context 快照，但 AgentLoop 保留完整历史", async () 
         { role: "user", content: "第二轮问题" },
         { role: "assistant", content: "第二轮回答" },
     ]);
-    const secondAfter = contextEvents.filter(
-        (event) => event.type === "context.after",
-    ).at(-1);
-    assert.equal(
-        (secondAfter?.payload as ContextSnapshot).droppedMessageCount,
-        2,
-    );
 });
 
 test("AgentLoop 每轮传入并保存 ContextManager 返回的摘要状态", async () => {
@@ -221,14 +191,12 @@ test("AgentLoop 每轮传入并保存 ContextManager 返回的摘要状态", asy
     await agent.run("第二轮问题");
 
     assert.deepEqual(
-        contextManager.receivedCompactionCounts,
-        [0, 1],
+        contextManager.receivedSummaries,
+        ["", "第 1 次摘要"],
     );
     assert.deepEqual(agent.getContextState(), {
         summary: "第 2 次摘要",
         firstKeptMessageIndex: 0,
-        tokensBefore: 3,
-        compactionCount: 2,
     });
     assert.equal(agent.getMessages().length, 4);
 });
@@ -260,17 +228,13 @@ test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
     };
     const registry = new ToolRegistry();
     registry.register(fakeSplitTool);
-    const toolEvents: RuntimeEvent[] = [];
-    const toolSink: RuntimeEventSink = {
-        emit: (event) => {
-            toolEvents.push(event);
-        },
-    };
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
     const agent = createAgent(
         provider,
         registry,
-        new ContextManager(new ProviderTokenCounter(provider)),
-        toolSink,
+        new ContextManager(new ProviderTokenCounter(provider), undefined, tracer),
+        tracer,
     );
 
     const answer = await agent.run("帮我诊断 packages/agent/test/test-short.md");
@@ -282,41 +246,35 @@ test("诊断意图产生 Tool Call 后，将结果回传模型", async () => {
         "assistant",
         "tool",
     ]);
-    assert.deepEqual(toolEvents.map((event) => event.type), [
-        "turn.start", "context.before", "context.after", "model.response",
-        "tool.call", "tool.result", "context.before", "context.after",
-        "model.response", "turn.end",
-    ]);
+    assert.ok(traceStore.list().some((event) => event.name === "tool.call"));
+    assert.ok(traceStore.list().some((event) => event.name === "tool.result"));
 });
 
-test("Agent 失败时发布 turn.error 后原样抛出错误", async () => {
+test("Agent 失败时记录 agent.turn error 后原样抛出错误", async () => {
     const expectedError = new Error("context failed");
     const failedContextBuilder: ContextBuilder = {
         async build() {
             throw expectedError;
         },
     };
-    const events: RuntimeEvent[] = [];
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
     const agent = createAgent(
         new FakeProvider([]),
         new ToolRegistry(),
         failedContextBuilder,
-        {
-            emit: (event) => {
-                events.push(event);
-            },
-        },
+        tracer,
     );
 
     await assert.rejects(agent.run("你好"), (error: unknown) => {
         assert.equal(error, expectedError);
         return true;
     });
-    assert.deepEqual(events.map((event) => event.type), [
-        "turn.start", "context.before", "turn.error",
-    ]);
+    const errorEvent = traceStore.list().find(
+        (event) => event.name === "agent.turn" && event.phase === "error",
+    );
     assert.equal(
-        (events.at(-1)?.payload as { message: string }).message,
+        (errorEvent?.data as { error: { message: string } }).error.message,
         "context failed",
     );
 });

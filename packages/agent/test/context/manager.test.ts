@@ -85,8 +85,6 @@ test("未超预算时保留完整历史且不修改输入", async () => {
     });
 
     assert.deepEqual(snapshot.messages, messages);
-    assert.equal(snapshot.estimatedInputTokens, 3);
-    assert.equal(snapshot.droppedMessageCount, 0);
     assert.deepEqual(messages, original);
     assert.notEqual(snapshot.messages, messages);
 });
@@ -109,7 +107,6 @@ test("超预算时从最旧的非必留消息组开始删除", async () => {
         { role: "assistant", content: "旧回答" },
         { role: "user", content: "当前问题" },
     ]);
-    assert.equal(snapshot.droppedMessageCount, 1);
 });
 
 test("裁剪时完整删除 Tool Call 和 Tool Result", async () => {
@@ -133,7 +130,6 @@ test("裁剪时完整删除 Tool Call 和 Tool Result", async () => {
     assert.deepEqual(snapshot.messages, [
         { role: "user", content: "当前问题" },
     ]);
-    assert.equal(snapshot.droppedMessageCount, 3);
 });
 
 test("必留内容超过预算时明确失败", async () => {
@@ -182,20 +178,13 @@ test("达到 80% 水位后摘要旧历史并尽量降低到 60%", async () => {
             state: {
                 summary: "",
                 firstKeptMessageIndex: 0,
-                tokensBefore: 0,
-                compactionCount: 0,
             },
             options: compactionOptions,
             summaryModel: "summary-model",
         },
     });
 
-    assert.equal(snapshot.compacted, true);
-    assert.equal(snapshot.compressionFallbackUsed, false);
-    assert.equal(snapshot.tokensBeforeCompaction, 100);
-    assert.equal(snapshot.tokensAfterCompaction, 60);
     assert.equal(snapshot.nextContextState?.firstKeptMessageIndex, 5);
-    assert.equal(snapshot.nextContextState?.compactionCount, 1);
     assert.equal(snapshot.messages.length, 5);
     assert.match(snapshot.systemPrompt ?? "", /保留后的新摘要/);
     assert.equal(engine.requests.length, 1);
@@ -222,8 +211,6 @@ test("连续压缩时只摘要上次边界后的新增历史并合并旧摘要",
             state: {
                 summary: "## Progress\n- 旧摘要",
                 firstKeptMessageIndex: 2,
-                tokensBefore: 90,
-                compactionCount: 1,
             },
             options: compactionOptions,
             summaryModel: "summary-model",
@@ -231,7 +218,6 @@ test("连续压缩时只摘要上次边界后的新增历史并合并旧摘要",
     });
 
     assert.equal(snapshot.nextContextState?.firstKeptMessageIndex, 7);
-    assert.equal(snapshot.nextContextState?.compactionCount, 2);
     const summaryPrompt = engine.requests[0]?.messages[0];
     assert.equal(summaryPrompt?.role, "user");
     assert.match(summaryPrompt?.content ?? "", /旧摘要/);
@@ -248,8 +234,6 @@ test("摘要模型失败时保留旧状态并退回整组删除", async () => {
     const previousState = {
         summary: "旧摘要",
         firstKeptMessageIndex: 0,
-        tokensBefore: 0,
-        compactionCount: 1,
     };
 
     const snapshot = await manager.build({
@@ -264,9 +248,6 @@ test("摘要模型失败时保留旧状态并退回整组删除", async () => {
         },
     });
 
-    assert.equal(snapshot.compacted, false);
-    assert.equal(snapshot.compressionFallbackUsed, true);
     assert.deepEqual(snapshot.nextContextState, previousState);
-    assert.ok(snapshot.estimatedInputTokens <= 90);
     assert.ok(snapshot.messages.length < 10);
 });
