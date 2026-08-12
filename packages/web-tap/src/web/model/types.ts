@@ -1,10 +1,17 @@
-import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import type { TraceEvent } from "@dkagent/trace";
 
 export type TapNodeKind =
   | "turn_start"
   | "context_before"
   | "context_after"
   | "context_trimmed"
+  | "step_start"
+  | "context_tokens"
+  | "context_threshold"
+  | "context_compaction_plan"
+  | "context_summary_request"
+  | "context_summary_response"
+  | "context_compaction_completed"
   | "model_request"
   | "model_response"
   | "tool_call"
@@ -21,7 +28,7 @@ export interface TapNodeView {
   status: "running" | "completed" | "error";
   eventIds: string[];
   detail: unknown;
-  rawEvents: RuntimeEvent[];
+  rawEvents: TraceEvent[];
 }
 
 export interface TapStepView {

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import type { TraceEvent, TraceEventName, TracePhase } from "@dkagent/trace";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TapApp } from "../../src/web/app/TapApp.js";
@@ -163,21 +163,22 @@ describe("TapApp", () => {
     circularDetail.self = circularDetail;
     const brokenEvent = {
       id: "turn-broken-event",
-      sessionId: "session-fixture",
-      turnId: "turn-broken",
+      traceId: "turn-broken",
       sequence: 2,
       timestamp: "2026-08-12T00:02:00.000Z",
-      type: "custom.circular",
-      payload: circularDetail,
-    } as unknown as RuntimeEvent;
+      name: "custom.circular" as TraceEventName,
+      phase: "event" as const,
+      data: circularDetail,
+    } as TraceEvent;
     const startEvent = {
       ...brokenEvent,
       id: "turn-broken-start",
       sequence: 1,
       timestamp: "2026-08-12T00:01:59.000Z",
-      type: "turn.start",
-      payload: { input: "仍可切换节点" },
-    } as RuntimeEvent;
+      name: "agent.turn",
+      phase: "start" as const,
+      data: { input: { input: "仍可切换节点" } },
+    } as TraceEvent;
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     try {
@@ -202,12 +203,12 @@ describe("TapApp", () => {
     act(() => {
       store.getState().appendEvent({
         id: "turn-4-start",
-        sessionId: "session-fixture",
-        turnId: "turn-4",
+        traceId: "turn-4",
         sequence: 99,
         timestamp: "2026-08-12T00:01:39.000Z",
-        type: "turn.start",
-        payload: { input: "第四轮：实时追加" },
+        name: "agent.turn",
+        phase: "start",
+        data: { input: { input: "第四轮：实时追加" } },
       });
     });
 
@@ -265,24 +266,27 @@ function getMediaBlock(styles: string, maxWidth: number) {
   return styles.slice(start, nextMedia === -1 ? undefined : nextMedia);
 }
 
-function fixtureEvents(): RuntimeEvent[] {
+function fixtureEvents(): TraceEvent[] {
   let sequence = 0;
   const event = (
     id: string,
-    type: RuntimeEvent["type"],
+    type: string,
     turnId: string,
     payload: unknown,
     step?: number,
-  ): RuntimeEvent => ({
-    id,
-    sessionId: "session-fixture",
-    turnId,
-    sequence: ++sequence,
-    timestamp: `2026-08-12T00:00:${String(sequence).padStart(2, "0")}.000Z`,
-    type,
-    payload,
-    ...(step === undefined ? {} : { step }),
-  });
+  ): TraceEvent => {
+    const mapped = legacyEvent(type, payload);
+    return {
+      id,
+      traceId: turnId,
+      sequence: ++sequence,
+      timestamp: `2026-08-12T00:00:${String(sequence).padStart(2, "0")}.000Z`,
+      name: mapped.name,
+      phase: mapped.phase,
+      data: mapped.data,
+      ...(step === undefined ? {} : { step }),
+    };
+  };
   const request = {
     systemPrompt: "你是天气助手",
     messages: [
@@ -315,8 +319,9 @@ function fixtureEvents(): RuntimeEvent[] {
     event("turn-1-end", "turn.end", "turn-1", { answer: "你好" }, 1),
     {
       ...event("turn-1-unknown", "turn.end", "turn-1", { traceMarker: "unknown-fixture" }, 1),
-      type: "custom.trace",
-    } as unknown as RuntimeEvent,
+      name: "custom.trace" as TraceEventName,
+      phase: "event" as const,
+    },
 
     event("turn-2-start", "turn.start", "turn-2", { input: "第二轮：帮我查询上海天气" }),
     event("turn-2-before-1", "context.before", "turn-2", context([]), 1),
@@ -358,4 +363,32 @@ function fixtureEvents(): RuntimeEvent[] {
     }, 1),
     event("turn-3-end", "turn.end", "turn-3", { answer: "已完成" }, 1),
   ];
+}
+
+function legacyEvent(type: string, payload: unknown): {
+  name: TraceEventName;
+  phase: TracePhase;
+  data: unknown;
+} {
+  switch (type) {
+    case "turn.start": return { name: "agent.turn", phase: "start", data: { input: payload } };
+    case "turn.end": return { name: "agent.turn", phase: "end", data: { output: payload } };
+    case "context.before": return { name: "context.build", phase: "start", data: { input: payload } };
+    case "context.after": return {
+      name: "context.snapshot.created",
+      phase: "event",
+      data: {
+        context: payload,
+        metrics: { droppedMessageCount: isRecord(payload) ? payload.droppedMessageCount ?? 0 : 0 },
+      },
+    };
+    case "model.response": return { name: "model.response", phase: "event", data: payload };
+    case "tool.call": return { name: "tool.call", phase: "start", data: { input: payload } };
+    case "tool.result": return { name: "tool.result", phase: "event", data: payload };
+    default: return { name: type as TraceEventName, phase: "event", data: payload };
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

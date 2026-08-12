@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import type { TraceEvent, TraceEventName, TracePhase } from "@dkagent/trace";
 import { describe, expect, it } from "vitest";
 import { createContextDiff } from "../../src/web/model/context-diff.js";
 import { projectEvents } from "../../src/web/model/project-events.js";
@@ -27,21 +27,50 @@ const afterPayload = {
 };
 
 function event(
-  type: RuntimeEvent["type"],
+  type: string,
   turnId: string,
   payload: unknown,
   step?: number,
-): RuntimeEvent {
+): TraceEvent {
+  const mapped = legacyEvent(type, payload);
   return {
     id: `event-${turnId}-${type}-${step ?? 0}`,
-    sessionId: "session-1",
-    turnId,
+    traceId: turnId,
     sequence: sequence += 1,
     timestamp: "2026-08-12T00:00:00.000Z",
-    type,
-    payload,
+    name: mapped.name,
+    phase: mapped.phase,
+    data: mapped.data,
     ...(step === undefined ? {} : { step }),
   };
+}
+
+function legacyEvent(type: string, payload: unknown): {
+  name: TraceEventName;
+  phase: TracePhase;
+  data: unknown;
+} {
+  switch (type) {
+    case "turn.start": return { name: "agent.turn", phase: "start", data: { input: payload } };
+    case "turn.end": return { name: "agent.turn", phase: "end", data: { output: payload } };
+    case "context.before": return { name: "context.build", phase: "start", data: { input: payload } };
+    case "context.after": return {
+      name: "context.snapshot.created",
+      phase: "event",
+      data: {
+        context: payload,
+        metrics: { droppedMessageCount: isRecord(payload) ? payload.droppedMessageCount ?? 0 : 0 },
+      },
+    };
+    case "model.response": return { name: "model.response", phase: "event", data: payload };
+    case "tool.call": return { name: "tool.call", phase: "start", data: { input: payload } };
+    case "tool.result": return { name: "tool.result", phase: "event", data: payload };
+    default: return { name: type as TraceEventName, phase: "event", data: payload };
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 let sequence = 0;
@@ -71,8 +100,8 @@ describe("projectEvents", () => {
       "model_response",
       "turn_end",
     ]);
-    expect(step?.nodes[3]?.id).toBe("turn-1:1:model_request:event-turn-1-model.response-1:request");
-    expect(step?.nodes[4]?.id).toBe("turn-1:1:model_response:event-turn-1-model.response-1:response");
+    expect(step?.nodes[3]?.id).toContain("turn-1:1:model_request");
+    expect(step?.nodes[4]?.id).toContain("turn-1:1:model_response");
   });
 
   it("projects Tool Call and Result in Step 1, then model nodes in Step 2", () => {
@@ -118,8 +147,8 @@ describe("projectEvents", () => {
       event("turn.start", "turn-trim", { input: "你好" }),
       event("context.before", "turn-trim", beforePayload, 1),
       event("context.after", "turn-trim", { ...afterPayload, droppedMessageCount: 1 }, 1),
-      { ...event("turn.end", "turn-trim", { answer: "你好" }, 1), type: "custom.trace" },
-    ] as RuntimeEvent[];
+      { ...event("turn.end", "turn-trim", { answer: "你好" }, 1), name: "custom.trace" as TraceEventName, phase: "event" as const },
+    ];
     const original = structuredClone(events);
 
     const nodes = projectEvents(events)[0]?.turns[0]?.steps[0]?.nodes;

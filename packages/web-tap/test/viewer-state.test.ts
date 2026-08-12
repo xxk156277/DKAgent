@@ -3,46 +3,46 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
-import { TapRecorder } from "../src/tap/recorder.js";
+import { MemoryTraceStore, type TraceEvent } from "@dkagent/trace";
+
 import {
   createViewerEventFeed,
   mergeViewerEvents,
 } from "../src/tap/viewer-state.js";
 
-const firstEvent: RuntimeEvent = {
+const firstEvent: TraceEvent = {
   id: "event-1",
-  sessionId: "session-1",
-  turnId: "turn-1",
+  traceId: "session-1",
   sequence: 1,
   timestamp: "2026-08-12T00:00:00.000Z",
-  type: "turn.start",
-  payload: { input: "第一条" },
+  name: "agent.turn",
+  phase: "start",
+  data: { input: "第一条" },
 };
 
 test("断线期间的事件会在重连时补齐且不与实时事件重复", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dkagent-tap-viewer-"));
-  const recorder = new TapRecorder(join(directory, "trace.jsonl"));
-  let visibleEvents: RuntimeEvent[] = [];
+  const store = new MemoryTraceStore();
+  let visibleEvents: TraceEvent[] = [];
   const feed = createViewerEventFeed({
-    loadHistory: () => recorder.readEvents(),
+    loadHistory: () => Promise.resolve(store.list()),
     updateEvents: (events) => {
       visibleEvents = events;
     },
     updateStatus: () => undefined,
   });
 
-  recorder.emit(firstEvent);
+  store.emit(firstEvent);
   await feed.onOpen();
   feed.onError();
 
-  const missedEvent: RuntimeEvent = {
+  const missedEvent: TraceEvent = {
     ...firstEvent,
     id: "event-2",
     sequence: 2,
-    type: "turn.end",
+    name: "agent.turn", phase: "end",
   };
-  recorder.emit(missedEvent);
+  store.emit(missedEvent);
 
   await feed.onOpen();
   feed.onMessage(missedEvent);
@@ -51,11 +51,11 @@ test("断线期间的事件会在重连时补齐且不与实时事件重复", as
 });
 
 test("补读历史期间到达的实时事件不会被历史结果覆盖", async () => {
-  let finishHistory: ((events: RuntimeEvent[]) => void) | undefined;
-  const history = new Promise<RuntimeEvent[]>((resolve) => {
+  let finishHistory: ((events: TraceEvent[]) => void) | undefined;
+  const history = new Promise<TraceEvent[]>((resolve) => {
     finishHistory = resolve;
   });
-  let visibleEvents: RuntimeEvent[] = [];
+  let visibleEvents: TraceEvent[] = [];
   const feed = createViewerEventFeed({
     loadHistory: () => history,
     updateEvents: (events) => {
@@ -73,31 +73,29 @@ test("补读历史期间到达的实时事件不会被历史结果覆盖", async
 });
 
 test("多个 session 按首次时间排序并在 session 内按 sequence 排序", () => {
-  const events: RuntimeEvent[] = [
+  const events: TraceEvent[] = [
     firstEvent,
     {
       ...firstEvent,
       id: "session-1-event-2",
       sequence: 2,
       timestamp: "2026-08-12T00:02:00.000Z",
-      type: "turn.end",
+      name: "agent.turn", phase: "end",
     },
     {
       ...firstEvent,
       id: "session-2-event-1",
-      sessionId: "session-2",
-      turnId: "turn-2",
+      traceId: "session-2",
       sequence: 1,
       timestamp: "2026-08-12T00:03:00.000Z",
     },
     {
       ...firstEvent,
       id: "session-2-event-2",
-      sessionId: "session-2",
-      turnId: "turn-2",
+      traceId: "session-2",
       sequence: 2,
       timestamp: "2026-08-12T00:04:00.000Z",
-      type: "turn.end",
+      name: "agent.turn", phase: "end",
     },
   ];
 

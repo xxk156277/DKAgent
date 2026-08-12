@@ -1,88 +1,138 @@
-import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import type { TraceEvent } from "@dkagent/trace";
 import { createContextDiff } from "./context-diff.js";
 import type { TapNodeKind, TapNodeView, TapSessionView, TapStepView, TapTurnView } from "./types.js";
 
-/** 将不可变 Runtime Events 投影为 UI 消费的 Session → Turn → Step → Node。 */
-export function projectEvents(events: RuntimeEvent[]): TapSessionView[] {
-  const sorted = sortEvents(events);
-  const sessions = new Map<string, TapSessionView>();
+const CURRENT_SESSION_ID = "current";
+
+/** 将 Trace 投影为当前详情页需要的 Session → Turn → Step → Node。 */
+export function projectEvents(events: TraceEvent[]): TapSessionView[] {
   const turns = new Map<string, TapTurnView>();
   const stepMaps = new Map<string, Map<number, TapStepView>>();
   const latestSteps = new Map<string, number>();
-  const contextBefore = new Map<string, RuntimeEvent>();
+  const contextBefore = new Map<string, TraceEvent>();
+  const session: TapSessionView = { id: CURRENT_SESSION_ID, turns: [] };
 
-  for (const event of sorted) {
-    const turnKey = `${event.sessionId}:${event.turnId}`;
-    const session = getSession(sessions, event.sessionId);
-    const turn = getTurn(turns, session, event.turnId);
-    const stepNumber = resolveStep(event, latestSteps.get(turnKey));
-    latestSteps.set(turnKey, Math.max(latestSteps.get(turnKey) ?? 1, stepNumber));
-    const step = getStep(stepMaps, turnKey, turn, stepNumber);
-    const nodes = toNodes(event, stepNumber, contextBefore.get(`${turnKey}:${stepNumber}`));
-    step.nodes.push(...nodes);
+  for (const event of sortEvents(events)) {
+    const turn = getTurn(turns, session, event.traceId);
+    const stepNumber = resolveStep(event, latestSteps.get(event.traceId));
+    latestSteps.set(event.traceId, Math.max(latestSteps.get(event.traceId) ?? 1, stepNumber));
+    const step = getStep(stepMaps, event.traceId, turn, stepNumber);
 
-    if (event.type === "context.before") contextBefore.set(`${turnKey}:${stepNumber}`, event);
-  }
-
-  return [...sessions.values()];
-}
-
-function toNodes(event: RuntimeEvent, step: number, before?: RuntimeEvent): TapNodeView[] {
-  if (event.type === "model.response") return modelNodes(event, step);
-
-  if (event.type === "context.after") {
-    const after = eventNode(event, step, "context_after", "Context 已构建", "completed", {
-      context: event.payload,
-      diff: before ? createContextDiff(before.payload, event.payload) : undefined,
-    });
-    if (droppedMessageCount(event.payload) > 0 && before) {
-      return [
-        derivedTrimNode(before, event, step),
-        after,
-      ];
+    if (event.name === "context.build" && event.phase === "start") {
+      contextBefore.set(`${event.traceId}:${stepNumber}`, event);
     }
-    return [after];
+    const nodes = toNodes(event, stepNumber, contextBefore.get(`${event.traceId}:${stepNumber}`));
+    step.nodes.push(...nodes);
   }
 
-  const mapped = nodeDefinition(event.type);
-  return [eventNode(event, step, mapped.kind, mapped.title, mapped.status, event.payload)];
+  return session.turns.length === 0 ? [] : [session];
 }
 
-function modelNodes(event: RuntimeEvent, step: number): TapNodeView[] {
-  const payload = isRecord(event.payload) ? event.payload : {};
-  return [
-    eventNode(event, step, "model_request", "模型请求", "running", payload.request, ":request"),
-    eventNode(event, step, "model_response", "模型响应", "completed", payload.response, ":response"),
-  ];
+function toNodes(event: TraceEvent, step: number, before?: TraceEvent): TapNodeView[] {
+  if (shouldHideLifecycleEnd(event)) return [];
+
+  // 兼容迁移前测试夹具；真实 Trace 中请求与响应已是两个独立事件。
+  if (event.name === "model.response" && isRecord(event.data)
+    && "request" in event.data && "response" in event.data) {
+    return [
+      eventNode(event, step, "model_request", "模型请求", "running", event.data.request),
+      eventNode(event, step, "model_response", "模型响应", "completed", event.data.response),
+    ];
+  }
+
+  if (event.name === "context.snapshot.created") {
+    const payload = unwrapData(event.data);
+    const after = eventNode(event, step, "context_after", "Context 已构建", "completed", payload);
+    const dropped = readNumber(payload, "metrics", "droppedMessageCount");
+    return dropped > 0 && before
+      ? [derivedTrimNode(before, event, step), after]
+      : [after];
+  }
+
+  const definition = nodeDefinition(event);
+  return [eventNode(
+    event,
+    step,
+    definition.kind,
+    definition.title,
+    definition.status,
+    unwrapData(event.data),
+  )];
 }
 
-function derivedTrimNode(before: RuntimeEvent, after: RuntimeEvent, step: number): TapNodeView {
+function shouldHideLifecycleEnd(event: TraceEvent): boolean {
+  if (event.phase !== "end") return false;
+  return event.name === "agent.step"
+    || event.name === "context.build"
+    || event.name === "context.summary.request"
+    || event.name === "model.request"
+    || event.name === "tool.call";
+}
+
+function nodeDefinition(event: TraceEvent): {
+  kind: TapNodeKind;
+  title: string;
+  status: TapNodeView["status"];
+} {
+  if (event.phase === "error") {
+    return {
+      kind: event.name === "agent.turn" ? "turn_error" : "unknown",
+      title: event.name === "agent.turn" ? "对话失败" : `${eventLabel(event.name)}失败`,
+      status: "error",
+    };
+  }
+  switch (event.name) {
+    case "agent.turn":
+      return event.phase === "start"
+        ? { kind: "turn_start", title: "对话开始", status: "running" }
+        : { kind: "turn_end", title: "对话完成", status: "completed" };
+    case "agent.step": return { kind: "step_start", title: `Step ${event.step ?? 1} 开始`, status: "running" };
+    case "context.build": return { kind: "context_before", title: "构建 Context", status: "running" };
+    case "context.tokens.counted": return { kind: "context_tokens", title: tokenStageLabel(event.data), status: "completed" };
+    case "context.threshold.checked": return { kind: "context_threshold", title: "检查压缩阈值", status: "completed" };
+    case "context.compaction.planned": return { kind: "context_compaction_plan", title: "规划 Context 压缩", status: "completed" };
+    case "context.summary.request": return { kind: "context_summary_request", title: "摘要模型请求", status: "running" };
+    case "context.summary.response": return { kind: "context_summary_response", title: "摘要模型响应", status: "completed" };
+    case "context.compaction.completed": return { kind: "context_compaction_completed", title: "Context 压缩完成", status: "completed" };
+    case "model.request": return { kind: "model_request", title: "模型请求", status: "running" };
+    case "model.response": return { kind: "model_response", title: "模型响应", status: "completed" };
+    case "tool.call": return { kind: "tool_call", title: "Tool 调用", status: "running" };
+    case "tool.result": return { kind: "tool_result", title: "Tool 结果", status: "completed" };
+    default: return { kind: "unknown", title: "未知事件", status: "completed" };
+  }
+}
+
+function derivedTrimNode(before: TraceEvent, after: TraceEvent, step: number): TapNodeView {
+  const beforeData = unwrapData(before.data);
+  const afterData = unwrapData(after.data);
+  const afterContext = isRecord(afterData) && "context" in afterData
+    ? afterData.context
+    : afterData;
   return {
-    id: `${after.turnId}:${step}:context_trimmed:${before.id}:${after.id}`,
+    id: `${after.traceId}:${step}:context_trimmed:${before.id}:${after.id}`,
     kind: "context_trimmed",
     title: "上下文已裁剪",
     eventType: "context.trimmed",
     status: "completed",
     eventIds: [before.id, after.id],
-    detail: createContextDiff(before.payload, after.payload),
+    detail: createContextDiff(beforeData, afterContext),
     rawEvents: [before, after],
   };
 }
 
 function eventNode(
-  event: RuntimeEvent,
+  event: TraceEvent,
   step: number,
   kind: TapNodeKind,
   title: string,
   status: TapNodeView["status"],
   detail: unknown,
-  suffix = "",
 ): TapNodeView {
   return {
-    id: `${event.turnId}:${step}:${kind}:${event.id}${suffix}`,
+    id: `${event.traceId}:${step}:${kind}:${event.id}`,
     kind,
     title,
-    eventType: event.type,
+    eventType: `${event.name}.${event.phase}`,
     status,
     eventIds: [event.id],
     detail: kind === "unknown" ? { raw: event } : detail,
@@ -90,54 +140,56 @@ function eventNode(
   };
 }
 
-function nodeDefinition(type: string): { kind: TapNodeKind; title: string; status: TapNodeView["status"] } {
-  switch (type) {
-    case "turn.start": return { kind: "turn_start", title: "对话开始", status: "running" };
-    case "context.before": return { kind: "context_before", title: "构建 Context 前", status: "running" };
-    case "tool.call": return { kind: "tool_call", title: "Tool 调用", status: "running" };
-    case "tool.result": return { kind: "tool_result", title: "Tool 结果", status: "completed" };
-    case "turn.end": return { kind: "turn_end", title: "对话完成", status: "completed" };
-    case "turn.error": return { kind: "turn_error", title: "对话失败", status: "error" };
-    default: return { kind: "unknown", title: "未知事件", status: "completed" };
-  }
+function unwrapData(data: unknown): unknown {
+  if (!isRecord(data)) return data;
+  if (Object.keys(data).length === 1 && "input" in data) return data.input;
+  if (Object.keys(data).length === 1 && "output" in data) return data.output;
+  return data;
 }
 
-function resolveStep(event: RuntimeEvent, latestStep?: number): number {
-  if (event.type === "turn.start") return 1;
-  if ((event.type === "turn.end" || event.type === "turn.error") && event.step === undefined) {
-    return latestStep ?? 1;
-  }
-  return typeof event.step === "number" && Number.isFinite(event.step) ? event.step : 1;
+function tokenStageLabel(data: unknown): string {
+  const value = unwrapData(data);
+  const stage = isRecord(value) ? value.stage : undefined;
+  if (stage === "before_compaction") return "计算压缩前 Token";
+  if (stage === "after_compaction") return "计算压缩后 Token";
+  if (stage === "final_request") return "计算最终请求 Token";
+  return "计算 Token";
 }
 
-function getSession(sessions: Map<string, TapSessionView>, sessionId: string): TapSessionView {
-  const existing = sessions.get(sessionId);
+function eventLabel(name: string): string {
+  return name.split(".").map((word) => ({
+    agent: "Agent",
+    context: "Context",
+    summary: "摘要",
+    model: "模型",
+    tool: "Tool",
+    request: "请求",
+  })[word] ?? word).join(" ");
+}
+
+function resolveStep(event: TraceEvent, latestStep?: number): number {
+  return event.step ?? latestStep ?? 1;
+}
+
+function getTurn(turns: Map<string, TapTurnView>, session: TapSessionView, traceId: string): TapTurnView {
+  const existing = turns.get(traceId);
   if (existing) return existing;
-  const session = { id: sessionId, turns: [] };
-  sessions.set(sessionId, session);
-  return session;
-}
-
-function getTurn(turns: Map<string, TapTurnView>, session: TapSessionView, turnId: string): TapTurnView {
-  const key = `${session.id}:${turnId}`;
-  const existing = turns.get(key);
-  if (existing) return existing;
-  const turn = { id: turnId, steps: [] };
-  turns.set(key, turn);
+  const turn = { id: traceId, steps: [] };
+  turns.set(traceId, turn);
   session.turns.push(turn);
   return turn;
 }
 
 function getStep(
   stepMaps: Map<string, Map<number, TapStepView>>,
-  turnKey: string,
+  traceId: string,
   turn: TapTurnView,
   stepNumber: number,
 ): TapStepView {
-  let steps = stepMaps.get(turnKey);
+  let steps = stepMaps.get(traceId);
   if (!steps) {
     steps = new Map();
-    stepMaps.set(turnKey, steps);
+    stepMaps.set(traceId, steps);
   }
   const existing = steps.get(stepNumber);
   if (existing) return existing;
@@ -149,31 +201,17 @@ function getStep(
   return step;
 }
 
-function sortEvents(events: RuntimeEvent[]): RuntimeEvent[] {
-  const insertionOrder = new Map(events.map((event, index) => [event.id, index]));
-  const sessions = new Map<string, { timestamp: number; index: number }>();
-  for (const [index, event] of events.entries()) {
-    const timestamp = parsedTimestamp(event.timestamp);
-    const current = sessions.get(event.sessionId);
-    if (!current || timestamp < current.timestamp) sessions.set(event.sessionId, { timestamp, index });
-  }
-  return [...events].sort((left, right) => {
-    const leftSession = sessions.get(left.sessionId)!;
-    const rightSession = sessions.get(right.sessionId)!;
-    if (leftSession !== rightSession) return leftSession.timestamp - rightSession.timestamp || leftSession.index - rightSession.index;
-    return left.sequence - right.sequence
-      || parsedTimestamp(left.timestamp) - parsedTimestamp(right.timestamp)
-      || (insertionOrder.get(left.id) ?? 0) - (insertionOrder.get(right.id) ?? 0);
-  });
+function sortEvents(events: TraceEvent[]): TraceEvent[] {
+  const order = new Map(events.map((event, index) => [event.id, index]));
+  return [...events].sort((left, right) => left.sequence - right.sequence
+    || Date.parse(left.timestamp) - Date.parse(right.timestamp)
+    || (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
 }
 
-function parsedTimestamp(value: string): number {
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
-}
-
-function droppedMessageCount(payload: unknown): number {
-  return isRecord(payload) && typeof payload.droppedMessageCount === "number" ? payload.droppedMessageCount : 0;
+function readNumber(value: unknown, parentKey: string, key: string): number {
+  if (!isRecord(value) || !isRecord(value[parentKey])) return 0;
+  const number = value[parentKey][key];
+  return typeof number === "number" ? number : 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

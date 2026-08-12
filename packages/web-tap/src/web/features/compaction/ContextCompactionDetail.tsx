@@ -1,11 +1,11 @@
 import { Card, Descriptions, Typography } from "antd";
-import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import type { TraceEvent } from "@dkagent/trace";
 import type { ContextDiff } from "../../model/types.js";
 import { MessageList, isRecord } from "../node-detail/FieldDescriptions.js";
 
 interface ContextCompactionDetailProps {
   diff: ContextDiff;
-  rawEvents: RuntimeEvent[];
+  rawEvents: TraceEvent[];
 }
 
 /** 上下文裁剪详情明确展示 Before/After 与完整移除消息组。 */
@@ -47,12 +47,12 @@ export function ContextCompactionDetail({ diff, rawEvents }: ContextCompactionDe
   );
 }
 
-function readTriggerReason(events: RuntimeEvent[]): string | undefined {
+function readTriggerReason(events: TraceEvent[]): string | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (!event) continue;
-    if (!isRecord(event.payload)) continue;
-    const reason = event.payload.triggerReason ?? event.payload.reason;
+    if (!isRecord(event.data)) continue;
+    const reason = event.data.triggerReason ?? event.data.reason;
     if (typeof reason === "string") return reason;
   }
   return undefined;

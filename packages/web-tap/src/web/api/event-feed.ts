@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import type { TraceEvent } from "@dkagent/trace";
 import type { StoreApi } from "zustand/vanilla";
 import type { TapState } from "../store/tap-store.js";
 
@@ -10,7 +10,7 @@ interface EventSourceLike {
 }
 
 type EventSourceConstructor = new (url: string) => EventSourceLike;
-type FetchEvents = (url: string) => Promise<{ json(): Promise<RuntimeEvent[]> }>;
+type FetchEvents = (url: string) => Promise<{ json(): Promise<TraceEvent[]> }>;
 const connectionEpochs = new WeakMap<StoreApi<TapState>, number>();
 
 export interface EventFeedOptions {
@@ -61,7 +61,7 @@ export function connectEventFeed(
   source.onmessage = (message) => {
     if (!isCurrentConnection()) return;
     try {
-      store.getState().appendEvent(JSON.parse(message.data) as RuntimeEvent);
+      store.getState().appendEvent(JSON.parse(message.data) as TraceEvent);
     } catch {
       store.getState().setConnectionStatus("error");
     }

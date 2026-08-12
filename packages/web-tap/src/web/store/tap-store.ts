@@ -1,24 +1,24 @@
 import { useStore } from "zustand";
-import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import type { TraceEvent } from "@dkagent/trace";
 import { createStore } from "zustand/vanilla";
 import { mergeViewerEvents } from "../../tap/viewer-state.js";
 import { projectEvents } from "../model/project-events.js";
 import type { TapNodeView, TapSessionView, TapTurnView } from "../model/types.js";
 
-const sessionProjectionCache = new WeakMap<RuntimeEvent[], TapSessionView[]>();
+const sessionProjectionCache = new WeakMap<TraceEvent[], TapSessionView[]>();
 const nodeProjectionCache = new WeakMap<TapTurnView, TapNodeView[]>();
 const emptyTurns: TapTurnView[] = [];
 const emptyNodes: TapNodeView[] = [];
 
 export interface TapState {
-  events: RuntimeEvent[];
+  events: TraceEvent[];
   connectionStatus: "connecting" | "live" | "reconnecting" | "error";
   selectedSessionId: string | null;
   selectedTurnId: string | null;
   selectedNodeId: string | null;
   followLive: boolean;
-  replaceHistory(events: RuntimeEvent[]): void;
-  appendEvent(event: RuntimeEvent): void;
+  replaceHistory(events: TraceEvent[]): void;
+  appendEvent(event: TraceEvent): void;
   selectTurn(turnId: string): void;
   selectNode(nodeId: string): void;
   setConnectionStatus(status: TapState["connectionStatus"]): void;
@@ -102,19 +102,19 @@ export function selectNodes(state: TapState) {
 function updateEvents(
   set: (partial: Partial<TapState>) => void,
   get: () => TapState,
-  events: RuntimeEvent[],
+  events: TraceEvent[],
 ): void {
   const state = get();
   const shouldFollow = state.followLive || state.selectedTurnId === null;
   set({ events, ...(shouldFollow ? findLatestSelection(events) ?? {} : {}) });
 }
 
-function findLatestSelection(events: RuntimeEvent[]): Pick<TapState, "selectedSessionId" | "selectedTurnId" | "selectedNodeId"> | undefined {
-  const latestEvent = findLatestRuntimeEvent(events);
+function findLatestSelection(events: TraceEvent[]): Pick<TapState, "selectedSessionId" | "selectedTurnId" | "selectedNodeId"> | undefined {
+  const latestEvent = findLatestTraceEvent(events);
   if (!latestEvent) return undefined;
   const sessions = projectEvents(events);
-  const session = sessions.find((item) => item.id === latestEvent.sessionId);
-  const turn = session?.turns.find((item) => item.id === latestEvent.turnId);
+  const session = sessions[0];
+  const turn = session?.turns.find((item) => item.id === latestEvent.traceId);
   const node = turn?.steps
     .flatMap((step) => step.nodes)
     .filter((item) => item.eventIds.includes(latestEvent.id))
@@ -128,8 +128,8 @@ function findLatestSelection(events: RuntimeEvent[]): Pick<TapState, "selectedSe
 }
 
 /** 按全局时间、sequence 与原始输入顺序确定最后活动的 Runtime Event。 */
-function findLatestRuntimeEvent(events: RuntimeEvent[]): RuntimeEvent | undefined {
-  return events.reduce<RuntimeEvent | undefined>((latest, event) => {
+function findLatestTraceEvent(events: TraceEvent[]): TraceEvent | undefined {
+  return events.reduce<TraceEvent | undefined>((latest, event) => {
     if (!latest) return event;
     const timestampDifference = parseEventTimestamp(event.timestamp) - parseEventTimestamp(latest.timestamp);
     if (timestampDifference !== 0) return timestampDifference > 0 ? event : latest;
@@ -144,7 +144,7 @@ function parseEventTimestamp(value: string): number {
   return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
 }
 
-function findTurnSelection(events: RuntimeEvent[], turnId: string): Pick<TapState, "selectedSessionId" | "selectedTurnId" | "selectedNodeId"> | undefined {
+function findTurnSelection(events: TraceEvent[], turnId: string): Pick<TapState, "selectedSessionId" | "selectedTurnId" | "selectedNodeId"> | undefined {
   for (const session of projectEvents(events)) {
     const turn = session.turns.find((item) => item.id === turnId);
     const node = turn?.steps.at(-1)?.nodes.at(-1);
@@ -155,7 +155,7 @@ function findTurnSelection(events: RuntimeEvent[], turnId: string): Pick<TapStat
   return undefined;
 }
 
-function findNodeSelection(events: RuntimeEvent[], nodeId: string): Pick<TapState, "selectedSessionId" | "selectedTurnId" | "selectedNodeId"> | undefined {
+function findNodeSelection(events: TraceEvent[], nodeId: string): Pick<TapState, "selectedSessionId" | "selectedTurnId" | "selectedNodeId"> | undefined {
   for (const session of projectEvents(events)) {
     for (const turn of session.turns) {
       if (turn.steps.some((step) => step.nodes.some((node) => node.id === nodeId))) {

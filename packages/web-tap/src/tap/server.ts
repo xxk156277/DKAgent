@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import type { ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
-import type { TapRecorder } from "./recorder.js";
+import type { TraceStore } from "@dkagent/trace";
 
 export interface TapServerHandle {
   url: string;
@@ -13,7 +13,7 @@ export interface TapServerHandle {
 
 /** 启动只读 Tap Viewer；所有观测端异常都与 Agent 主流程隔离。 */
 export async function startTapServer(options: {
-  recorder: TapRecorder;
+  store: TraceStore;
   webRoot: string;
   host?: string;
   port?: number;
@@ -23,7 +23,7 @@ export async function startTapServer(options: {
   }
   const host = "127.0.0.1";
   const clients = new Set<ServerResponse>();
-  const unsubscribe = options.recorder.subscribe((event) => {
+  const unsubscribe = options.store.subscribe((event) => {
     let frame: string;
     try {
       frame = `data: ${JSON.stringify(event)}\n\n`;
@@ -44,7 +44,7 @@ export async function startTapServer(options: {
   try {
     const webRoot = await validateWebRoot(options.webRoot);
     server = createServer((request, response) => {
-      void handleRequest(request.url, response, options.recorder, clients, webRoot);
+      void handleRequest(request.url, response, options.store, clients, webRoot);
     });
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => reject(error);
@@ -77,13 +77,13 @@ export async function startTapServer(options: {
 async function handleRequest(
   url: string | undefined,
   response: ServerResponse,
-  recorder: TapRecorder,
+  store: TraceStore,
   clients: Set<ServerResponse>,
   webRoot: string,
 ): Promise<void> {
   try {
     if (url === "/api/events") {
-      const events = await recorder.readEvents();
+      const events = store.list();
       response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       response.end(JSON.stringify(events));
       return;

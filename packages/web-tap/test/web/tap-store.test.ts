@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import type { TraceEvent } from "@dkagent/trace";
 import { render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -9,17 +9,17 @@ function event(
   id: string,
   turnId: string,
   sequence: number,
-  type: RuntimeEvent["type"] = "turn.start",
-  sessionId = "session-1",
-): RuntimeEvent {
+  type: "turn.start" | "turn.end" = "turn.start",
+  _sessionId = "session-1",
+): TraceEvent {
   return {
     id,
-    sessionId,
-    turnId,
+    traceId: turnId,
     sequence,
     timestamp: `2026-08-12T00:00:0${sequence}.000Z`,
-    type,
-    payload: {},
+    name: "agent.turn",
+    phase: type === "turn.start" ? "start" : "end",
+    data: type === "turn.start" ? { input: {} } : { output: {} },
   };
 }
 
@@ -42,7 +42,7 @@ class FakeEventSource {
     this.onopen?.(new Event("open"));
   }
 
-  message(value: RuntimeEvent): void {
+  message(value: TraceEvent): void {
     this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(value) }));
   }
 }
@@ -72,7 +72,7 @@ describe("createTapStore", () => {
     ]);
 
     expect(store.getState()).toMatchObject({
-      selectedSessionId: "session-1",
+      selectedSessionId: "current",
       selectedTurnId: "turn-2",
       selectedNodeId: "turn-2:1:turn_start:latest",
       followLive: true,
@@ -153,7 +153,7 @@ describe("createTapStore", () => {
     ]);
 
     expect(store.getState()).toMatchObject({
-      selectedSessionId: "session-a",
+      selectedSessionId: "current",
       selectedTurnId: "turn-a-latest",
       selectedNodeId: "turn-a-latest:1:turn_end:a-latest",
     });
@@ -184,7 +184,7 @@ describe("createTapStore", () => {
     store.getState().replaceHistory([event("first", "turn-1", 1)]);
     const state = store.getState();
 
-    expect(selectSessions(state).map((session) => session.id)).toEqual(["session-1"]);
+    expect(selectSessions(state).map((session) => session.id)).toEqual(["current"]);
     expect(selectTurns(state).map((turn) => turn.id)).toEqual(["turn-1"]);
     expect(selectNodes(state).map((node) => node.id)).toEqual(["turn-1:1:turn_start:first"]);
   });
@@ -211,7 +211,7 @@ describe("createTapStore", () => {
 
   it("merges history with events received during the history request", async () => {
     const store = createTapStore();
-    const history = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const history = deferred<{ json(): Promise<TraceEvent[]> }>();
     const fetch = () => history.promise;
 
     connectEventFeed(store, { fetch, EventSource: FakeEventSource });
@@ -243,7 +243,7 @@ describe("createTapStore", () => {
 
   it("prevents late history writes after cleanup", async () => {
     const store = createTapStore();
-    const history = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const history = deferred<{ json(): Promise<TraceEvent[]> }>();
     const cleanup = connectEventFeed(store, { fetch: () => history.promise, EventSource: FakeEventSource });
     const source = FakeEventSource.latest!;
 
@@ -258,8 +258,8 @@ describe("createTapStore", () => {
 
   it("merges successful history responses from the current connection", async () => {
     const store = createTapStore();
-    const firstHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
-    const secondHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const firstHistory = deferred<{ json(): Promise<TraceEvent[]> }>();
+    const secondHistory = deferred<{ json(): Promise<TraceEvent[]> }>();
     const fetch = vi.fn()
       .mockReturnValueOnce(firstHistory.promise)
       .mockReturnValueOnce(secondHistory.promise);
@@ -278,8 +278,8 @@ describe("createTapStore", () => {
 
   it("keeps completed history when a later current-connection request fails", async () => {
     const store = createTapStore();
-    const initialHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
-    const refreshedHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const initialHistory = deferred<{ json(): Promise<TraceEvent[]> }>();
+    const refreshedHistory = deferred<{ json(): Promise<TraceEvent[]> }>();
     const fetch = vi.fn()
       .mockReturnValueOnce(initialHistory.promise)
       .mockReturnValueOnce(refreshedHistory.promise);
@@ -299,8 +299,8 @@ describe("createTapStore", () => {
 
   it("ignores an older history rejection after the feed has started reconnecting", async () => {
     const store = createTapStore();
-    const firstHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
-    const secondHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const firstHistory = deferred<{ json(): Promise<TraceEvent[]> }>();
+    const secondHistory = deferred<{ json(): Promise<TraceEvent[]> }>();
     const fetch = vi.fn()
       .mockReturnValueOnce(firstHistory.promise)
       .mockReturnValueOnce(secondHistory.promise);
@@ -318,9 +318,9 @@ describe("createTapStore", () => {
 
   it("ignores an older connection rejection after a newer connection is live", async () => {
     const store = createTapStore();
-    const oldHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
-    const newHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
-    const refreshedHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const oldHistory = deferred<{ json(): Promise<TraceEvent[]> }>();
+    const newHistory = deferred<{ json(): Promise<TraceEvent[]> }>();
+    const refreshedHistory = deferred<{ json(): Promise<TraceEvent[]> }>();
     const fetch = vi.fn()
       .mockReturnValueOnce(oldHistory.promise)
       .mockReturnValueOnce(newHistory.promise)
@@ -340,7 +340,7 @@ describe("createTapStore", () => {
 
   it("does not change status or fetch when a closed feed receives a late open", () => {
     const store = createTapStore();
-    const fetch = vi.fn(() => deferred<{ json(): Promise<RuntimeEvent[]> }>().promise);
+    const fetch = vi.fn(() => deferred<{ json(): Promise<TraceEvent[]> }>().promise);
     const cleanup = connectEventFeed(store, { fetch, EventSource: FakeEventSource });
     const source = FakeEventSource.latest!;
 

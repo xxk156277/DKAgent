@@ -30,6 +30,20 @@ const fieldLabels: Record<string, string> = {
   droppedMessageCount: "已裁剪消息数",
   triggerReason: "触发原因",
   reason: "原因",
+  stage: "计算阶段",
+  tokens: "Token 数",
+  triggerTokens: "触发阈值 Token",
+  targetTokens: "压缩目标 Token",
+  exceeded: "是否超过阈值",
+  strategy: "处理策略",
+  tokensBefore: "压缩前 Token",
+  tokensAfter: "压缩后 Token",
+  tokensSaved: "节省 Token",
+  savedRatio: "节省比例",
+  summarizedMessageCount: "摘要消息数",
+  retainedMessageCount: "保留消息数",
+  fallbackUsed: "是否使用兜底",
+  durationMs: "耗时（毫秒）",
 };
 
 const roleLabels: Record<string, string> = {
@@ -48,7 +62,7 @@ export function FieldDescriptions({ data, omitKeys = emptyKeys }: FieldDescripti
     .map(([key, value]) => ({
       key,
       label: fieldLabels[key] ?? key,
-      children: renderValue(value),
+      children: renderValue(key, value),
     }));
   return items.length > 0
     ? <Descriptions bordered column={1} size="small" items={items} />
@@ -102,8 +116,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function renderValue(value: unknown): ReactNode {
+function renderValue(key: string, value: unknown): ReactNode {
   if (value === null || value === undefined) return "—";
+  if (key === "savedRatio" && typeof value === "number") {
+    return `${(value * 100).toFixed(1)}%`;
+  }
   if (typeof value === "string" || typeof value === "number") return String(value);
   if (typeof value === "boolean") return value ? "是" : "否";
   return <JsonBlock value={value} />;
