@@ -99,8 +99,11 @@ function renderContextTrim(node: TapNodeView): ReactNode {
 }
 
 function renderError(node: TapNodeView): ReactNode {
+  const nestedError = isRecord(node.detail) && isRecord(node.detail.error)
+    ? node.detail.error.message
+    : undefined;
   const message = isRecord(node.detail)
-    ? String(node.detail.message ?? node.detail.error ?? "Agent 运行失败")
+    ? String(node.detail.message ?? nestedError ?? "Agent 运行失败")
     : String(node.detail ?? "Agent 运行失败");
   return (
     <div className="tap-error-detail">
