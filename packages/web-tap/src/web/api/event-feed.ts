@@ -40,7 +40,8 @@ export function connectEventFeed(
     try {
       const response = await fetchEvents("/api/events");
       const events = await response.json();
-      if (isCurrentConnection() && currentRequest === requestEpoch) {
+      // 同一连接的历史快照都可按事件 ID 合并；不能因后续请求已开始而丢弃完整历史。
+      if (isCurrentConnection()) {
         store.getState().replaceHistory(events);
       }
     } catch {

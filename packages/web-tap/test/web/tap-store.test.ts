@@ -221,7 +221,7 @@ describe("createTapStore", () => {
     expect(store.getState().events).toEqual([]);
   });
 
-  it("ignores an older history response after a newer SSE open request", async () => {
+  it("merges successful history responses from the current connection", async () => {
     const store = createTapStore();
     const firstHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
     const secondHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
@@ -238,7 +238,28 @@ describe("createTapStore", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(store.getState().events.map((item) => item.id)).toEqual(["newer"]);
+    expect(store.getState().events.map((item) => item.id)).toEqual(["older", "newer"]);
+  });
+
+  it("keeps completed history when a later current-connection request fails", async () => {
+    const store = createTapStore();
+    const initialHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const refreshedHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const fetch = vi.fn()
+      .mockReturnValueOnce(initialHistory.promise)
+      .mockReturnValueOnce(refreshedHistory.promise);
+
+    connectEventFeed(store, { fetch, EventSource: FakeEventSource });
+    FakeEventSource.latest!.open();
+    initialHistory.resolve({ json: async () => [event("history", "turn-history", 1)] });
+    await Promise.resolve();
+    await Promise.resolve();
+    refreshedHistory.reject(new Error("refresh failed"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.getState().events.map((item) => item.id)).toEqual(["history"]);
+    expect(store.getState().connectionStatus).toBe("error");
   });
 
   it("ignores an older history rejection after the feed has started reconnecting", async () => {
