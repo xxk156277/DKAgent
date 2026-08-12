@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +20,29 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TapApp", () => {
+  it("lays out Turn, Node, and Detail as flexible regions in DOM order", () => {
+    renderFixture();
+
+    const complementaryRegions = screen.getAllByRole("complementary");
+    expect(complementaryRegions).toHaveLength(2);
+    const turnRegion = complementaryRegions[0]!;
+    const nodeRegion = complementaryRegions[1]!;
+    const detailRegion = screen.getByRole("main");
+    expect([turnRegion, nodeRegion, detailRegion].map((region) => region.className)).toEqual([
+      expect.stringContaining("tap-turn-region"),
+      expect.stringContaining("tap-node-region"),
+      expect.stringContaining("tap-detail-region"),
+    ]);
+    expect(turnRegion.compareDocumentPosition(nodeRegion)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(nodeRegion.compareDocumentPosition(detailRegion)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
+    expect(styles).toMatch(/\.tap-app-shell\s*\{[^}]*display:\s*flex;/s);
+    expect(styles).toMatch(/\.tap-node-region\s*\{[^}]*flex:\s*0\s+0\s+280px;/s);
+    expect(styles).toMatch(/\.tap-detail-region\s*\{[^}]*flex:\s*1\s+1\s+auto;/s);
+    expect(styles).toMatch(/\.tap-detail-region\s*\{[^}]*min-width:\s*0;/s);
+  });
+
   it("renders three Turns without Session navigation or breadcrumbs", () => {
     const { container } = renderFixture();
 

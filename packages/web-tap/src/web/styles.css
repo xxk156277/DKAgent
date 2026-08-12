@@ -23,9 +23,7 @@ button {
 }
 
 .tap-app-shell {
-  display: grid;
-  grid-template-areas: "turn detail node";
-  grid-template-columns: 240px minmax(420px, 1fr) 280px;
+  display: flex;
   align-items: stretch;
   background: var(--ant-color-bg-layout, #f5f5f5);
 }
@@ -46,12 +44,13 @@ button {
 }
 
 .tap-turn-region {
-  grid-area: turn;
+  flex: 0 0 240px;
   border-inline-end: 1px solid var(--ant-color-border-secondary, #f0f0f0);
 }
 
 .tap-detail-region {
-  grid-area: detail;
+  flex: 1 1 auto;
+  min-width: 0;
   background: var(--ant-color-bg-layout, #f5f5f5);
 }
 
@@ -61,7 +60,7 @@ button {
 }
 
 .tap-node-region {
-  grid-area: node;
+  flex: 0 0 280px;
   border-inline-start: 1px solid var(--ant-color-border-secondary, #f0f0f0);
 }
 
@@ -265,25 +264,26 @@ button {
 
 @media (max-width: 959px) {
   .tap-app-shell {
-    grid-template-areas:
-      "turn detail"
-      "node node";
-    grid-template-columns: 240px minmax(0, 1fr);
+    flex-wrap: wrap;
+  }
+
+  .tap-detail-region {
+    flex: 0 0 calc(100% - 240px);
   }
 
   .tap-node-region {
+    order: 3;
+    flex-basis: 100%;
     border-block-start: 1px solid var(--ant-color-border-secondary, #f0f0f0);
     border-inline-start: 0;
   }
 }
 
 @media (max-width: 639px) {
-  .tap-app-shell {
-    grid-template-areas:
-      "turn"
-      "detail"
-      "node";
-    grid-template-columns: minmax(0, 1fr);
+  .tap-turn-region,
+  .tap-node-region,
+  .tap-detail-region {
+    flex: 0 0 100%;
   }
 
   .tap-region {
@@ -291,8 +291,13 @@ button {
   }
 
   .tap-turn-region {
-    border-block-end: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+    border-block-end: 0;
     border-inline-end: 0;
+  }
+
+  .tap-node-region {
+    order: 0;
+    border-block-start: 0;
   }
 }
 

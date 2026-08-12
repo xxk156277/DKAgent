@@ -51,17 +51,17 @@ export function TapApp({ store = tapStore }: TapAppProps) {
             connectionStatus={connectionStatus}
             onSelect={selectTurn}
           />
-          <main className="tap-region tap-detail-region">
-            <NodeDetailBoundary key={selectedNodeId ?? "empty"} node={selectedNode}>
-              <NodeDetail node={selectedNode} />
-            </NodeDetailBoundary>
-          </main>
           <NodeNav
             turn={selectedTurn}
             turnIndex={selectedTurnIndex + 1}
             selectedNodeId={selectedNodeId}
             onSelect={selectNode}
           />
+          <main className="tap-region tap-detail-region">
+            <NodeDetailBoundary key={selectedNodeId ?? "empty"} node={selectedNode}>
+              <NodeDetail node={selectedNode} />
+            </NodeDetailBoundary>
+          </main>
         </div>
       </AntdApp>
     </ConfigProvider>
