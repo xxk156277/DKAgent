@@ -3,8 +3,8 @@ import { mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { TapRecorder } from "../../src/tap/recorder.js";
-import type { RuntimeEvent } from "../../src/runtime/events.js";
+import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import { TapRecorder } from "../src/tap/recorder.js";
 
 const event: RuntimeEvent = {
   id: "event-1",

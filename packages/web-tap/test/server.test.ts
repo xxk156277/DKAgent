@@ -5,10 +5,10 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { TapRecorder } from "../../src/tap/recorder.js";
-import { startTapServer } from "../../src/tap/server.js";
-import type { RuntimeEvent } from "../../src/runtime/events.js";
-import { VIEWER_HTML } from "../../src/tap/viewer.js";
+import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import { TapRecorder } from "../src/tap/recorder.js";
+import { startTapServer } from "../src/tap/server.js";
+import { VIEWER_HTML } from "../src/tap/viewer.js";
 
 const event: RuntimeEvent = {
   id: "event-1",

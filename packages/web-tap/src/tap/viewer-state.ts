@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "../runtime/events.js";
+import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
 
 export interface ViewerEventFeedOptions {
   loadHistory(): Promise<RuntimeEvent[]>;

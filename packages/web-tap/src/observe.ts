@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { join } from "node:path";
-import { runAgentCli } from "./cli/run.js";
+import { runAgentCli } from "@dkagent/agent/cli";
 import { TapRecorder } from "./tap/recorder.js";
 import { startTapServer } from "./tap/server.js";
 import type { TapServerHandle } from "./tap/server.js";

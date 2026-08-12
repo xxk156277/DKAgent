@@ -9,8 +9,9 @@ test("Tap 启动失败时仍以无 sink 模式启动 Agent CLI", async (t) => {
   t.after(() => new Promise<void>((resolve, reject) => occupied.close((error) => (error ? reject(error) : resolve()))));
 
   const child = spawn(process.execPath, [
-    "node_modules/tsx/dist/cli.mjs",
-    "src/observe.ts",
+    "--import",
+    "tsx",
+    "packages/web-tap/src/observe.ts",
   ], {
     cwd: process.cwd(),
     env: {

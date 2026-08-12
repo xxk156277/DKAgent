@@ -1,6 +1,9 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { RuntimeEvent, RuntimeEventSink } from "../runtime/events.js";
+import type {
+  RuntimeEvent,
+  RuntimeEventSink,
+} from "@dkagent/agent/runtime-events";
 
 type Listener = (event: RuntimeEvent) => void | Promise<void>;
 

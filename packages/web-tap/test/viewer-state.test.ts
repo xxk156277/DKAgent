@@ -3,9 +3,12 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { RuntimeEvent } from "../../src/runtime/events.js";
-import { TapRecorder } from "../../src/tap/recorder.js";
-import { createViewerEventFeed, mergeViewerEvents } from "../../src/tap/viewer-state.js";
+import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
+import { TapRecorder } from "../src/tap/recorder.js";
+import {
+  createViewerEventFeed,
+  mergeViewerEvents,
+} from "../src/tap/viewer-state.js";
 
 const firstEvent: RuntimeEvent = {
   id: "event-1",
