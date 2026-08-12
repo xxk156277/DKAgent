@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { createInterface } from "node:readline";
 import { AgentLoop } from "../agent/loop.js";
 import { AGENT_SYSTEM_PROMPT } from "../agent/prompt.js";

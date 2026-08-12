@@ -8,7 +8,7 @@
   },
   "scripts": {
     "agent": "cd ../.. && tsx packages/agent/src/index.ts",
-    "test": "cd ../.. && tsx --test packages/agent/test/**/*.test.ts",
+    "test": "cd ../.. && tsx --test packages/agent/test/monorepo-layout.test.ts packages/agent/test/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "test:phase1": "cd ../.. && tsx --test packages/agent/test/phase1/*.test.ts",
     "typecheck:phase1": "tsc -p tsconfig.phase1.json --noEmit",

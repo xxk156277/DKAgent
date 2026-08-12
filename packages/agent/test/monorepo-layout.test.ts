@@ -25,3 +25,21 @@ test("业务源码和测试已完全迁入两个 workspace", async () => {
   await access(new URL("packages/agent/src/index.ts", root));
   await access(new URL("packages/web-tap/src/observe.ts", root));
 });
+
+test("根测试覆盖布局回归且 web-tap 不隐式依赖 dotenv", async () => {
+  const agent = await readJson("packages/agent/package.json");
+  const tap = await readJson("packages/web-tap/package.json");
+  const observeSource = await readFile(
+    new URL("packages/web-tap/src/observe.ts", root),
+    "utf8",
+  );
+  const cliSource = await readFile(
+    new URL("packages/agent/src/cli/run.ts", root),
+    "utf8",
+  );
+
+  assert.match(agent.scripts.test, /monorepo-layout\.test\.ts/);
+  assert.deepEqual(tap.dependencies, { "@dkagent/agent": "*" });
+  assert.doesNotMatch(observeSource, /dotenv/);
+  assert.match(cliSource, /dotenv\/config/);
+});
