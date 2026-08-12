@@ -10,6 +10,9 @@ const emptyKeys: readonly string[] = [];
 const fieldLabels: Record<string, string> = {
   input: "输入",
   answer: "回答",
+  systemPrompt: "系统提示词",
+  maxTokens: "最大输出 Token",
+  temperature: "温度",
   model: "模型",
   tools: "工具",
   type: "类型",

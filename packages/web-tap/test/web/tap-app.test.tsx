@@ -56,8 +56,12 @@ describe("TapApp", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /模型请求/ })[0]!);
 
     expect(screen.getByRole("heading", { name: "模型请求" })).toBeVisible();
-    expect(screen.getByRole("columnheader", { name: "模型" })).toBeVisible();
-    expect(screen.getByRole("cell", { name: "fixture-model" })).toBeVisible();
+    expect(screen.getByRole("row", { name: "系统提示词 你是天气助手" })).toBeVisible();
+    expect(screen.getByRole("row", { name: "最大输出 Token 256" })).toBeVisible();
+    expect(screen.getByRole("row", { name: "温度 0" })).toBeVisible();
+    expect(screen.queryByRole("columnheader", { name: "systemPrompt" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "maxTokens" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "temperature" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /System 消息/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /User 消息/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /Assistant 消息/ })).toBeVisible();
@@ -71,7 +75,8 @@ describe("TapApp", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: /模型响应/ })[0]!);
 
-    expect(screen.getByRole("row", { name: "模型 fixture-model" })).toBeVisible();
+    expect(screen.queryByRole("columnheader", { name: "模型" })).not.toBeInTheDocument();
+    expect(screen.queryByText("—", { exact: true })).not.toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "停止原因" })).toBeVisible();
     expect(screen.getByRole("columnheader", { name: "用量" })).toBeVisible();
     expect(screen.getByRole("row", { name: "停止原因 tool_use" })).toBeVisible();
@@ -178,7 +183,7 @@ function fixtureEvents(): RuntimeEvent[] {
     ...(step === undefined ? {} : { step }),
   });
   const request = {
-    model: "fixture-model",
+    systemPrompt: "你是天气助手",
     messages: [
       { role: "system", content: "你是天气助手" },
       { role: "user", content: "帮我查天气" },
@@ -186,6 +191,8 @@ function fixtureEvents(): RuntimeEvent[] {
       { role: "tool", toolCallId: "call-weather", content: "晴" },
     ],
     tools: [{ name: "weather" }],
+    maxTokens: 256,
+    temperature: 0,
   };
   const response = {
     type: "text",

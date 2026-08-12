@@ -82,13 +82,7 @@ function renderModelRequest(node: TapNodeView): ReactNode {
 
 function renderModelResponse(node: TapNodeView): ReactNode {
   if (!isRecord(node.detail)) return <JsonCard title="模型响应数据" value={node.detail} />;
-  return <FieldDescriptions data={{ model: readResponseModel(node), ...node.detail }} />;
-}
-
-function readResponseModel(node: TapNodeView): unknown {
-  const payload = node.rawEvents[0]?.payload;
-  if (!isRecord(payload) || !isRecord(payload.request)) return undefined;
-  return payload.request.model;
+  return <FieldDescriptions data={node.detail} />;
 }
 
 function renderContextTrim(node: TapNodeView): ReactNode {
