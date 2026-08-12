@@ -1,0 +1,40 @@
+<style>
+#tap-layouts{color:#172033}.layout-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.layout{padding:0;overflow:hidden;background:#f7f9fc;border:1px solid #d9e0ea;border-radius:12px;cursor:pointer;text-align:left}.layout:hover,.layout.is-selected{border-color:#315efb;box-shadow:0 0 0 2px rgba(49,94,251,.15)}.window{min-height:390px;background:#eef2f7}.topbar{height:34px;background:#fff;border-bottom:1px solid #d9e0ea;display:flex;align-items:center;justify-content:space-between;padding:0 10px;font-size:10px}.live{color:#08966f}.shell{display:grid;min-height:355px}.sidebar{background:#fff;border-right:1px solid #d9e0ea;padding:8px}.main{padding:9px}.node{background:#fff;border:1px solid #d9e0ea;border-left:3px solid #315efb;border-radius:6px;padding:7px;margin-bottom:7px;font-size:9px}.node.active{background:#eef3ff;border-color:#315efb}.node.feature{border-left-color:#d48806;background:#fff8e6}.panel{background:#fff;border:1px solid #d9e0ea;border-radius:7px;margin-bottom:8px;overflow:hidden}.panel-title{padding:7px 9px;border-bottom:1px solid #e7ebf1;font-size:9px;font-weight:600;display:flex;justify-content:space-between}.code{margin:0;padding:9px;min-height:52px;background:#f8fafc;color:#475569;font:8px/1.55 ui-monospace,monospace;white-space:pre-wrap}.flow{display:flex;align-items:center;gap:4px;padding:8px}.step{flex:1;background:#fff;border:1px solid #cfd7e3;border-radius:6px;padding:6px 3px;text-align:center;font-size:8px}.caption{padding:12px 13px 14px;background:#fff;border-top:1px solid #d9e0ea}.caption strong{display:block;margin-bottom:4px}.caption span{color:#64748b;font-size:12px;line-height:1.5}.badge{display:inline-flex!important;width:22px;height:22px;align-items:center;justify-content:center;border-radius:50%;background:#315efb;color:#fff!important;margin-right:6px}@media(max-width:900px){.layout-grid{grid-template-columns:1fr}}
+</style>
+<div id="tap-layouts">
+<h2>DKAgent Tap：选择信息布局</h2>
+<p class="subtitle">MVP 不展示 Session，只聚焦一次 AgentLoop 的节点、字段和功能触发过程。</p>
+<div class="layout-grid">
+<button type="button" class="layout" data-choice="a" onclick="toggleSelect(this)">
+<div class="window"><div class="topbar"><b>DKAgent Tap</b><span class="live">● 实时监听</span></div><div class="shell" style="grid-template-columns:34% 66%"><div class="sidebar"><div class="node">1 用户输入</div><div class="node">2 构建上下文前</div><div class="node feature active">3 上下文裁剪</div><div class="node">4 模型请求 / 响应</div><div class="node">5 Tool 调用</div><div class="node">6 最终回答</div></div><div class="main"><div class="panel"><div class="panel-title"><span>上下文裁剪</span><span>Step 1</span></div><pre class="code">触发原因：超过输入预算
+裁剪前：8 条消息 · 4,820 tokens
+裁剪后：5 条消息 · 3,100 tokens</pre></div><div class="panel"><div class="panel-title"><span>被移除消息</span><span>3 条</span></div><pre class="code">[system] 系统提示词
+[user] 第一轮问题
+[assistant] 第一轮回答</pre></div><div class="panel"><div class="panel-title"><span>原始 JSON</span><span>{ }</span></div><pre class="code">{"type":"context.after", ...}</pre></div></div></div></div>
+<div class="caption"><strong><span class="badge">A</span>节点导航 + 单一详情区</strong><span>最接近参考图。节点清晰，适合逐步学习 AgentLoop；MVP 实现最小。</span></div></button>
+<button type="button" class="layout" data-choice="b" onclick="toggleSelect(this)">
+<div class="window"><div class="topbar"><b>DKAgent Tap</b><span class="live">● 实时监听</span></div><div class="main"><div class="panel"><div class="panel-title"><span>AgentLoop 过程</span><span>Step 1</span></div><div class="flow"><div class="step">输入</div>→<div class="step">上下文</div>→<div class="step" style="border-color:#d48806;background:#fff8e6">裁剪</div>→<div class="step">模型</div>→<div class="step">Tool</div></div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="panel"><div class="panel-title"><span>裁剪前</span><span>4,820 tokens</span></div><pre class="code" style="min-height:165px">系统提示词
+用户消息 × 4
+助手消息 × 3
+Tool Schema × 2</pre></div><div class="panel"><div class="panel-title"><span>裁剪后</span><span>3,100 tokens</span></div><pre class="code" style="min-height:165px">系统提示词
+用户消息 × 2
+助手消息 × 2
+Tool Schema × 2</pre></div></div><div class="panel"><div class="panel-title"><span>原始事件字段</span><span>JSON</span></div><pre class="code">eventId · turnId · step · sequence · payload</pre></div></div></div>
+<div class="caption"><strong><span class="badge">B</span>横向流程 + 双栏对比</strong><span>功能过程更直观，尤其适合上下文压缩；普通节点详情空间较少。</span></div></button>
+<button type="button" class="layout" data-choice="c" onclick="toggleSelect(this)">
+<div class="window"><div class="topbar"><b>DKAgent Tap</b><span class="live">● 实时监听</span></div><div class="shell" style="grid-template-columns:27% 40% 33%"><div class="sidebar"><div class="node">用户输入</div><div class="node active">上下文</div><div class="node">模型</div><div class="node">Tool</div><div class="node">回答</div></div><div class="main"><div class="panel"><div class="panel-title"><span>关键字段</span><span>已汉化</span></div><pre class="code" style="min-height:250px">触发阶段：Step 1
+最大上下文：8,000
+输出预留：2,000
+可用输入：6,000
+估算输入：3,100
+
+消息列表
+  用户：你好
+  助手：...</pre></div></div><div class="main" style="padding-left:0"><div class="panel"><div class="panel-title"><span>原始 JSON</span><span>复制</span></div><pre class="code" style="min-height:287px">{
+  "type":
+    "context.after",
+  "step": 1,
+  "payload": { ... }
+}</pre></div></div></div></div>
+<div class="caption"><strong><span class="badge">C</span>节点 + 汉化字段 + 原始 JSON</strong><span>信息最完整，适合深入调试；三栏在小屏较拥挤，MVP 复杂度更高。</span></div></button>
+</div></div>

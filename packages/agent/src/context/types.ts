@@ -1,5 +1,7 @@
 import type {
     AgentMessage,
+    ModelRequest,
+    ModelResponse,
     ToolSchema,
 } from "../query-engine/provider.js";
 
@@ -35,6 +37,28 @@ export interface ContextCompactionOptions {
     maxSummaryTokens: number;
     /** Tool Result 进入摘要请求前允许保留的最大字符数。 */
     maxToolResultChars: number;
+}
+
+/** 生成一次历史摘要所需的输入。 */
+export interface HistorySummaryInput {
+    /** 上一次压缩生成的摘要；第一次压缩时为空字符串。 */
+    existingSummary: string;
+    /** 本次新增进入摘要范围的原始历史消息。 */
+    messages: readonly AgentMessage[];
+    /** 执行摘要任务使用的模型 ID。 */
+    model: string;
+    /** 摘要结果允许模型输出的最大 Token 数。 */
+    maxTokens: number;
+    /** Tool Result 序列化给摘要模型前允许保留的最大字符数。 */
+    maxToolResultChars: number;
+    /** 用于中止本次摘要模型请求。 */
+    abortSignal?: AbortSignal;
+}
+
+/** Compressor 调用摘要模型所依赖的最小端口。 */
+export interface HistorySummaryEngine {
+    /** 发送一次模型请求，并返回 Provider 中立的模型响应。 */
+    query(request: ModelRequest): Promise<ModelResponse>;
 }
 
 /**
