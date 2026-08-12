@@ -131,7 +131,7 @@ button {
 }
 
 .tap-turn-status.is-running,
-.tap-node-button.is-running .tap-node-status {
+.tap-node-button.is-current .tap-node-status {
   color: var(--ant-color-primary, #1677ff);
 }
 
@@ -196,11 +196,26 @@ button {
 }
 
 .tap-node-button.is-tool-node {
-  border-inline-start-color: var(--ant-color-border, #d9d9d9);
+  border-inline-start: 3px solid var(--ant-color-primary-border, #91caff);
+  background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.02));
+}
+
+.tap-node-button[data-tool-pair="start"] {
+  margin-block-end: -8px;
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+  border-block-end-color: transparent;
+}
+
+.tap-node-button[data-tool-pair="end"] {
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+  border-block-start-color: transparent;
 }
 
 .tap-detail-body,
 .tap-context-detail,
+.tap-model-detail,
 .tap-error-detail,
 .tap-compaction-detail,
 .tap-removed-groups {

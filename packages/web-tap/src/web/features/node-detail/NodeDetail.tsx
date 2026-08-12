@@ -16,8 +16,8 @@ const nodeRenderers: Record<TapNodeKind, NodeRenderer> = {
   context_before: renderContext,
   context_after: renderContext,
   context_trimmed: renderContextTrim,
-  model_request: (node) => <JsonCard title="request" value={node.detail} />,
-  model_response: (node) => <JsonCard title="response" value={node.detail} />,
+  model_request: renderModelRequest,
+  model_response: renderModelResponse,
   tool_call: renderFields,
   tool_result: renderFields,
   turn_end: renderFields,
@@ -65,6 +65,30 @@ function renderContext(node: TapNodeView): ReactNode {
       </Card>
     </div>
   );
+}
+
+function renderModelRequest(node: TapNodeView): ReactNode {
+  if (!isRecord(node.detail)) return <JsonCard title="模型请求数据" value={node.detail} />;
+  const messages = Array.isArray(node.detail.messages) ? node.detail.messages : [];
+  return (
+    <div className="tap-model-detail">
+      <FieldDescriptions data={node.detail} omitKeys={["messages"]} />
+      <Card className="tap-data-card" size="small" title="请求消息">
+        <MessageList messages={messages} />
+      </Card>
+    </div>
+  );
+}
+
+function renderModelResponse(node: TapNodeView): ReactNode {
+  if (!isRecord(node.detail)) return <JsonCard title="模型响应数据" value={node.detail} />;
+  return <FieldDescriptions data={{ model: readResponseModel(node), ...node.detail }} />;
+}
+
+function readResponseModel(node: TapNodeView): unknown {
+  const payload = node.rawEvents[0]?.payload;
+  if (!isRecord(payload) || !isRecord(payload.request)) return undefined;
+  return payload.request.model;
 }
 
 function renderContextTrim(node: TapNodeView): ReactNode {

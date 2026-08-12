@@ -1,5 +1,5 @@
 import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TapApp } from "../../src/web/app/TapApp.js";
 import { createTapStore } from "../../src/web/store/tap-store.js";
@@ -19,13 +19,14 @@ afterEach(cleanup);
 
 describe("TapApp", () => {
   it("renders three Turns without Session navigation or breadcrumbs", () => {
-    renderFixture();
+    const { container } = renderFixture();
 
     expect(screen.getByRole("button", { name: /^第 1 轮/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /^第 2 轮/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /^第 3 轮/ })).toBeVisible();
     expect(screen.queryByText("Session 列表")).not.toBeInTheDocument();
-    expect(screen.queryByText("/", { exact: true })).not.toBeInTheDocument();
+    expect(container.querySelector(".ant-breadcrumb, [aria-label*='breadcrumb' i]")).toBeNull();
+    expect(container.querySelector("input, textarea, [contenteditable='true']")).toBeNull();
   });
 
   it("switches Turn and groups its nodes by Step", () => {
@@ -38,15 +39,85 @@ describe("TapApp", () => {
     expect(screen.getByRole("heading", { name: "Step 2" })).toBeVisible();
   });
 
-  it("selects the model request and renders its request JSON", () => {
+  it("marks every non-error node completed after its Turn ends", () => {
+    renderFixture();
+    fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
+
+    const navigation = screen.getByRole("complementary", { name: "第 2 轮节点" });
+    expect(within(navigation).queryByText("进行中")).not.toBeInTheDocument();
+    expect(within(navigation).queryByText("当前")).not.toBeInTheDocument();
+    expect(within(navigation).getAllByText("已完成")).toHaveLength(12);
+  });
+
+  it("renders model request fields and role-grouped messages semantically", () => {
     renderFixture();
     fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
 
     fireEvent.click(screen.getAllByRole("button", { name: /模型请求/ })[0]!);
 
     expect(screen.getByRole("heading", { name: "模型请求" })).toBeVisible();
-    expect(screen.getByText("request")).toBeVisible();
-    expect(screen.getByText(/"model": "fixture-model"/)).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "模型" })).toBeVisible();
+    expect(screen.getByRole("cell", { name: "fixture-model" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /System 消息/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /User 消息/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Assistant 消息/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Tool 消息/ })).toBeVisible();
+    expect(screen.getByText("原始 JSON")).toBeVisible();
+  });
+
+  it("renders model response stop reason and usage semantically", () => {
+    renderFixture();
+    fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
+
+    fireEvent.click(screen.getAllByRole("button", { name: /模型响应/ })[0]!);
+
+    expect(screen.getByRole("row", { name: "模型 fixture-model" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "停止原因" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "用量" })).toBeVisible();
+    expect(screen.getByRole("row", { name: "停止原因 tool_use" })).toBeVisible();
+    expect(screen.getByText("原始 JSON")).toBeVisible();
+  });
+
+  it("visually pairs Tool Call and Result with the same toolCallId", () => {
+    renderFixture();
+    fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
+
+    const call = screen.getByRole("button", { name: /Tool 调用/ });
+    const result = screen.getByRole("button", { name: /Tool 结果/ });
+    expect(call).toHaveAttribute("data-tool-call-id", "call-weather");
+    expect(result).toHaveAttribute("data-tool-call-id", "call-weather");
+    expect(call).toHaveAttribute("data-tool-pair", "start");
+    expect(result).toHaveAttribute("data-tool-pair", "end");
+  });
+
+  it("falls back to raw JSON for an unknown node", () => {
+    renderFixture();
+    fireEvent.click(screen.getByRole("button", { name: /^第 1 轮/ }));
+    fireEvent.click(screen.getByRole("button", { name: /未知事件/ }));
+
+    expect(screen.getByRole("heading", { name: "未知事件" })).toBeVisible();
+    expect(screen.getByText("未知节点数据")).toBeVisible();
+    expect(screen.getByText(/"traceMarker": "unknown-fixture"/)).toBeVisible();
+  });
+
+  it("subscribes to later Store updates and marks the latest active node current", () => {
+    const { store } = renderFixture();
+
+    act(() => {
+      store.getState().appendEvent({
+        id: "turn-4-start",
+        sessionId: "session-fixture",
+        turnId: "turn-4",
+        sequence: 99,
+        timestamp: "2026-08-12T00:01:39.000Z",
+        type: "turn.start",
+        payload: { input: "第四轮：实时追加" },
+      });
+    });
+
+    expect(screen.getByRole("button", { name: /^第 4 轮/ })).toBeVisible();
+    const navigation = screen.getByRole("complementary", { name: "第 4 轮节点" });
+    expect(within(navigation).getByText("当前")).toBeVisible();
   });
 
   it("renders context trim counts and removed messages, then copies raw events", async () => {
@@ -85,7 +156,7 @@ describe("TapApp", () => {
 function renderFixture(events = fixtureEvents()) {
   const store = createTapStore();
   store.getState().replaceHistory(events);
-  return render(<TapApp store={store} />);
+  return { store, ...render(<TapApp store={store} />) };
 }
 
 function fixtureEvents(): RuntimeEvent[] {
@@ -108,7 +179,12 @@ function fixtureEvents(): RuntimeEvent[] {
   });
   const request = {
     model: "fixture-model",
-    messages: [{ role: "user", content: "帮我查天气" }],
+    messages: [
+      { role: "system", content: "你是天气助手" },
+      { role: "user", content: "帮我查天气" },
+      { role: "assistant", toolCalls: [{ id: "call-weather", name: "weather", input: { city: "上海" } }] },
+      { role: "tool", toolCallId: "call-weather", content: "晴" },
+    ],
     tools: [{ name: "weather" }],
   };
   const response = {
@@ -129,6 +205,10 @@ function fixtureEvents(): RuntimeEvent[] {
     event("turn-1-start", "turn.start", "turn-1", { input: "第一轮：你好" }),
     event("turn-1-model", "model.response", "turn-1", { request, response }, 1),
     event("turn-1-end", "turn.end", "turn-1", { answer: "你好" }, 1),
+    {
+      ...event("turn-1-unknown", "turn.end", "turn-1", { traceMarker: "unknown-fixture" }, 1),
+      type: "custom.trace",
+    } as unknown as RuntimeEvent,
 
     event("turn-2-start", "turn.start", "turn-2", { input: "第二轮：帮我查询上海天气" }),
     event("turn-2-before-1", "context.before", "turn-2", context([]), 1),
@@ -138,6 +218,7 @@ function fixtureEvents(): RuntimeEvent[] {
       response: {
         type: "tool_use",
         toolCalls: [{ id: "call-weather", name: "weather", input: { city: "上海" } }],
+        usage: { inputTokens: 12, outputTokens: 4 },
         stopReason: "tool_use",
       },
     }, 1),
