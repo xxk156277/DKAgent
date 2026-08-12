@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../../../", import.meta.url);
@@ -17,4 +17,11 @@ test("根包声明 agent 与 web-tap workspaces", async () => {
   assert.equal(tap.name, "@dkagent/web-tap");
   assert.equal(tap.dependencies["@dkagent/agent"], "*");
   assert.equal(agent.dependencies?.["@dkagent/web-tap"], undefined);
+});
+
+test("业务源码和测试已完全迁入两个 workspace", async () => {
+  await assert.rejects(access(new URL("src", root)));
+  await assert.rejects(access(new URL("test", root)));
+  await access(new URL("packages/agent/src/index.ts", root));
+  await access(new URL("packages/web-tap/src/observe.ts", root));
 });
