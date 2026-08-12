@@ -1,17 +1,20 @@
 import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
-import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { createElement } from "react";
+import { describe, expect, it, vi } from "vitest";
 import { connectEventFeed } from "../../src/web/api/event-feed.js";
-import { createTapStore, selectNodes, selectSessions, selectTurns } from "../../src/web/store/tap-store.js";
+import { createTapStore, selectNodes, selectSessions, selectTurns, useTapStore } from "../../src/web/store/tap-store.js";
 
 function event(
   id: string,
   turnId: string,
   sequence: number,
   type: RuntimeEvent["type"] = "turn.start",
+  sessionId = "session-1",
 ): RuntimeEvent {
   return {
     id,
-    sessionId: "session-1",
+    sessionId,
     turnId,
     sequence,
     timestamp: `2026-08-12T00:00:0${sequence}.000Z`,
@@ -46,8 +49,17 @@ class FakeEventSource {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => { resolve = next; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
+    resolve = next;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+function SessionSubscriber() {
+  const sessions = useTapStore(selectSessions);
+  return createElement("output", undefined, sessions.length);
 }
 
 describe("createTapStore", () => {
@@ -96,6 +108,22 @@ describe("createTapStore", () => {
     });
   });
 
+  it("selects the session and node from the globally newest interleaved event", () => {
+    const store = createTapStore();
+
+    store.getState().replaceHistory([
+      event("a-first", "turn-a-first", 1, "turn.start", "session-a"),
+      event("b-first", "turn-b", 2, "turn.start", "session-b"),
+      event("a-latest", "turn-a-latest", 3, "turn.end", "session-a"),
+    ]);
+
+    expect(store.getState()).toMatchObject({
+      selectedSessionId: "session-a",
+      selectedTurnId: "turn-a-latest",
+      selectedNodeId: "turn-a-latest:1:turn_end:a-latest",
+    });
+  });
+
   it("deduplicates an event received from both history and SSE", () => {
     const store = createTapStore();
     const duplicated = event("duplicated", "turn-1", 1);
@@ -124,6 +152,26 @@ describe("createTapStore", () => {
     expect(selectSessions(state).map((session) => session.id)).toEqual(["session-1"]);
     expect(selectTurns(state).map((turn) => turn.id)).toEqual(["turn-1"]);
     expect(selectNodes(state).map((node) => node.id)).toEqual(["turn-1:1:turn_start:first"]);
+  });
+
+  it("returns stable projection references for the same events snapshot", () => {
+    const store = createTapStore();
+    store.getState().replaceHistory([event("first", "turn-1", 1)]);
+    const state = store.getState();
+
+    expect(selectSessions(state)).toBe(selectSessions(state));
+    expect(selectTurns(state)).toBe(selectTurns(state));
+    expect(selectNodes(state)).toBe(selectNodes(state));
+  });
+
+  it("does not warn when a component subscribes to projected sessions", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(createElement(SessionSubscriber));
+
+    expect(screen.getByRole("status").textContent).toBe("0");
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("getSnapshot");
+    consoleError.mockRestore();
   });
 
   it("merges history with events received during the history request", async () => {
@@ -171,5 +219,79 @@ describe("createTapStore", () => {
 
     expect(source.closed).toBe(true);
     expect(store.getState().events).toEqual([]);
+  });
+
+  it("ignores an older history response after a newer SSE open request", async () => {
+    const store = createTapStore();
+    const firstHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const secondHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const fetch = vi.fn()
+      .mockReturnValueOnce(firstHistory.promise)
+      .mockReturnValueOnce(secondHistory.promise);
+
+    connectEventFeed(store, { fetch, EventSource: FakeEventSource });
+    FakeEventSource.latest!.open();
+    secondHistory.resolve({ json: async () => [event("newer", "turn-newer", 2)] });
+    await Promise.resolve();
+    await Promise.resolve();
+    firstHistory.resolve({ json: async () => [event("older", "turn-older", 1)] });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.getState().events.map((item) => item.id)).toEqual(["newer"]);
+  });
+
+  it("ignores an older history rejection after the feed has started reconnecting", async () => {
+    const store = createTapStore();
+    const firstHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const secondHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const fetch = vi.fn()
+      .mockReturnValueOnce(firstHistory.promise)
+      .mockReturnValueOnce(secondHistory.promise);
+
+    connectEventFeed(store, { fetch, EventSource: FakeEventSource });
+    const source = FakeEventSource.latest!;
+    source.open();
+    source.onerror?.(new Event("error"));
+    firstHistory.reject(new Error("stale history"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.getState().connectionStatus).toBe("reconnecting");
+  });
+
+  it("ignores an older connection rejection after a newer connection is live", async () => {
+    const store = createTapStore();
+    const oldHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const newHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const refreshedHistory = deferred<{ json(): Promise<RuntimeEvent[]> }>();
+    const fetch = vi.fn()
+      .mockReturnValueOnce(oldHistory.promise)
+      .mockReturnValueOnce(newHistory.promise)
+      .mockReturnValueOnce(refreshedHistory.promise);
+
+    const closeOld = connectEventFeed(store, { fetch, EventSource: FakeEventSource });
+    const closeNew = connectEventFeed(store, { fetch, EventSource: FakeEventSource });
+    FakeEventSource.latest!.open();
+    oldHistory.reject(new Error("old connection"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.getState().connectionStatus).toBe("live");
+    closeOld();
+    closeNew();
+  });
+
+  it("does not change status or fetch when a closed feed receives a late open", () => {
+    const store = createTapStore();
+    const fetch = vi.fn(() => deferred<{ json(): Promise<RuntimeEvent[]> }>().promise);
+    const cleanup = connectEventFeed(store, { fetch, EventSource: FakeEventSource });
+    const source = FakeEventSource.latest!;
+
+    cleanup();
+    source.open();
+
+    expect(store.getState().connectionStatus).toBe("connecting");
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

@@ -3,6 +3,12 @@ import type { RuntimeEvent } from "@dkagent/agent/runtime-events";
 import { createStore } from "zustand/vanilla";
 import { mergeViewerEvents } from "../../tap/viewer-state.js";
 import { projectEvents } from "../model/project-events.js";
+import type { TapNodeView, TapSessionView, TapTurnView } from "../model/types.js";
+
+const sessionProjectionCache = new WeakMap<RuntimeEvent[], TapSessionView[]>();
+const nodeProjectionCache = new WeakMap<TapTurnView, TapNodeView[]>();
+const emptyTurns: TapTurnView[] = [];
+const emptyNodes: TapNodeView[] = [];
 
 export interface TapState {
   events: RuntimeEvent[];
@@ -57,19 +63,27 @@ export function useTapStore<T>(selector: (state: TapState) => T): T {
 
 /** 从原始事件即时投影 Session，避免在 Store 中维护镜像数据。 */
 export function selectSessions(state: TapState) {
-  return projectEvents(state.events);
+  const cached = sessionProjectionCache.get(state.events);
+  if (cached) return cached;
+  const sessions = projectEvents(state.events);
+  sessionProjectionCache.set(state.events, sessions);
+  return sessions;
 }
 
 /** 仅返回当前 Session 的 Turn 列表。 */
 export function selectTurns(state: TapState) {
-  return selectSessions(state).find((session) => session.id === state.selectedSessionId)?.turns ?? [];
+  return selectSessions(state).find((session) => session.id === state.selectedSessionId)?.turns ?? emptyTurns;
 }
 
 /** 仅返回当前 Turn 的扁平 Node 列表。 */
 export function selectNodes(state: TapState) {
-  return selectTurns(state)
-    .find((turn) => turn.id === state.selectedTurnId)?.steps
-    .flatMap((step) => step.nodes) ?? [];
+  const turn = selectTurns(state).find((item) => item.id === state.selectedTurnId);
+  if (!turn) return emptyNodes;
+  const cached = nodeProjectionCache.get(turn);
+  if (cached) return cached;
+  const nodes = turn.steps.flatMap((step) => step.nodes);
+  nodeProjectionCache.set(turn, nodes);
+  return nodes;
 }
 
 function updateEvents(
@@ -83,17 +97,38 @@ function updateEvents(
 }
 
 function findLatestSelection(events: RuntimeEvent[]): Pick<TapState, "selectedSessionId" | "selectedTurnId" | "selectedNodeId"> | undefined {
+  const latestEvent = findLatestRuntimeEvent(events);
+  if (!latestEvent) return undefined;
   const sessions = projectEvents(events);
-  const session = sessions.at(-1);
-  const turn = session?.turns.at(-1);
-  const step = turn?.steps.at(-1);
-  const node = step?.nodes.at(-1);
+  const session = sessions.find((item) => item.id === latestEvent.sessionId);
+  const turn = session?.turns.find((item) => item.id === latestEvent.turnId);
+  const node = turn?.steps
+    .flatMap((step) => step.nodes)
+    .filter((item) => item.eventIds.includes(latestEvent.id))
+    .at(-1) ?? turn?.steps.at(-1)?.nodes.at(-1);
   if (!session || !turn || !node) return undefined;
   return {
     selectedSessionId: session.id,
     selectedTurnId: turn.id,
     selectedNodeId: node.id,
   };
+}
+
+/** 按全局时间、sequence 与原始输入顺序确定最后活动的 Runtime Event。 */
+function findLatestRuntimeEvent(events: RuntimeEvent[]): RuntimeEvent | undefined {
+  return events.reduce<RuntimeEvent | undefined>((latest, event) => {
+    if (!latest) return event;
+    const timestampDifference = parseEventTimestamp(event.timestamp) - parseEventTimestamp(latest.timestamp);
+    if (timestampDifference !== 0) return timestampDifference > 0 ? event : latest;
+    if (event.sequence !== latest.sequence) return event.sequence > latest.sequence ? event : latest;
+    // 相同排序键时，reduce 中靠后的事件是稳定的最终 tie-breaker。
+    return event;
+  }, undefined);
+}
+
+function parseEventTimestamp(value: string): number {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
 }
 
 function findTurnSelection(events: RuntimeEvent[], turnId: string): Pick<TapState, "selectedSessionId" | "selectedTurnId" | "selectedNodeId"> | undefined {

@@ -11,6 +11,7 @@ interface EventSourceLike {
 
 type EventSourceConstructor = new (url: string) => EventSourceLike;
 type FetchEvents = (url: string) => Promise<{ json(): Promise<RuntimeEvent[]> }>;
+const connectionEpochs = new WeakMap<StoreApi<TapState>, number>();
 
 export interface EventFeedOptions {
   fetch?: FetchEvents;
@@ -24,30 +25,40 @@ export function connectEventFeed(
 ): () => void {
   const fetchEvents = options.fetch ?? ((url: string) => globalThis.fetch(url));
   const EventSourceImpl = options.EventSource ?? globalThis.EventSource as unknown as EventSourceConstructor;
+  const connectionEpoch = (connectionEpochs.get(store) ?? 0) + 1;
+  connectionEpochs.set(store, connectionEpoch);
   if (!EventSourceImpl) {
     store.getState().setConnectionStatus("error");
     return () => {};
   }
 
   let active = true;
+  let requestEpoch = 0;
+  const isCurrentConnection = () => active && connectionEpochs.get(store) === connectionEpoch;
   const loadHistory = async (): Promise<void> => {
+    const currentRequest = ++requestEpoch;
     try {
       const response = await fetchEvents("/api/events");
       const events = await response.json();
-      if (active) store.getState().replaceHistory(events);
+      if (isCurrentConnection() && currentRequest === requestEpoch) {
+        store.getState().replaceHistory(events);
+      }
     } catch {
-      if (active) store.getState().setConnectionStatus("error");
+      if (isCurrentConnection() && currentRequest === requestEpoch) {
+        store.getState().setConnectionStatus("error");
+      }
     }
   };
 
   store.getState().setConnectionStatus("connecting");
   const source = new EventSourceImpl("/api/events/stream");
   source.onopen = () => {
+    if (!isCurrentConnection()) return;
     store.getState().setConnectionStatus("live");
     void loadHistory();
   };
   source.onmessage = (message) => {
-    if (!active) return;
+    if (!isCurrentConnection()) return;
     try {
       store.getState().appendEvent(JSON.parse(message.data) as RuntimeEvent);
     } catch {
@@ -55,7 +66,7 @@ export function connectEventFeed(
     }
   };
   source.onerror = () => {
-    if (active) store.getState().setConnectionStatus("reconnecting");
+    if (isCurrentConnection()) store.getState().setConnectionStatus("reconnecting");
   };
 
   // 初次连接也补读持久化历史。
@@ -63,6 +74,9 @@ export function connectEventFeed(
 
   return () => {
     active = false;
+    if (connectionEpochs.get(store) === connectionEpoch) {
+      connectionEpochs.set(store, connectionEpoch + 1);
+    }
     source.close();
   };
 }
