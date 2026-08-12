@@ -39,7 +39,8 @@ test("根测试覆盖布局回归且 web-tap 不隐式依赖 dotenv", async () =
   );
 
   assert.match(agent.scripts.test, /monorepo-layout\.test\.ts/);
-  assert.deepEqual(tap.dependencies, { "@dkagent/agent": "*" });
+  // Tap 可以拥有自己的前端依赖，但不能通过 dotenv 隐式读取 Agent 配置。
+  assert.equal(tap.dependencies?.dotenv, undefined);
   assert.doesNotMatch(observeSource, /dotenv/);
   assert.match(cliSource, /dotenv\/config/);
 });

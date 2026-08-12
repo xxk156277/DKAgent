@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "test": "npm run test:node && npm run test:web -- --run",
-    "test:node": "cd ../.. && tsx --test packages/web-tap/test/*.test.ts",
+    "test:node": "npm run build && cd ../.. && tsx --test packages/web-tap/test/*.test.ts",
     "test:web": "vitest",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit"
   },

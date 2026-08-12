@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, request as httpRequest } from "node:http";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -90,6 +90,22 @@ test("拒绝目录穿越且缺失资源不回退到首页", async (t) => {
   assert.equal(await statusFor("/../package.json"), 404);
   assert.equal(await statusFor("/%2e%2e/package.json"), 404);
   assert.equal((await fetch(`${server.url}assets/missing.js`)).status, 404);
+});
+
+test("拒绝 webRoot 内指向外部文件的符号链接", {
+  skip: process.platform === "win32" ? "Windows 创建符号链接通常需要额外权限" : false,
+}, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "dkagent-tap-server-"));
+  const webRoot = await createWebRoot(directory);
+  const outsideFile = join(directory, "outside.txt");
+  await writeFile(outsideFile, "repository secret", "utf8");
+  await symlink(outsideFile, join(webRoot, "assets", "outside.txt"));
+
+  const recorder = new TapRecorder(join(directory, "trace.jsonl"));
+  const server = await startTapServer({ recorder, webRoot, port: 0 });
+  t.after(() => server.close());
+
+  assert.equal((await fetch(`${server.url}assets/outside.txt`)).status, 404);
 });
 
 test("仅监听 loopback 地址", async () => {
