@@ -1,11 +1,18 @@
 import { Collapse, Descriptions, Empty, Layout, Typography } from "antd";
+import { useEffect } from "react";
+import { connectEventFeed } from "../api/event-feed.js";
+import { tapStore, useTapStore } from "../store/tap-store.js";
 
 const { Content, Sider } = Layout;
 
 /**
- * TAP 的静态三栏入口；事件加载与交互状态由后续任务接入。
+ * TAP 三栏入口；生命周期仅在顶层建立一次事件连接。
  */
 export function TapApp() {
+  const connectionStatus = useTapStore((state) => state.connectionStatus);
+
+  useEffect(() => connectEventFeed(tapStore), []);
+
   return (
     <Layout className="tap-app">
       <Sider className="tap-sidebar" theme="light" width={280}>
@@ -13,6 +20,9 @@ export function TapApp() {
           <Typography.Title id="turn-list-heading" level={2}>
             对话轮次
           </Typography.Title>
+          <Typography.Text aria-live="polite" type="secondary">
+            连接状态：{connectionStatus}
+          </Typography.Text>
           <Empty description="暂无对话轮次" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         </aside>
       </Sider>
