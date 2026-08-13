@@ -1,7 +1,7 @@
 import CheckCircleFilled from "@ant-design/icons/CheckCircleFilled";
 import ClockCircleFilled from "@ant-design/icons/ClockCircleFilled";
 import CloseCircleFilled from "@ant-design/icons/CloseCircleFilled";
-import { Empty, Typography } from "antd";
+import { Collapse, Empty, Typography } from "antd";
 import type { ReactNode } from "react";
 import type { TapNodeView, TapTurnView } from "../../model/types.js";
 
@@ -32,10 +32,14 @@ export function NodeNav({ turn, turnIndex, selectedNodeId, onSelect }: NodeNavPr
         <Typography.Title id="node-navigation-heading" level={2}>{heading}</Typography.Title>
       </header>
       {turn ? (
-        <div className="tap-step-list">
-          {turn.steps.map((step) => (
-            <section className="tap-step" key={step.step} aria-labelledby={`step-${turn.id}-${step.step}`}>
-              <Typography.Title id={`step-${turn.id}-${step.step}`} level={3}>Step {step.step}</Typography.Title>
+        <Collapse
+          key={turn.id}
+          className="tap-step-collapse"
+          defaultActiveKey={turn.steps.map((step) => String(step.step))}
+          items={turn.steps.map((step) => ({
+            key: String(step.step),
+            label: `Step ${step.step}`,
+            children: (
               <div className="tap-node-list">
                 {step.nodes.map((node) => (
                   <NodeButton
@@ -48,9 +52,9 @@ export function NodeNav({ turn, turnIndex, selectedNodeId, onSelect }: NodeNavPr
                   />
                 ))}
               </div>
-            </section>
-          ))}
-        </div>
+            ),
+          }))}
+        />
       ) : (
         <Empty description="暂无可导航节点" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       )}

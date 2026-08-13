@@ -19,12 +19,14 @@ button {
 
 #root,
 .tap-app-shell {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
 }
 
 .tap-app-shell {
   display: flex;
   align-items: stretch;
+  overflow: hidden;
   background: var(--ant-color-bg-layout, #f5f5f5);
 }
 
@@ -45,13 +47,34 @@ button {
 
 .tap-turn-region {
   flex: 0 0 240px;
+  overflow-y: auto;
   border-inline-end: 1px solid var(--ant-color-border-secondary, #f0f0f0);
 }
 
 .tap-detail-region {
   flex: 1 1 auto;
   min-width: 0;
+  overflow-y: auto;
   background: var(--ant-color-bg-layout, #f5f5f5);
+  scrollbar-width: thin;
+  scrollbar-color: var(--ant-color-border-secondary, #d9d9d9) transparent;
+}
+
+.tap-detail-region::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tap-detail-region::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tap-detail-region::-webkit-scrollbar-thumb {
+  background: var(--ant-color-border, #d9d9d9);
+  border-radius: 999px;
+}
+
+.tap-detail-region::-webkit-scrollbar-thumb:hover {
+  background: var(--ant-color-text-quaternary, #bfbfbf);
 }
 
 .tap-node-detail {
@@ -60,7 +83,8 @@ button {
 }
 
 .tap-node-region {
-  flex: 0 0 280px;
+  flex: 0 0 350px;
+  overflow-y: auto;
   border-inline-end: 1px solid var(--ant-color-border-secondary, #f0f0f0);
 }
 
@@ -139,13 +163,21 @@ button {
   color: var(--ant-color-error, #ff4d4f);
 }
 
-.tap-step + .tap-step {
-  margin-top: 24px;
+.tap-step-collapse.ant-collapse {
+  background: transparent;
+  border: 0;
 }
 
-.tap-step .ant-typography {
-  margin-block: 0 8px;
-  font-size: 14px;
+.tap-step-collapse.ant-collapse > .ant-collapse-item {
+  border-block-end: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}
+
+.tap-step-collapse .ant-collapse-header {
+  font-weight: 600;
+}
+
+.tap-step-collapse .ant-collapse-content-box {
+  padding: 0;
 }
 
 .tap-node-list {
@@ -263,17 +295,25 @@ button {
 }
 
 @media (max-width: 959px) {
+  #root,
+  .tap-app-shell {
+    height: auto;
+  }
+
   .tap-app-shell {
     flex-wrap: wrap;
+    overflow: visible;
   }
 
   .tap-detail-region {
     flex: 0 0 calc(100% - 240px);
+    overflow-y: visible;
   }
 
   .tap-node-region {
     order: 3;
     flex-basis: 100%;
+    overflow-y: visible;
     border-block-start: 1px solid var(--ant-color-border-secondary, #f0f0f0);
     border-inline-end: 0;
     border-inline-start: 0;

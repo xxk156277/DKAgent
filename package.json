@@ -6,6 +6,7 @@
   "scripts": {
     "agent": "npm run agent -w @dkagent/agent",
     "observe": "npm run observe -w @dkagent/web-tap",
+    "dev": "npm run dev -w @dkagent/web-tap",
     "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test:phase1": "npm run test:phase1 -w @dkagent/agent",
