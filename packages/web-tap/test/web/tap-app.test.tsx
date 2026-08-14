@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { TraceEvent, TraceEventName, TracePhase } from "@dkagent/trace";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -55,10 +57,21 @@ describe("TapApp", () => {
     const insights = screen.getByRole("complementary", { name: "Agent 指标" });
     expect(insights).toHaveClass("is-collapsed");
     expect(within(insights).queryByText("输入 / 输出 Token")).not.toBeInTheDocument();
-    expect(within(insights).getByText("0")).toBeVisible();
     expect(within(insights).getByRole("button", { name: "展开 Agent 指标" })).toHaveAttribute("aria-expanded", "false");
     expect(store.getState().selectedTurnId).toBe(selectedTurnId);
     expect(store.getState().selectedNodeId).toBe(selectedNodeId);
+  });
+
+  it("keeps the collapsed Agent insights toggle within its 48px rail", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
+
+    expect(styles).toMatch(/\.tap-insights-rail\.is-collapsed\s*\{[^}]*flex-basis:\s*48px;/s);
+    expect(styles).toMatch(
+      /\.tap-insights-rail\.is-collapsed\s+\.tap-insights-header\s*\{[^}]*padding-inline:\s*6px;/s,
+    );
+    expect(styles).toMatch(
+      /\.tap-insights-rail\.is-collapsed\s+\.ant-btn\s*\{[^}]*min-inline-size:\s*32px;/s,
+    );
   });
 
   it("keeps Turn-level metrics unchanged when selecting another Node", () => {

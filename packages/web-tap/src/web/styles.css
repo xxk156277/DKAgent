@@ -242,6 +242,20 @@ button {
   overflow: hidden;
 }
 
+.tap-insights-rail.is-collapsed .tap-insights-header {
+  justify-content: center;
+  padding-inline: 6px;
+}
+
+.tap-insights-rail.is-collapsed .ant-badge {
+  display: none;
+}
+
+.tap-insights-rail.is-collapsed .ant-btn {
+  min-inline-size: 32px;
+  padding-inline: 0;
+}
+
 .tap-insights-header {
   display: flex;
   min-height: 52px;
