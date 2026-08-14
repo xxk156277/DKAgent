@@ -72,6 +72,43 @@ describe("analyzeAgentTurn", () => {
     expect(result.evaluations.find((item) => item.id === "answer_quality")?.status).toBe("unknown");
   });
 
+  it("aggregates main and summary model calls in the same Turn", () => {
+    const result = analyze([
+      traceEvent("event-1", "agent.turn", "start", { input: { input: "继续" } }, { spanId: "turn" }),
+      traceEvent("event-2", "context.summary.request", "start", { input: { model: "summary" } }, { spanId: "summary-1", parentSpanId: "turn" }),
+      traceEvent("event-3", "context.summary.response", "event", {
+        type: "text",
+        content: "摘要",
+        usage: { inputTokens: 30, outputTokens: 6 },
+      }, { spanId: "summary-1", parentSpanId: "turn" }),
+      traceEvent("event-4", "model.request", "start", { input: { model: "main" } }, { spanId: "model-1", parentSpanId: "turn", step: 1 }),
+      traceEvent("event-5", "model.response", "event", {
+        type: "text",
+        content: "完成",
+        usage: { inputTokens: 12, outputTokens: 4 },
+      }, { spanId: "model-1", parentSpanId: "turn", step: 1 }),
+      traceEvent("event-6", "agent.turn", "end", { output: { answer: "完成" } }, { spanId: "turn" }),
+    ]);
+
+    expect(result.metrics).toMatchObject({
+      modelCallCount: 2,
+      inputTokens: 42,
+      outputTokens: 10,
+    });
+    expect(result.evaluations.find((item) => item.id === "model_pairs")?.status).toBe("passed");
+  });
+
+  it("fails model call completeness when a completed Turn lacks a summary response", () => {
+    const result = analyze([
+      traceEvent("event-1", "agent.turn", "start", { input: { input: "继续" } }, { spanId: "turn" }),
+      traceEvent("event-2", "context.summary.request", "start", { input: { model: "summary" } }, { spanId: "summary-1", parentSpanId: "turn" }),
+      traceEvent("event-3", "agent.turn", "end", { output: { answer: "完成" } }, { spanId: "turn" }),
+    ]);
+
+    expect(result.metrics.modelCallCount).toBe(1);
+    expect(result.evaluations.find((item) => item.id === "model_pairs")?.status).toBe("failed");
+  });
+
   it("does not turn missing telemetry into zero or a passing quality result", () => {
     const result = analyze([
       traceEvent("event-1", "agent.turn", "start", { input: { input: "继续" } }, { spanId: "turn" }),

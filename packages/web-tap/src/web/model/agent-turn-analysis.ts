@@ -11,8 +11,10 @@ export function analyzeAgentTurn(turn: TapTurnView): AgentTurnAnalysis {
   const turnError = events.find((event) => event.name === "agent.turn" && event.phase === "error");
   const turnEnd = [...events].reverse().find((event) => event.name === "agent.turn" && event.phase === "end");
   const status = turnError ? "error" : turnEnd ? "completed" : "running";
-  const modelRequests = events.filter((event) => event.name === "model.request" && event.phase === "start");
-  const modelResponses = events.filter((event) => event.name === "model.response" && event.phase === "event");
+  const modelRequests = events.filter((event) =>
+    (event.name === "model.request" || event.name === "context.summary.request") && event.phase === "start");
+  const modelResponses = events.filter((event) =>
+    (event.name === "model.response" || event.name === "context.summary.response") && event.phase === "event");
   const toolCalls = events.filter((event) => event.name === "tool.call" && event.phase === "start");
   const toolResults = events.filter((event) => event.name === "tool.result" && event.phase === "event");
   const compactions = events.filter((event) => event.name === "context.compaction.completed" && event.phase === "event");
