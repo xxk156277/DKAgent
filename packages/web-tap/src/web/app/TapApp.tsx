@@ -1,10 +1,11 @@
 import { App as AntdApp, ConfigProvider } from "antd";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 import { connectEventFeed } from "../api/event-feed.js";
-import { AgentEvaluationPanel } from "../features/agent-metrics/AgentEvaluationPanel.js";
-import { AgentMetricsSummary } from "../features/agent-metrics/AgentMetricsSummary.js";
+import { AgentInsightsRail } from "../features/layout/AgentInsightsRail.js";
+import { TapHeader } from "../features/layout/TapHeader.js";
+import { TurnHeader } from "../features/layout/TurnHeader.js";
 import { NodeDetail } from "../features/node-detail/NodeDetail.js";
 import { NodeDetailBoundary } from "../features/node-detail/NodeDetailBoundary.js";
 import { NodeNav } from "../features/timeline/NodeNav.js";
@@ -28,7 +29,7 @@ const tapTheme = {
   },
 } as const;
 
-/** TAP 三栏入口；Store 可注入，事件连接仍只在顶层建立一次。 */
+/** TAP 工作区入口；Store 可注入，事件连接仍只在顶层建立一次。 */
 export function TapApp({ store = tapStore }: TapAppProps) {
   const turns = useStore(store, selectTurns);
   const nodes = useStore(store, selectNodes);
@@ -37,6 +38,7 @@ export function TapApp({ store = tapStore }: TapAppProps) {
   const selectedNodeId = useStore(store, (state) => state.selectedNodeId);
   const selectTurn = useStore(store, (state) => state.selectTurn);
   const selectNode = useStore(store, (state) => state.selectNode);
+  const [metricsCollapsed, setMetricsCollapsed] = useState(false);
 
   useEffect(() => connectEventFeed(store), [store]);
 
@@ -52,31 +54,41 @@ export function TapApp({ store = tapStore }: TapAppProps) {
     <ConfigProvider theme={tapTheme}>
       <AntdApp>
         <div className="tap-app-shell">
-          <TurnList
-            turns={turns}
-            selectedTurnId={selectedTurnId}
-            connectionStatus={connectionStatus}
-            onSelect={selectTurn}
-          />
-          <NodeNav
-            turn={selectedTurn}
-            turnIndex={selectedTurnIndex + 1}
-            selectedNodeId={selectedNodeId}
-            onSelect={selectNode}
-          />
-          <main className="tap-region tap-detail-region">
-            <div className="tap-detail-stack">
-              {turnAnalysis === undefined ? null : (
-                <>
-                  <AgentMetricsSummary metrics={turnAnalysis.metrics} />
-                  <AgentEvaluationPanel items={turnAnalysis.evaluations} />
-                </>
-              )}
-              <NodeDetailBoundary key={selectedNodeId ?? "empty"} node={selectedNode}>
-                <NodeDetail node={selectedNode} />
-              </NodeDetailBoundary>
-            </div>
-          </main>
+          <TapHeader connectionStatus={connectionStatus} />
+          <div className="tap-app-body">
+            <TurnList
+              turns={turns}
+              selectedTurnId={selectedTurnId}
+              connectionStatus={connectionStatus}
+              onSelect={selectTurn}
+            />
+            <section
+              className="tap-workspace"
+              aria-label={selectedTurn ? `第 ${selectedTurnIndex + 1} 轮工作区` : "当前 Turn 工作区"}
+            >
+              <TurnHeader turn={selectedTurn} turnIndex={selectedTurnIndex + 1} />
+              <div className="tap-workspace-content">
+                <section className="tap-execution-workspace" aria-label="执行过程">
+                  <NodeNav
+                    turn={selectedTurn}
+                    turnIndex={selectedTurnIndex + 1}
+                    selectedNodeId={selectedNodeId}
+                    onSelect={selectNode}
+                  />
+                  <main className="tap-region tap-detail-region">
+                    <NodeDetailBoundary key={selectedNodeId ?? "empty"} node={selectedNode}>
+                      <NodeDetail node={selectedNode} />
+                    </NodeDetailBoundary>
+                  </main>
+                </section>
+                <AgentInsightsRail
+                  analysis={turnAnalysis}
+                  collapsed={metricsCollapsed}
+                  onToggle={() => setMetricsCollapsed((value) => !value)}
+                />
+              </div>
+            </section>
+          </div>
         </div>
       </AntdApp>
     </ConfigProvider>

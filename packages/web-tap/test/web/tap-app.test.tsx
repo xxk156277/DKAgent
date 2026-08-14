@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import type { TraceEvent, TraceEventName, TracePhase } from "@dkagent/trace";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +5,17 @@ import { TapApp } from "../../src/web/app/TapApp.js";
 import { AgentEvaluationPanel } from "../../src/web/features/agent-metrics/AgentEvaluationPanel.js";
 import type { AgentEvaluationItem } from "../../src/web/model/types.js";
 import { createTapStore } from "../../src/web/store/tap-store.js";
+
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+Object.defineProperty(globalThis, "ResizeObserver", {
+  configurable: true,
+  value: ResizeObserverMock,
+});
 
 const clipboardWrite = vi.fn<() => Promise<void>>();
 
@@ -22,55 +31,44 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TapApp", () => {
-  it("lays out Turn, Node, and Detail as flexible regions in DOM order", () => {
-    renderFixture();
+  it("places execution and Agent insights as sibling regions for the selected Turn", () => {
+    renderFixture(agentMetricsFixture());
 
-    const complementaryRegions = screen.getAllByRole("complementary");
-    expect(complementaryRegions).toHaveLength(2);
-    const turnRegion = complementaryRegions[0]!;
-    const nodeRegion = complementaryRegions[1]!;
-    const detailRegion = screen.getByRole("main");
-    expect([turnRegion, nodeRegion, detailRegion].map((region) => region.className)).toEqual([
-      expect.stringContaining("tap-turn-region"),
-      expect.stringContaining("tap-node-region"),
-      expect.stringContaining("tap-detail-region"),
-    ]);
-    expect(turnRegion.compareDocumentPosition(nodeRegion)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(nodeRegion.compareDocumentPosition(detailRegion)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const workspace = screen.getByRole("region", { name: "第 1 轮工作区" });
+    const execution = within(workspace).getByRole("region", { name: "执行过程" });
+    const insights = within(workspace).getByRole("complementary", { name: "Agent 指标" });
+    const detail = within(execution).getByRole("main");
 
-    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
-    expect(styles).toMatch(/\.tap-app-shell\s*\{[^}]*display:\s*flex;/s);
-    expect(styles).toMatch(/\.tap-node-region\s*\{[^}]*flex:\s*0\s+0\s+350px;/s);
-    expect(styles).toMatch(/\.tap-detail-region\s*\{[^}]*flex:\s*1\s+1\s+auto;/s);
-    expect(styles).toMatch(/\.tap-detail-region\s*\{[^}]*min-width:\s*0;/s);
+    expect(execution.parentElement).toBe(insights.parentElement);
+    expect(execution).toContainElement(detail);
+    expect(insights).not.toContainElement(detail);
+    expect(within(workspace).getByText("Agent 指标汇总当前 Turn，不随 Node 切换")).toBeVisible();
   });
 
-  it("keeps Flex wrapping and visual order responsive at each breakpoint", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
-    const tabletStyles = getMediaBlock(styles, 959);
-    const mobileStyles = getMediaBlock(styles, 639);
+  it("collapses Agent insights without changing the selected Turn or Node", () => {
+    const { store } = renderFixture(agentMetricsFixture());
+    const selectedTurnId = store.getState().selectedTurnId;
+    const selectedNodeId = store.getState().selectedNodeId;
 
-    expect(tabletStyles).toMatch(/\.tap-app-shell\s*\{[^}]*flex-wrap:\s*wrap;/s);
-    expect(tabletStyles).toMatch(/\.tap-detail-region\s*\{[^}]*flex:\s*0\s+0\s+calc\(100%\s*-\s*240px\);/s);
-    expect(tabletStyles).toMatch(/\.tap-node-region\s*\{[^}]*order:\s*3;/s);
-    expect(tabletStyles).toMatch(/\.tap-node-region\s*\{[^}]*flex-basis:\s*100%;/s);
-    expect(mobileStyles).toMatch(
-      /\.tap-turn-region,\s*\.tap-node-region,\s*\.tap-detail-region\s*\{[^}]*flex:\s*0\s+0\s+100%;/s,
-    );
-    expect(mobileStyles).toMatch(/\.tap-node-region\s*\{[^}]*order:\s*0;/s);
+    fireEvent.click(screen.getByRole("button", { name: "收起 Agent 指标" }));
+
+    const insights = screen.getByRole("complementary", { name: "Agent 指标" });
+    expect(insights).toHaveClass("is-collapsed");
+    expect(within(insights).queryByText("输入 / 输出 Token")).not.toBeInTheDocument();
+    expect(within(insights).getByText("0")).toBeVisible();
+    expect(within(insights).getByRole("button", { name: "展开 Agent 指标" })).toHaveAttribute("aria-expanded", "false");
+    expect(store.getState().selectedTurnId).toBe(selectedTurnId);
+    expect(store.getState().selectedNodeId).toBe(selectedNodeId);
   });
 
-  it("uses one desktop divider and clears obsolete dividers when wrapping", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
-    const desktopStyles = styles.slice(0, styles.indexOf("@media"));
-    const tabletStyles = getMediaBlock(styles, 959);
-    const mobileStyles = getMediaBlock(styles, 639);
+  it("keeps Turn-level metrics unchanged when selecting another Node", () => {
+    renderFixture(agentMetricsFixture());
+    const insights = screen.getByRole("complementary", { name: "Agent 指标" });
+    const tokenText = within(insights).getByText("12 / 4").textContent;
 
-    expect(desktopStyles).toMatch(/\.tap-node-region\s*\{[^}]*border-inline-end:\s*1px\s+solid/s);
-    expect(desktopStyles).not.toMatch(/\.tap-node-region\s*\{[^}]*border-inline-start:/s);
-    expect(tabletStyles).toMatch(/\.tap-node-region\s*\{[^}]*border-inline-end:\s*0;/s);
-    expect(mobileStyles).toMatch(/\.tap-turn-region\s*\{[^}]*border-inline-end:\s*0;/s);
-    expect(mobileStyles).toMatch(/\.tap-node-region\s*\{[^}]*border-block-start:\s*0;/s);
+    fireEvent.click(screen.getByRole("button", { name: /模型响应/ }));
+
+    expect(within(insights).getByText("12 / 4")).toHaveTextContent(tokenText ?? "");
   });
 
   it("renders three Turns without Session navigation or breadcrumbs", () => {
