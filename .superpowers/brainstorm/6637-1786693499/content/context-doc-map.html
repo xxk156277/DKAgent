@@ -1,0 +1,68 @@
+<h2>两份文档与共享图集</h2>
+<p class="subtitle">目标：学习文档讲清“当前怎么工作”，生产文档只讲“风险、指标、演进”，不重复解释源码。</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">context-learning.md</div>
+    <div class="mockup-body">
+      <div class="label">学习理解</div>
+      <ol>
+        <li>模块定位与边界</li>
+        <li>核心对象与职责</li>
+        <li>Token 预算关系</li>
+        <li>消息分组与必留规则</li>
+        <li>80%/60% 压缩流程</li>
+        <li>增量摘要与失败兜底</li>
+        <li>主调用链与代码导航</li>
+        <li>当前能力边界</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">context-production-review.md</div>
+    <div class="mockup-body">
+      <div class="label">生产评审</div>
+      <ol>
+        <li>评审结论与成熟度</li>
+        <li>质量指标与 SLO</li>
+        <li>生产风险矩阵</li>
+        <li>故障与降级策略</li>
+        <li>安全、并发、持久化问题</li>
+        <li>P0/P1/P2 演进路线</li>
+        <li>上线检查清单</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>context-diagrams.drawio：8 个页面</h3>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+    <div class="placeholder">01<br>系统边界图</div>
+    <div class="placeholder">02<br>模块架构图</div>
+    <div class="placeholder">03<br>Token 预算关系图</div>
+    <div class="placeholder">04<br>Context 构建流程图</div>
+    <div class="placeholder">05<br>数据流图</div>
+    <div class="placeholder">06<br>压缩时序图</div>
+    <div class="placeholder">07<br>状态与降级图</div>
+    <div class="placeholder">08<br>生产差距与演进图</div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>避免重复</h4>
+    <ul>
+      <li>生产文档引用学习文档的模块事实，不重复解释类和方法。</li>
+      <li>两份文档复用系统边界图，生产专属内容集中在页面 07–08。</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>明确不写</h4>
+    <ul>
+      <li>不逐行解释源码。</li>
+      <li>不把未来 Memory、RAG 当成当前 Context 已实现能力。</li>
+    </ul>
+  </div>
+</div>

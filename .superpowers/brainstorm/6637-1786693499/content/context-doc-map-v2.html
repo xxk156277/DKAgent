@@ -1,0 +1,43 @@
+<h2>精简版：两份短文档 + 四张核心图</h2>
+<p class="subtitle">每个章节只解决一个问题，读者 15–20 分钟可完成阅读。</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">学习理解文档</div>
+    <div class="mockup-body">
+      <ol>
+        <li><strong>模块是什么</strong><br>定位、输入输出、与 AgentLoop 的边界</li>
+        <li><strong>核心组件</strong><br>Manager、Grouper、Counter、Compressor</li>
+        <li><strong>一次请求怎么走</strong><br>预算、分组、80%/60%、摘要、兜底</li>
+        <li><strong>当前做到哪里</strong><br>已实现能力与明确未实现项</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">生产评审文档</div>
+    <div class="mockup-body">
+      <ol>
+        <li><strong>评审结论</strong><br>当前成熟度与可用范围</li>
+        <li><strong>关键问题</strong><br>只保留最重要的 6 类风险</li>
+        <li><strong>解决方案</strong><br>问题、影响、方案一一对应</li>
+        <li><strong>演进顺序</strong><br>P0 / P1 / 暂不做</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>共享 Draw.io：4 个页面</h3>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+    <div class="placeholder"><strong>01 架构图</strong><br>系统边界 + 组件关系</div>
+    <div class="placeholder"><strong>02 数据流图</strong><br>消息、摘要、Token 快照</div>
+    <div class="placeholder"><strong>03 时序/流程图</strong><br>80% 触发、60% 目标、失败兜底</div>
+    <div class="placeholder"><strong>04 生产评审图</strong><br>问题 → 影响 → 解决方案 → 优先级</div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros"><h4>保留</h4><ul><li>关键设计原因</li><li>真实代码边界</li><li>可执行的生产演进建议</li></ul></div>
+  <div class="cons"><h4>删除</h4><ul><li>逐字段、逐方法解释</li><li>重复的指标清单</li><li>与当前模块无关的未来扩展</li></ul></div>
+</div>

@@ -1,0 +1,42 @@
+<h2>Context 文档与图集组织方式</h2>
+<p class="subtitle">两份 Markdown：学习理解、生产评审。请选择 Draw.io 图集如何组织。</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mock-nav">共享图集 context-diagrams.drawio</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px">
+        <div class="placeholder">学习文档<br>引用页面 1–5</div>
+        <div class="placeholder">生产评审<br>引用页面 1、6–8</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 一份共享多页面图集（推荐）</h3>
+      <p>共用架构图与主数据流，避免两份文档重复维护；生产专属风险图单独分页。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="split">
+        <div class="placeholder">learning.drawio<br>5 页</div>
+        <div class="placeholder">production.drawio<br>5 页</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 两份独立图集</h3>
+      <p>每份文档完全独立，但架构图、数据流图会重复，后续容易产生版本偏差。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mock-nav">Markdown 内 Mermaid</div>
+      <div class="placeholder">Draw.io 只保留总架构图</div>
+    </div>
+    <div class="card-body">
+      <h3>C. Mermaid 为主，Draw.io 为辅</h3>
+      <p>阅读方便，但不满足“流程图、数据流图、时序图均有 Draw.io 源文件”的强交付目标。</p>
+    </div>
+  </div>
+</div>
