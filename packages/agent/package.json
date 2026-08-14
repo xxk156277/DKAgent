@@ -13,7 +13,7 @@
     "typecheck:phase1": "tsc -p tsconfig.phase1.json --noEmit",
     "test:context": "cd ../.. && tsx --test packages/agent/test/context/*.test.ts",
     "typecheck:context": "tsc -p tsconfig.context.json --noEmit",
-    "test:session": "cd ../.. && tsx --test packages/agent/test/session/*.test.ts",
+    "test:session": "cd ../.. && tsx --test packages/agent/test/session/*.test.ts && node --test packages/agent/test/session/*.test.mjs",
     "typecheck:session": "tsc -p tsconfig.session.json --noEmit",
     "test:knowledge": "cd ../.. && tsx --test packages/agent/test/knowledge/*.test.ts",
     "typecheck:knowledge": "tsc -p tsconfig.knowledge.json --noEmit",

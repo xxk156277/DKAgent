@@ -11,6 +11,10 @@ import {
 } from "../context/index.js";
 import { OpenAICompatibleProvider } from "../query-engine/providers/openai-compatible.js";
 import { QueryEngine } from "../query-engine/query-engine.js";
+import {
+    SqliteSessionStore,
+    type SessionSnapshot,
+} from "../session/index.js";
 import { createToolRegistry } from "../tools/index.js";
 import { createSafePrompt } from "./safe-prompt.js";
 
@@ -32,40 +36,64 @@ export async function runAgentCli(options: {
         compressor,
         tracer,
     );
-    const agent = new AgentLoop({
-        queryEngine,
-        toolRegistry,
-        contextManager,
-        model: config.model,
-        maxContextTokens: config.maxContextTokens,
-        maxOutputTokens: config.maxOutputTokens,
-        contextCompaction: config.contextCompaction,
-        summaryModel: config.summaryModel,
-        maxSteps: 5,
-        systemPrompt: AGENT_SYSTEM_PROMPT,
-        onTextDelta: (text) => process.stdout.write(text),
-        tracer,
-    });
+    const sessionStore = new SqliteSessionStore(".dkagent/sessions.db");
+    const createAgent = (snapshot: SessionSnapshot): AgentLoop =>
+        new AgentLoop({
+            queryEngine,
+            toolRegistry,
+            contextManager,
+            model: config.model,
+            maxContextTokens: config.maxContextTokens,
+            maxOutputTokens: config.maxOutputTokens,
+            contextCompaction: config.contextCompaction,
+            summaryModel: config.summaryModel,
+            maxSteps: 5,
+            systemPrompt: AGENT_SYSTEM_PROMPT,
+            onTextDelta: (text) => process.stdout.write(text),
+            tracer,
+            session: {
+                snapshot,
+                store: sessionStore,
+            },
+        });
+
+    const restored = sessionStore.loadLatest();
+    let currentSession = restored ?? sessionStore.create();
+    let agent = createAgent(currentSession);
 
     const readline = createInterface({ input: process.stdin, output: process.stdout });
-    console.log("DKAgent 已启动，输入自然语言开始对话，按 Ctrl+C 退出。\n");
+    const startupMessage = restored
+        ? `DKAgent 已恢复 Session ${currentSession.id}，输入 /new 创建新会话。`
+        : `DKAgent 已创建 Session ${currentSession.id}，输入自然语言开始对话。`;
+    console.log(`${startupMessage}\n`);
     readline.setPrompt("> ");
     const prompt = createSafePrompt(readline);
     prompt();
 
-    for await (const input of readline) {
-        const userInput = input.trim();
-        if (!userInput) {
+    try {
+        for await (const input of readline) {
+            const userInput = input.trim();
+            if (!userInput) {
+                prompt();
+                continue;
+            }
+            if (userInput === "/new") {
+                currentSession = sessionStore.create();
+                agent = createAgent(currentSession);
+                console.log(`已创建 Session ${currentSession.id}\n`);
+                prompt();
+                continue;
+            }
+            try {
+                await agent.run(userInput);
+                process.stdout.write("\n\n");
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.error(`\nAgent 运行失败：${message}\n`);
+            }
             prompt();
-            continue;
         }
-        try {
-            await agent.run(userInput);
-            process.stdout.write("\n\n");
-        } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : String(error);
-            console.error(`\nAgent 运行失败：${message}\n`);
-        }
-        prompt();
+    } finally {
+        sessionStore.close();
     }
 }
