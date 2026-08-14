@@ -1,12 +1,15 @@
 import { App as AntdApp, ConfigProvider } from "antd";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 import { connectEventFeed } from "../api/event-feed.js";
+import { AgentEvaluationPanel } from "../features/agent-metrics/AgentEvaluationPanel.js";
+import { AgentMetricsSummary } from "../features/agent-metrics/AgentMetricsSummary.js";
 import { NodeDetail } from "../features/node-detail/NodeDetail.js";
 import { NodeDetailBoundary } from "../features/node-detail/NodeDetailBoundary.js";
 import { NodeNav } from "../features/timeline/NodeNav.js";
 import { TurnList } from "../features/turns/TurnList.js";
+import { analyzeAgentTurn } from "../model/agent-turn-analysis.js";
 import {
   selectNodes,
   selectTurns,
@@ -39,6 +42,10 @@ export function TapApp({ store = tapStore }: TapAppProps) {
 
   const selectedTurnIndex = turns.findIndex((turn) => turn.id === selectedTurnId);
   const selectedTurn = selectedTurnIndex >= 0 ? turns[selectedTurnIndex] : undefined;
+  const turnAnalysis = useMemo(
+    () => selectedTurn === undefined ? undefined : analyzeAgentTurn(selectedTurn),
+    [selectedTurn],
+  );
   const selectedNode = nodes.find((node) => node.id === selectedNodeId);
 
   return (
@@ -58,9 +65,17 @@ export function TapApp({ store = tapStore }: TapAppProps) {
             onSelect={selectNode}
           />
           <main className="tap-region tap-detail-region">
-            <NodeDetailBoundary key={selectedNodeId ?? "empty"} node={selectedNode}>
-              <NodeDetail node={selectedNode} />
-            </NodeDetailBoundary>
+            <div className="tap-detail-stack">
+              {turnAnalysis === undefined ? null : (
+                <>
+                  <AgentMetricsSummary metrics={turnAnalysis.metrics} />
+                  <AgentEvaluationPanel items={turnAnalysis.evaluations} />
+                </>
+              )}
+              <NodeDetailBoundary key={selectedNodeId ?? "empty"} node={selectedNode}>
+                <NodeDetail node={selectedNode} />
+              </NodeDetailBoundary>
+            </div>
           </main>
         </div>
       </AntdApp>

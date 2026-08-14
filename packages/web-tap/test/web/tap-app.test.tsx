@@ -38,7 +38,7 @@ describe("TapApp", () => {
 
     const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
     expect(styles).toMatch(/\.tap-app-shell\s*\{[^}]*display:\s*flex;/s);
-    expect(styles).toMatch(/\.tap-node-region\s*\{[^}]*flex:\s*0\s+0\s+280px;/s);
+    expect(styles).toMatch(/\.tap-node-region\s*\{[^}]*flex:\s*0\s+0\s+350px;/s);
     expect(styles).toMatch(/\.tap-detail-region\s*\{[^}]*flex:\s*1\s+1\s+auto;/s);
     expect(styles).toMatch(/\.tap-detail-region\s*\{[^}]*min-width:\s*0;/s);
   });
@@ -88,8 +88,38 @@ describe("TapApp", () => {
     fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
 
     expect(screen.getByRole("heading", { name: "第 2 轮节点" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Step 1" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Step 2" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Step 1/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Step 2/ })).toBeVisible();
+  });
+
+  it("shows Agent facts, rule checks, and unknown semantic evaluations", () => {
+    renderFixture(agentMetricsFixture());
+
+    const metrics = screen.getByRole("region", { name: "Agent 运行指标" });
+    expect(within(metrics).getByText("已完成")).toBeVisible();
+    expect(within(metrics).getByText("50 毫秒")).toBeVisible();
+    expect(within(metrics).getByText("12 / 4")).toBeVisible();
+    expect(within(metrics).getByText("1 / 1 成功")).toBeVisible();
+    expect(within(metrics).getByText("100 → 60（节省 40.0%）")).toBeVisible();
+
+    const evaluation = screen.getByRole("region", { name: "Agent 轨迹评价" });
+    expect(within(evaluation).getByText("Tool 执行结果")).toBeVisible();
+    expect(within(evaluation).getAllByText("通过").length).toBeGreaterThan(0);
+    expect(within(evaluation).getByText("幻觉")).toBeVisible();
+    expect(within(evaluation).getByText("待评测：需要外部事实依据或参考答案")).toBeVisible();
+  });
+
+  it("updates Agent analysis when selecting another Turn", () => {
+    renderFixture(agentMetricsFixtureWithRunningTurn());
+
+    fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
+
+    const metrics = screen.getByRole("region", { name: "Agent 运行指标" });
+    expect(within(metrics).getByText("进行中")).toBeVisible();
+    expect(within(metrics).getAllByText("未记录").length).toBeGreaterThan(0);
+
+    const evaluation = screen.getByRole("region", { name: "Agent 轨迹评价" });
+    expect(within(evaluation).getByText("本轮仍在运行，尚不能判断是否完成")).toBeVisible();
   });
 
   it("marks every non-error node completed after its Turn ends", () => {
@@ -254,6 +284,62 @@ function renderFixture(events = fixtureEvents()) {
   const store = createTapStore();
   store.getState().replaceHistory(events);
   return { store, ...render(<TapApp store={store} />) };
+}
+
+function metricEvent(
+  id: string,
+  traceId: string,
+  name: TraceEvent["name"],
+  phase: TraceEvent["phase"],
+  data: unknown,
+  options: Partial<Pick<TraceEvent, "spanId" | "parentSpanId" | "step" | "durationMs">> = {},
+): TraceEvent {
+  const sequence = Number(id.split("-").at(-1));
+  return {
+    id,
+    traceId,
+    sequence,
+    timestamp: `2026-08-13T00:00:${String(sequence).padStart(2, "0")}.000Z`,
+    name,
+    phase,
+    data,
+    ...options,
+  };
+}
+
+function agentMetricsFixture(): TraceEvent[] {
+  return [
+    metricEvent("metric-1", "turn-1", "agent.turn", "start", { input: { input: "查天气" } }, { spanId: "turn-1" }),
+    metricEvent("metric-2", "turn-1", "agent.step", "start", { input: { step: 1 } }, { spanId: "step-1", parentSpanId: "turn-1", step: 1 }),
+    metricEvent("metric-3", "turn-1", "model.request", "start", { input: { model: "test" } }, { spanId: "model-1", parentSpanId: "step-1", step: 1 }),
+    metricEvent("metric-4", "turn-1", "model.response", "event", {
+      type: "tool_use",
+      usage: { inputTokens: 12, outputTokens: 4 },
+    }, { spanId: "model-1", parentSpanId: "step-1", step: 1 }),
+    metricEvent("metric-5", "turn-1", "tool.call", "start", {
+      input: { id: "call-1", name: "weather", input: { city: "上海" } },
+    }, { spanId: "tool-1", parentSpanId: "step-1", step: 1 }),
+    metricEvent("metric-6", "turn-1", "tool.result", "event", {
+      toolCallId: "call-1",
+      name: "weather",
+      result: { success: true, data: { weather: "晴" } },
+    }, { spanId: "tool-1", parentSpanId: "step-1", step: 1 }),
+    metricEvent("metric-7", "turn-1", "context.compaction.completed", "event", {
+      tokensBefore: 100,
+      tokensAfter: 60,
+      savedRatio: 0.4,
+    }, { spanId: "context-1", parentSpanId: "step-1", step: 1 }),
+    metricEvent("metric-8", "turn-1", "agent.step", "end", { output: {} }, { spanId: "step-1", parentSpanId: "turn-1", step: 1, durationMs: 40 }),
+    metricEvent("metric-9", "turn-1", "agent.turn", "end", { output: { answer: "上海晴" } }, { spanId: "turn-1", durationMs: 50 }),
+  ];
+}
+
+function agentMetricsFixtureWithRunningTurn(): TraceEvent[] {
+  return [
+    ...agentMetricsFixture(),
+    metricEvent("metric-10", "turn-2", "agent.turn", "start", { input: { input: "继续" } }, { spanId: "turn-2" }),
+    metricEvent("metric-11", "turn-2", "agent.step", "start", { input: { step: 1 } }, { spanId: "step-2", parentSpanId: "turn-2", step: 1 }),
+  ];
 }
 
 /** 仅截取指定断点，避免 CSS 契约跨媒体查询误匹配。 */
