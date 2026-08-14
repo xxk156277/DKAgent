@@ -43,10 +43,14 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    S["当前运行详情"] --> T["Turn：一次用户输入"]
-    T --> P["Step：一次模型循环"]
-    P --> N["Node：Context、模型、Tool 等事件"]
+    T["Turn：一次用户输入"] --> E["执行过程"]
+    T --> M["Agent 指标与评价"]
+    E --> S["Step：一次模型循环"]
+    S --> N["Node：Context、模型、Tool 等事件"]
+    N --> D["节点详情"]
 ```
+
+页面在桌面端同时展示执行过程和可折叠 Agent 指标栏；紧凑视口默认折叠指标栏，移动端通过抽屉查看 Turn 和 Agent 指标。切换 Node 不会改变 Turn 级指标。
 
 ## 模块职责
 
