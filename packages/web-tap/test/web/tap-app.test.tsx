@@ -105,8 +105,15 @@ describe("TapApp", () => {
     const evaluation = screen.getByRole("region", { name: "Agent 轨迹评价" });
     expect(within(evaluation).getByText("Tool 执行结果")).toBeVisible();
     expect(within(evaluation).getAllByText("通过").length).toBeGreaterThan(0);
-    expect(within(evaluation).getByText("幻觉")).toBeVisible();
-    expect(within(evaluation).getByText("待评测：需要外部事实依据或参考答案")).toBeVisible();
+
+    const traceRules = within(evaluation).getByRole("region", { name: "规则判断（基于 Trace）" });
+    expect(within(traceRules).getByRole("heading", { name: "规则判断（基于 Trace）" })).toBeVisible();
+
+    const pendingEvaluation = within(evaluation).getByRole("region", { name: "待评测（需要外部证据）" });
+    expect(within(pendingEvaluation).getByRole("heading", { name: "待评测（需要外部证据）" })).toBeVisible();
+    expect(within(pendingEvaluation).getByText("幻觉")).toBeVisible();
+    expect(within(pendingEvaluation).getByText("待评测：需要外部事实依据或参考答案")).toBeVisible();
+    expect(within(traceRules).queryByText("幻觉")).not.toBeInTheDocument();
   });
 
   it("updates Agent analysis when selecting another Turn", () => {
