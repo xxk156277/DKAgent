@@ -82,6 +82,48 @@ button {
   margin-inline: auto;
 }
 
+.tap-detail-stack {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  max-width: 960px;
+  margin-inline: auto;
+}
+
+.tap-detail-stack .tap-node-detail {
+  max-width: none;
+  margin-inline: 0;
+}
+
+.tap-metrics-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+}
+
+.tap-metrics-grid .ant-statistic {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.tap-metrics-grid .ant-statistic-content {
+  overflow-wrap: anywhere;
+  font-size: 18px;
+}
+
+.tap-evaluation-item.ant-list-item {
+  display: grid;
+  gap: 4px;
+}
+
+.tap-evaluation-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .tap-node-region {
   flex: 0 0 350px;
   overflow-y: auto;
