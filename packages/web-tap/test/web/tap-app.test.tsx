@@ -4,6 +4,8 @@ import type { TraceEvent, TraceEventName, TracePhase } from "@dkagent/trace";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TapApp } from "../../src/web/app/TapApp.js";
+import { AgentEvaluationPanel } from "../../src/web/features/agent-metrics/AgentEvaluationPanel.js";
+import type { AgentEvaluationItem } from "../../src/web/model/types.js";
 import { createTapStore } from "../../src/web/store/tap-store.js";
 
 const clipboardWrite = vi.fn<() => Promise<void>>();
@@ -284,6 +286,48 @@ describe("TapApp", () => {
       expect(screen.getByText("复制失败，请检查剪贴板权限")).toBeVisible();
     });
     expect(screen.getByRole("heading", { name: "上下文裁剪" })).toBeVisible();
+  });
+});
+
+describe("AgentEvaluationPanel", () => {
+  it("renders failed and warning trace rules outside the pending evaluation group", () => {
+    const items: AgentEvaluationItem[] = [
+      {
+        id: "tool_results",
+        label: "Tool 执行结果",
+        status: "failed",
+        summary: "1 个 Tool 调用明确失败",
+        evidenceEventIds: ["tool-result-1"],
+      },
+      {
+        id: "context_compaction",
+        label: "Context 压缩结果",
+        status: "warning",
+        summary: "压缩后 Token 没有下降，需要检查压缩过程",
+        evidenceEventIds: ["compaction-1"],
+      },
+      {
+        id: "answer_quality",
+        label: "最终答案质量",
+        status: "unknown",
+        summary: "待评测：需要参考答案、人工评价或独立评测器",
+        evidenceEventIds: [],
+      },
+    ];
+
+    render(<AgentEvaluationPanel items={items} />);
+
+    const traceRules = screen.getByRole("region", { name: "规则判断（基于 Trace）" });
+    const failedItem = within(traceRules).getByText("Tool 执行结果").closest("li");
+    const warningItem = within(traceRules).getByText("Context 压缩结果").closest("li");
+    expect(failedItem).not.toBeNull();
+    expect(warningItem).not.toBeNull();
+    expect(within(failedItem!).getByText("失败")).toBeVisible();
+    expect(within(warningItem!).getByText("需关注")).toBeVisible();
+
+    const pendingEvaluation = screen.getByRole("region", { name: "待评测（需要外部证据）" });
+    expect(within(pendingEvaluation).queryByText("Tool 执行结果")).not.toBeInTheDocument();
+    expect(within(pendingEvaluation).queryByText("Context 压缩结果")).not.toBeInTheDocument();
   });
 });
 
