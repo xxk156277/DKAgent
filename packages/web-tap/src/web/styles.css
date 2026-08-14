@@ -247,13 +247,13 @@ button {
   padding-inline: 6px;
 }
 
-.tap-insights-rail.is-collapsed .ant-badge {
-  display: none;
-}
-
 .tap-insights-rail.is-collapsed .ant-btn {
   min-inline-size: 32px;
   padding-inline: 0;
+}
+
+.tap-insights-rail.is-collapsed .tap-insights-toggle-badge .ant-badge-count {
+  transform: translate(0, -50%);
 }
 
 .tap-insights-header {

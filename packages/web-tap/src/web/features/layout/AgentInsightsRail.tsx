@@ -25,24 +25,21 @@ export function AgentInsightsRail({ analysis, collapsed, onToggle }: {
   const attentionCount = analysis?.evaluations.filter(
     (item) => item.status === "warning" || item.status === "failed",
   ).length ?? 0;
+  const toggle = (
+    <Button
+      type="text"
+      icon={collapsed ? <LeftOutlined /> : <RightOutlined />}
+      aria-label={collapsed ? "展开 Agent 指标" : "收起 Agent 指标"}
+      aria-expanded={!collapsed}
+      onClick={onToggle}
+    />
+  );
 
   return (
     <aside className={`tap-insights-rail${collapsed ? " is-collapsed" : ""}`} aria-label="Agent 指标">
       <header className="tap-insights-header">
-        {collapsed ? (
-          <Badge count={attentionCount} showZero size="small">
-            <span className="tap-insights-label">指标</span>
-          </Badge>
-        ) : (
-          <Typography.Title level={2}>Agent 指标</Typography.Title>
-        )}
-        <Button
-          type="text"
-          icon={collapsed ? <LeftOutlined /> : <RightOutlined />}
-          aria-label={collapsed ? "展开 Agent 指标" : "收起 Agent 指标"}
-          aria-expanded={!collapsed}
-          onClick={onToggle}
-        />
+        {collapsed ? <Badge className="tap-insights-toggle-badge" count={attentionCount} showZero size="small">{toggle}</Badge> : <Typography.Title level={2}>Agent 指标</Typography.Title>}
+        {collapsed ? null : toggle}
       </header>
       {collapsed ? null : <AgentInsightsContent analysis={analysis} />}
     </aside>

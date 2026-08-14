@@ -57,7 +57,11 @@ describe("TapApp", () => {
     const insights = screen.getByRole("complementary", { name: "Agent 指标" });
     expect(insights).toHaveClass("is-collapsed");
     expect(within(insights).queryByText("输入 / 输出 Token")).not.toBeInTheDocument();
-    expect(within(insights).getByRole("button", { name: "展开 Agent 指标" })).toHaveAttribute("aria-expanded", "false");
+    const toggle = within(insights).getByRole("button", { name: "展开 Agent 指标" });
+    expect(within(insights).getByText("0")).toBeVisible();
+    expect(toggle).toBeVisible();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.closest(".tap-insights-toggle-badge")).toContainElement(toggle);
     expect(store.getState().selectedTurnId).toBe(selectedTurnId);
     expect(store.getState().selectedNodeId).toBe(selectedNodeId);
   });
@@ -71,6 +75,9 @@ describe("TapApp", () => {
     );
     expect(styles).toMatch(
       /\.tap-insights-rail\.is-collapsed\s+\.ant-btn\s*\{[^}]*min-inline-size:\s*32px;/s,
+    );
+    expect(styles).toMatch(
+      /\.tap-insights-rail\.is-collapsed\s+\.tap-insights-toggle-badge\s+\.ant-badge-count\s*\{[^}]*transform:\s*translate\(0,\s*-50%\);/s,
     );
   });
 
