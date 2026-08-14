@@ -8,16 +8,22 @@ import type {
 } from "../context/types.js";
 
 export class AgentLoop {
-    private readonly messages: AgentMessage[] = [];
+    private readonly messages: AgentMessage[];
     /** Agent 只保存下一次压缩决策真正需要的状态。 */
-    private contextState: ConversationContextState = {
-        summary: "",
-        firstKeptMessageIndex: 0,
-    };
+    private contextState: ConversationContextState;
     private readonly abortSignal: AbortSignal;
     private readonly tracer: Tracer;
 
     public constructor(private readonly options: AgentLoopOptions) {
+        this.messages = options.session
+            ? [...options.session.snapshot.messages]
+            : [];
+        this.contextState = options.session
+            ? { ...options.session.snapshot.contextState }
+            : {
+                summary: "",
+                firstKeptMessageIndex: 0,
+            };
         this.abortSignal = options.abortSignal ?? new AbortController().signal;
         this.tracer = options.tracer ?? new Tracer();
     }
@@ -33,7 +39,7 @@ export class AgentLoop {
 
     public run(userInput: string): Promise<string> {
         return this.tracer.trace("agent.turn", { input: userInput }, async (turnSpan) => {
-            this.messages.push({ role: "user", content: userInput });
+            this.appendMessage({ role: "user", content: userInput });
             const maxSteps = this.options.maxSteps ?? 4;
 
             for (let step = 1; step <= maxSteps; step += 1) {
@@ -77,7 +83,15 @@ export class AgentLoop {
         };
         const contextSnapshot = await this.options.contextManager.build(contextBuildInput);
         if (contextSnapshot.nextContextState) {
-            this.contextState = { ...contextSnapshot.nextContextState };
+            const nextState = { ...contextSnapshot.nextContextState };
+            const session = this.options.session;
+            if (session) {
+                session.store.saveContextState(
+                    session.snapshot.id,
+                    nextState,
+                );
+            }
+            this.contextState = nextState;
         }
 
         const request = {
@@ -109,12 +123,12 @@ export class AgentLoop {
         if (response.type === "text") {
             const answer = response.content.trim();
             if (!answer) throw new Error("模型返回空文本");
-            this.messages.push({ role: "assistant", content: answer });
+            this.appendMessage({ role: "assistant", content: answer });
             stepSpan.setOutput({ answer });
             return answer;
         }
 
-        this.messages.push({
+        this.appendMessage({
             role: "assistant",
             ...(response.content === undefined ? {} : { content: response.content }),
             toolCalls: response.toolCalls,
@@ -147,11 +161,20 @@ export class AgentLoop {
                 },
                 { step },
             );
-            this.messages.push({
+            this.appendMessage({
                 role: "tool",
                 toolCallId: dispatched.toolCallId,
                 content: JSON.stringify(dispatched.result),
             });
         }
+    }
+
+    /** 先持久化消息，再更新 AgentLoop 内存历史。 */
+    private appendMessage(message: AgentMessage): void {
+        const session = this.options.session;
+        if (session) {
+            session.store.appendMessage(session.snapshot.id, message);
+        }
+        this.messages.push(message);
     }
 }

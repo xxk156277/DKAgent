@@ -5,7 +5,18 @@ import type {
     ContextCompactionOptions,
 } from "../context/types.js";
 import type { Tracer } from "@dkagent/trace";
+import type {
+    SessionSnapshot,
+    SessionStore,
+} from "../session/types.js";
 
+/** AgentLoop 当前绑定的 Session。 */
+export interface AgentLoopSessionOptions {
+    /** 构造 AgentLoop 时用于恢复历史的 Session 快照。 */
+    snapshot: SessionSnapshot;
+    /** 保存当前 Session 增量变化的持久化端口。 */
+    store: SessionStore;
+}
 
 export interface AgentLoopOptions {
     /** 模型请求中心。 */
@@ -34,4 +45,6 @@ export interface AgentLoopOptions {
     onTextDelta?: (text: string) => void;
     /** 可选被动追踪器；未提供时使用无副作用空追踪器。 */
     tracer?: Tracer;
+    /** 可选 Session；未提供时保持原有纯内存行为。 */
+    session?: AgentLoopSessionOptions;
 }
