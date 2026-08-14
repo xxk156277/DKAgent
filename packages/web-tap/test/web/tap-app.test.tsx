@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { TraceEvent, TraceEventName, TracePhase } from "@dkagent/trace";
+import { renderToString } from "react-dom/server";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TapApp } from "../../src/web/app/TapApp.js";
@@ -51,6 +52,9 @@ describe("TapApp", () => {
     expect(await screen.findByRole("dialog", { name: "对话轮次" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "关闭对话轮次" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "对话轮次" })).not.toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole("button", { name: "打开 Agent 指标" }));
     const drawer = await screen.findByRole("dialog", { name: "Agent 指标" });
     expect(within(drawer).getByText("12 / 4")).toBeVisible();
@@ -61,6 +65,38 @@ describe("TapApp", () => {
     renderFixture(agentMetricsFixture());
 
     expect(screen.getByRole("complementary", { name: "Agent 指标" })).toHaveClass("is-collapsed");
+  });
+
+  it("renders without window for SSR", () => {
+    const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", { configurable: true, value: undefined });
+
+    try {
+      expect(() => renderToString(<TapApp store={createTapStore()} />)).not.toThrow();
+    } finally {
+      if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);
+    }
+  });
+
+  it("closes the Turn drawer and restores focus to its trigger after selecting a Turn", async () => {
+    setViewportWidth(390);
+    renderFixture();
+
+    const trigger = screen.getByRole("button", { name: "打开对话轮次" });
+    fireEvent.click(trigger);
+    const drawer = await screen.findByRole("dialog", { name: "对话轮次" });
+    fireEvent.click(within(drawer).getByRole("button", { name: /^第 2 轮/ }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "对话轮次" })).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it("uses an explicit mobile overflow contract", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
+
+    expect(styles).toMatch(/@media\s*\(max-width:\s*767px\)[\s\S]*?body\s*\{[^}]*overflow-x:\s*hidden;/);
   });
 
   it("places execution and Agent insights as sibling regions for the selected Turn", () => {

@@ -115,42 +115,38 @@ export function TapApp({ store = tapStore }: TapAppProps) {
               </div>
             </section>
           </div>
-          {mobile && turnsOpen ? (
-            <Drawer
-              title="对话轮次"
-              aria-label="对话轮次"
-              placement="left"
-              size="min(88vw, 360px)"
-              open
-              closeIcon={null}
-              destroyOnHidden
-              extra={<Button type="text" aria-label="关闭对话轮次" onClick={() => setTurnsOpen(false)}>关闭</Button>}
-              onClose={() => setTurnsOpen(false)}
-            >
-              <TurnList
-                turns={turns}
-                selectedTurnId={selectedTurnId}
-                connectionStatus={connectionStatus}
-                onSelect={(turnId) => {
-                  selectTurn(turnId);
-                  setTurnsOpen(false);
-                }}
-              />
-            </Drawer>
-          ) : null}
-          {mobile && insightsOpen ? (
-            <Drawer
-              title="Agent 指标"
-              aria-label="Agent 指标"
-              placement="right"
-              size="min(92vw, 420px)"
-              open
-              destroyOnHidden
-              onClose={() => setInsightsOpen(false)}
-            >
-              <AgentInsightsContent analysis={turnAnalysis} />
-            </Drawer>
-          ) : null}
+          <Drawer
+            title="对话轮次"
+            aria-label="对话轮次"
+            placement="left"
+            size="min(88vw, 360px)"
+            open={mobile && turnsOpen}
+            closeIcon={null}
+            destroyOnHidden
+            extra={<Button type="text" aria-label="关闭对话轮次" onClick={() => setTurnsOpen(false)}>关闭</Button>}
+            onClose={() => setTurnsOpen(false)}
+          >
+            <TurnList
+              turns={turns}
+              selectedTurnId={selectedTurnId}
+              connectionStatus={connectionStatus}
+              onSelect={(turnId) => {
+                selectTurn(turnId);
+                setTurnsOpen(false);
+              }}
+            />
+          </Drawer>
+          <Drawer
+            title="Agent 指标"
+            aria-label="Agent 指标"
+            placement="right"
+            size="min(92vw, 420px)"
+            open={mobile && insightsOpen}
+            destroyOnHidden
+            onClose={() => setInsightsOpen(false)}
+          >
+            <AgentInsightsContent analysis={turnAnalysis} />
+          </Drawer>
         </div>
       </AntdApp>
     </ConfigProvider>

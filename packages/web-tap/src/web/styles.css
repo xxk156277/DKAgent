@@ -504,6 +504,8 @@ button {
 }
 
 @media (max-width: 767px) {
+  body { overflow-x: hidden; }
+
   #root,
   .tap-app-shell {
     min-height: 100vh;

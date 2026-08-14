@@ -31,9 +31,27 @@ export function TapHeader({
       </div>
       {mobile ? (
         <div className="tap-mobile-actions">
-          <Button type="text" aria-label="打开对话轮次" onClick={onOpenTurns}>对话</Button>
+          <Button
+            type="text"
+            aria-label="打开对话轮次"
+            onClick={(event) => {
+              event.currentTarget.focus();
+              onOpenTurns();
+            }}
+          >
+            对话
+          </Button>
           <Badge count={attentionCount} size="small">
-            <Button type="text" aria-label="打开 Agent 指标" onClick={onOpenInsights}>指标</Button>
+            <Button
+              type="text"
+              aria-label="打开 Agent 指标"
+              onClick={(event) => {
+                event.currentTarget.focus();
+                onOpenInsights();
+              }}
+            >
+              指标
+            </Button>
           </Badge>
         </div>
       ) : null}
