@@ -67,6 +67,16 @@ button {
   place-items: center;
 }
 
+.tap-mobile-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.tap-mobile-actions .ant-btn {
+  color: inherit;
+}
+
 .tap-connection {
   display: inline-flex;
   gap: 7px;
@@ -485,6 +495,75 @@ button {
   overflow-wrap: anywhere;
   background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.02));
   border-radius: var(--ant-border-radius-sm, 4px);
+}
+
+@media (max-width: 1279px) and (min-width: 768px) {
+  .tap-turn-region { flex-basis: 208px; }
+  .tap-node-region { flex-basis: 280px; }
+  .tap-workspace-content { gap: 8px; padding: 8px; }
+}
+
+@media (max-width: 767px) {
+  #root,
+  .tap-app-shell {
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: auto;
+  }
+
+  .tap-app-shell { overflow: visible; }
+
+  .tap-product-header {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 10;
+    padding-inline: 12px;
+  }
+
+  .tap-app-body,
+  .tap-workspace,
+  .tap-workspace-content,
+  .tap-execution-workspace {
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .tap-workspace-content,
+  .tap-execution-workspace { flex-direction: column; }
+
+  .tap-workspace-content { padding: 8px; }
+
+  .tap-turn-header {
+    min-height: 68px;
+    padding: 10px 12px;
+  }
+
+  .tap-node-region,
+  .tap-detail-region {
+    flex: 0 0 auto;
+    width: 100%;
+    overflow: visible;
+  }
+
+  .tap-node-region {
+    max-height: none;
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--tap-border);
+  }
+
+  .tap-region { padding: 14px; }
+
+  .tap-json-block {
+    overflow-x: auto;
+    white-space: pre;
+    overflow-wrap: normal;
+  }
+
+  .ant-drawer .tap-turn-region {
+    width: 100%;
+    padding: 0;
+    border: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

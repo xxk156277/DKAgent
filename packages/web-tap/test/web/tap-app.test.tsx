@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TapApp } from "../../src/web/app/TapApp.js";
 import { AgentEvaluationPanel } from "../../src/web/features/agent-metrics/AgentEvaluationPanel.js";
 import type { AgentEvaluationItem } from "../../src/web/model/types.js";
+import { getTapViewport } from "../../src/web/shared/useTapViewport.js";
 import { createTapStore } from "../../src/web/store/tap-store.js";
 
 class ResizeObserverMock {
@@ -22,6 +23,7 @@ Object.defineProperty(globalThis, "ResizeObserver", {
 const clipboardWrite = vi.fn<() => Promise<void>>();
 
 beforeEach(() => {
+  setViewportWidth(1440);
   clipboardWrite.mockReset();
   clipboardWrite.mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {
@@ -33,6 +35,34 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TapApp", () => {
+  it("maps viewport widths to the approved responsive modes", () => {
+    expect(getTapViewport(390)).toBe("mobile");
+    expect(getTapViewport(767)).toBe("mobile");
+    expect(getTapViewport(768)).toBe("compact");
+    expect(getTapViewport(1279)).toBe("compact");
+    expect(getTapViewport(1280)).toBe("wide");
+  });
+
+  it("opens Turn and Agent insight drawers on mobile", async () => {
+    setViewportWidth(390);
+    renderFixture(agentMetricsFixture());
+
+    fireEvent.click(screen.getByRole("button", { name: "打开对话轮次" }));
+    expect(await screen.findByRole("dialog", { name: "对话轮次" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭对话轮次" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开 Agent 指标" }));
+    const drawer = await screen.findByRole("dialog", { name: "Agent 指标" });
+    expect(within(drawer).getByText("12 / 4")).toBeVisible();
+  });
+
+  it("starts with the Agent insight rail collapsed in compact mode", () => {
+    setViewportWidth(1024);
+    renderFixture(agentMetricsFixture());
+
+    expect(screen.getByRole("complementary", { name: "Agent 指标" })).toHaveClass("is-collapsed");
+  });
+
   it("places execution and Agent insights as sibling regions for the selected Turn", () => {
     renderFixture(agentMetricsFixture());
 
@@ -353,6 +383,11 @@ function renderFixture(events = fixtureEvents()) {
   const store = createTapStore();
   store.getState().replaceHistory(events);
   return { store, ...render(<TapApp store={store} />) };
+}
+
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  fireEvent(window, new Event("resize"));
 }
 
 function metricEvent(
