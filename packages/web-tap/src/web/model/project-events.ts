@@ -14,6 +14,7 @@ export function projectEvents(events: TraceEvent[]): TapSessionView[] {
 
   for (const event of sortEvents(events)) {
     const turn = getTurn(turns, session, event.traceId);
+    turn.rawEvents.push(event);
     const stepNumber = resolveStep(event, latestSteps.get(event.traceId));
     latestSteps.set(event.traceId, Math.max(latestSteps.get(event.traceId) ?? 1, stepNumber));
     const step = getStep(stepMaps, event.traceId, turn, stepNumber);
@@ -174,7 +175,7 @@ function resolveStep(event: TraceEvent, latestStep?: number): number {
 function getTurn(turns: Map<string, TapTurnView>, session: TapSessionView, traceId: string): TapTurnView {
   const existing = turns.get(traceId);
   if (existing) return existing;
-  const turn = { id: traceId, steps: [] };
+  const turn: TapTurnView = { id: traceId, steps: [], rawEvents: [] };
   turns.set(traceId, turn);
   session.turns.push(turn);
   return turn;
