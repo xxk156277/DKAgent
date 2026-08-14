@@ -84,7 +84,7 @@ Web Tap 区分：
 1. Agent 执行需要的字段定义在 Agent；只为观测服务的字段和计算定义在 Trace 或 Web Tap。
 2. Trace 技术字段使用英文，中文只存在于 Web Tap 展示层。
 3. 新事件必须保留原始 JSON，并为未知事件提供降级显示。
-4. Prompt、Authorization、API Key、Headers 和环境变量必须在进入 Store 时脱敏。
+4. 进入 Store 时当前仅按字段名脱敏 API Key、Authorization、Header/Headers 和 env/environment。Prompt、用户输入和模型内容会为本地调试保留，并可通过 HTTP/SSE 展示；使用者不应输入敏感信息。
 5. Web Tap 不能反向修改 Agent 状态或改变 Agent 结果。
 6. 优先扩展纯投影函数，再增加 React 展示；组件不直接解释原始 Trace。
 7. 页面继续使用 React、Zustand、Ant Design 和 CSS Flex，不为简单指标增加图表依赖。
