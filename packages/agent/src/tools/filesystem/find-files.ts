@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { globbyStream } from "globby";
 import type { Tool, ToolResult } from "../types.js";
 import { toolFailure } from "./error.js";
@@ -49,6 +50,7 @@ export function createFindFilesTool(cwd: string): Tool<FindFilesInput, FindFiles
             const path = resolveToolPath(input.path ?? ".", cwd);
             try {
                 if (ctx.abortSignal.aborted) throw createAbortError();
+                if (!(await stat(path)).isDirectory()) throw new Error("搜索路径不是目录");
 
                 const stream = globbyStream(input.pattern, {
                     cwd: path,
@@ -81,11 +83,7 @@ export function createFindFilesTool(cwd: string): Tool<FindFilesInput, FindFiles
 
                 return { success: true, data: { path, files, total: files.length } };
             } catch (error) {
-                const failure = toolFailure(ctx.abortSignal.aborted ? createAbortError() : error);
-                if (failure.error?.message.includes("ENOENT")) {
-                    failure.error.message = "未找到 ripgrep，请先安装 rg";
-                }
-                return failure;
+                return toolFailure(ctx.abortSignal.aborted ? createAbortError() : error);
             }
         },
     };

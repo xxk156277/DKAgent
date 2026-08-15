@@ -146,6 +146,18 @@ test("find_files 无匹配时成功返回空数组", async () => {
     });
 });
 
+test("find_files 不存在的搜索目录返回 service_error", async () => {
+    await withTempDir(async (cwd) => {
+        const result = await createFindFilesTool(cwd).execute(
+            { pattern: "**/*", path: "missing" },
+            context(),
+        );
+
+        assert.equal(result.success, false);
+        assert.equal(result.error?.code, "service_error");
+    });
+});
+
 test("find_files 默认尊重 .gitignore", async () => {
     await withTempDir(async (cwd) => {
         await mkdir(join(cwd, ".git"));
