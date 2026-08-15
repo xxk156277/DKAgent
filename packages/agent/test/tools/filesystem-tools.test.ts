@@ -9,6 +9,7 @@ import { createWriteFileTool } from "../../src/tools/filesystem/write-file.js";
 import { createFindFilesTool } from "../../src/tools/filesystem/find-files.js";
 import { createGrepFilesTool } from "../../src/tools/filesystem/grep-files.js";
 import { resolveToolPath } from "../../src/tools/filesystem/path.js";
+import { createToolRegistry } from "../../src/tools/index.js";
 import type { ToolContext } from "../../src/tools/types.js";
 
 const context = (signal = new AbortController().signal): ToolContext => ({
@@ -287,5 +288,21 @@ test("grep_files 响应已中止的 AbortSignal", async () => {
 
         assert.equal(result.success, false);
         assert.equal(result.error?.code, "timeout");
+    });
+});
+
+test("createToolRegistry 注册文件工具，并把 cwd 下传给 read_file", async () => {
+    await withTempDir(async (cwd) => {
+        await writeFile(join(cwd, "notes.txt"), "from custom cwd", "utf8");
+        const registry = createToolRegistry(cwd);
+
+        assert.deepEqual(
+            registry.list().map((tool) => tool.name),
+            ["split_qa_pairs", "read_file", "find_files", "grep_files", "write_file"],
+        );
+
+        const result = await registry.resolve("read_file").execute({ path: "notes.txt" }, context());
+        assert.equal(result.success, true);
+        assert.equal(result.data?.content, "from custom cwd");
     });
 });
