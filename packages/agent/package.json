@@ -24,6 +24,7 @@
     "@ai-sdk/deepseek": "^3.0.24",
     "@ai-sdk/openai": "^4.0.34",
     "@dkagent/trace": "*",
+    "@vscode/ripgrep": "^1.18.0",
     "ai": "^7.0.56",
     "anthropic": "^0.0.0",
     "better-sqlite3": "^13.0.3",

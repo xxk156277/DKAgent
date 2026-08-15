@@ -7,6 +7,7 @@ import type { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { createReadFileTool } from "../../src/tools/filesystem/read-file.js";
 import { createWriteFileTool } from "../../src/tools/filesystem/write-file.js";
 import { createFindFilesTool } from "../../src/tools/filesystem/find-files.js";
+import { createGrepFilesTool } from "../../src/tools/filesystem/grep-files.js";
 import { resolveToolPath } from "../../src/tools/filesystem/path.js";
 import type { ToolContext } from "../../src/tools/types.js";
 
@@ -214,5 +215,77 @@ test("find_files 支持只有排除项的 glob", async () => {
         );
 
         assert.deepEqual(result.data?.files, ["visible.ts"]);
+    });
+});
+
+test("grep_files 返回匹配路径、行号和文本", async () => {
+    await withTempDir(async (cwd) => {
+        await writeFile(join(cwd, "notes.txt"), "first line\nneedle here\nlast line", "utf8");
+
+        const result = await createGrepFilesTool(cwd).execute({ pattern: "needle" }, context());
+
+        assert.equal(result.success, true);
+        assert.deepEqual(result.data, {
+            path: cwd,
+            matches: [{ path: "notes.txt", line: 2, text: "needle here" }],
+            total: 1,
+        });
+    });
+});
+
+test("grep_files 支持 glob 和 ignoreCase", async () => {
+    await withTempDir(async (cwd) => {
+        await writeFile(join(cwd, "notes.md"), "Needle in markdown", "utf8");
+        await writeFile(join(cwd, "notes.txt"), "Needle in text", "utf8");
+
+        const result = await createGrepFilesTool(cwd).execute(
+            { pattern: "needle", glob: "*.md", ignoreCase: true },
+            context(),
+        );
+
+        assert.deepEqual(result.data?.matches, [
+            { path: "notes.md", line: 1, text: "Needle in markdown" },
+        ]);
+    });
+});
+
+test("grep_files 支持字面量搜索和 limit", async () => {
+    await withTempDir(async (cwd) => {
+        await writeFile(join(cwd, "special.txt"), "a.b\naxb\na.b", "utf8");
+
+        const result = await createGrepFilesTool(cwd).execute(
+            { pattern: "a.b", literal: true, limit: 1 },
+            context(),
+        );
+
+        assert.deepEqual(result.data?.matches, [{ path: "special.txt", line: 1, text: "a.b" }]);
+        assert.equal(result.data?.total, 1);
+    });
+});
+
+test("grep_files 无匹配时成功返回空数组", async () => {
+    await withTempDir(async (cwd) => {
+        await writeFile(join(cwd, "notes.txt"), "hello", "utf8");
+
+        const result = await createGrepFilesTool(cwd).execute({ pattern: "missing" }, context());
+
+        assert.equal(result.success, true);
+        assert.deepEqual(result.data?.matches, []);
+        assert.equal(result.data?.total, 0);
+    });
+});
+
+test("grep_files 响应已中止的 AbortSignal", async () => {
+    await withTempDir(async (cwd) => {
+        const controller = new AbortController();
+        controller.abort();
+
+        const result = await createGrepFilesTool(cwd).execute(
+            { pattern: "needle" },
+            context(controller.signal),
+        );
+
+        assert.equal(result.success, false);
+        assert.equal(result.error?.code, "timeout");
     });
 });
