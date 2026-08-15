@@ -106,7 +106,7 @@ export async function runAgentCli(options: {
                 continue;
             }
 
-            if (userInput === "/switch" || userInput.startsWith("/switch ")) {
+            if (userInput === "/switch" || /^\/switch\s/.test(userInput)) {
                 const sessionId = userInput.slice("/switch".length).trim();
                 if (!sessionId) {
                     console.log("用法：/switch <sessionId>\n");
@@ -134,7 +134,7 @@ export async function runAgentCli(options: {
                 continue;
             }
 
-            if (userInput === "/delete" || userInput.startsWith("/delete ")) {
+            if (userInput === "/delete" || /^\/delete\s/.test(userInput)) {
                 const sessionId = userInput.slice("/delete".length).trim();
                 if (!sessionId) {
                     console.log("用法：/delete <sessionId>\n");

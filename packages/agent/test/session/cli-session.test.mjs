@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+import Database from "better-sqlite3";
 import test from "node:test";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
@@ -41,13 +42,18 @@ function startCli(workingDirectory) {
         stderr += chunk;
     });
 
-    const waitForOutput = (pattern, fromIndex = 0) => new Promise((resolve, reject) => {
+    const waitForStreamOutput = (
+        getOutput,
+        stream,
+        pattern,
+        fromIndex = 0,
+    ) => new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
             cleanup();
             reject(new Error(`等待 CLI 输出超时：${pattern}\nstdout:\n${stdout}\nstderr:\n${stderr}`));
         }, 10_000);
         const check = () => {
-            const match = stdout.slice(fromIndex).match(pattern);
+            const match = getOutput().slice(fromIndex).match(pattern);
             if (!match) return;
             cleanup();
             resolve(match);
@@ -58,13 +64,25 @@ function startCli(workingDirectory) {
         };
         const cleanup = () => {
             clearTimeout(timeout);
-            child.stdout.off("data", check);
+            stream.off("data", check);
             child.off("exit", onExit);
         };
-        child.stdout.on("data", check);
+        stream.on("data", check);
         child.on("exit", onExit);
         check();
     });
+    const waitForOutput = (pattern, fromIndex = 0) => waitForStreamOutput(
+        () => stdout,
+        child.stdout,
+        pattern,
+        fromIndex,
+    );
+    const waitForErrorOutput = (pattern, fromIndex = 0) => waitForStreamOutput(
+        () => stderr,
+        child.stderr,
+        pattern,
+        fromIndex,
+    );
 
     const waitForExit = () => new Promise((resolve) => {
         child.once("exit", (code) => resolve(code));
@@ -75,6 +93,7 @@ function startCli(workingDirectory) {
         output: () => stdout,
         errorOutput: () => stderr,
         waitForOutput,
+        waitForErrorOutput,
         waitForExit,
     };
 }
@@ -185,4 +204,87 @@ test("CLI 可以列出、切换和删除非当前 Session", async () => {
     cli.child.stdin.end();
     const exitCode = await exitPromise;
     assert.equal(exitCode, 0, cli.errorOutput());
+});
+
+test("CLI 切换结果决定后续用户消息写入的 Session，并支持 Tab 分隔参数", async () => {
+    const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-session-"));
+    const cli = startCli(workingDirectory);
+    let targetSessionId;
+
+    try {
+        const startup = await cli.waitForOutput(
+            /DKAgent 已创建 Session ([0-9a-f-]{36})/,
+        );
+        targetSessionId = startup[1];
+
+        let outputIndex = cli.output().length;
+        cli.child.stdin.write("/new\n");
+        await cli.waitForOutput(/已创建 Session [0-9a-f-]{36}/, outputIndex);
+
+        outputIndex = cli.output().length;
+        cli.child.stdin.write("/new\n");
+        const created = await cli.waitForOutput(
+            /已创建 Session ([0-9a-f-]{36})/,
+            outputIndex,
+        );
+        const disposableSessionId = created[1];
+
+        outputIndex = cli.output().length;
+        cli.child.stdin.write(`/switch\t${targetSessionId}\n`);
+        await cli.waitForOutput(
+            new RegExp(`已切换到 Session ${targetSessionId}`),
+            outputIndex,
+        );
+
+        let errorIndex = cli.errorOutput().length;
+        cli.child.stdin.write("切换成功后的消息\n");
+        await cli.waitForErrorOutput(/Agent 运行失败/, errorIndex);
+
+        outputIndex = cli.output().length;
+        cli.child.stdin.write("/switch missing-session\n");
+        await cli.waitForOutput(/Session missing-session 不存在/, outputIndex);
+
+        errorIndex = cli.errorOutput().length;
+        cli.child.stdin.write("切换失败后的消息\n");
+        await cli.waitForErrorOutput(/Agent 运行失败/, errorIndex);
+
+        outputIndex = cli.output().length;
+        cli.child.stdin.write(`/delete\t${disposableSessionId}\n`);
+        await cli.waitForOutput(
+            new RegExp(`已删除 Session ${disposableSessionId}`),
+            outputIndex,
+        );
+    } finally {
+        const exitPromise = cli.waitForExit();
+        cli.child.stdin.end();
+        const exitCode = await exitPromise;
+        assert.equal(exitCode, 0, cli.errorOutput());
+    }
+
+    const database = new Database(
+        join(workingDirectory, ".dkagent/sessions.db"),
+        { readonly: true },
+    );
+    try {
+        const rows = database.prepare(`
+            SELECT session_id, message_json
+            FROM session_messages
+            ORDER BY id ASC
+        `).all();
+        assert.deepEqual(rows.map((row) => ({
+            sessionId: row.session_id,
+            message: JSON.parse(row.message_json),
+        })), [
+            {
+                sessionId: targetSessionId,
+                message: { role: "user", content: "切换成功后的消息" },
+            },
+            {
+                sessionId: targetSessionId,
+                message: { role: "user", content: "切换失败后的消息" },
+            },
+        ]);
+    } finally {
+        database.close();
+    }
 });
