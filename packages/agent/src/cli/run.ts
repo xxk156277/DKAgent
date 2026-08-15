@@ -15,6 +15,13 @@ import {
     SqliteSessionStore,
     type SessionSnapshot,
 } from "../session/index.js";
+import {
+    AutomaticMemoryWriter,
+    MemoryExtractor,
+    MemoryRetriever,
+    SqliteMemoryStore,
+    type MemoryType,
+} from "../memory/index.js";
 import { createToolRegistry } from "../tools/index.js";
 import { createSafePrompt } from "./safe-prompt.js";
 
@@ -36,7 +43,31 @@ export async function runAgentCli(options: {
         compressor,
         tracer,
     );
-    const sessionStore = new SqliteSessionStore(".dkagent/sessions.db");
+    let memoryStore: SqliteMemoryStore;
+    try {
+        memoryStore = new SqliteMemoryStore(".dkagent/memory.db");
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Memory 数据库初始化失败：${message}`);
+    }
+    let sessionStore: SqliteSessionStore;
+    try {
+        sessionStore = new SqliteSessionStore(".dkagent/sessions.db");
+    } catch (error: unknown) {
+        try {
+            memoryStore.close();
+        } catch {
+            // Session 初始化失败时，Memory 关闭失败不能掩盖原始错误。
+        }
+        throw error;
+    }
+    const memoryExtractor = new MemoryExtractor(queryEngine, config.model, tracer);
+    const memoryRetriever = new MemoryRetriever(memoryStore);
+    const memoryWriter = new AutomaticMemoryWriter(
+        memoryExtractor,
+        memoryStore,
+        tracer,
+    );
 
     const createAgent = (
         snapshot: SessionSnapshot
@@ -58,6 +89,8 @@ export async function runAgentCli(options: {
                 snapshot,
                 store: sessionStore,
             },
+            memoryReader: memoryRetriever,
+            memoryWriter,
         });
     }
 
@@ -156,6 +189,65 @@ export async function runAgentCli(options: {
                 prompt();
                 continue;
             }
+
+            if (/^\/remember(?:\s|$)/.test(userInput)) {
+                const match = /^\/remember\s+(\S+)\s+(\S+)\s+(.+)$/.exec(userInput);
+                const [, type, key, content] = match ?? [];
+                if (!type || !key || !content) {
+                    console.log(
+                        "用法：/remember <profile|preference|decision> <key> <content>\n",
+                    );
+                    prompt();
+                    continue;
+                }
+
+                try {
+                    const memory = memoryStore.upsert({
+                        type: type as MemoryType,
+                        key,
+                        content,
+                        source: "explicit",
+                        sourceSessionId: currentSession.id,
+                    });
+                    console.log(`已保存 Memory ${memory.id}\n`);
+                } catch (error: unknown) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    console.log(`Memory 操作失败：${message}\n`);
+                }
+                prompt();
+                continue;
+            }
+
+            if (userInput === "/memories") {
+                const memories = memoryStore.list();
+                if (memories.length === 0) {
+                    console.log("暂无 Memory\n");
+                } else {
+                    console.log(`${memories.map((memory) => (
+                        `[${memory.type}] ${memory.key} = ${memory.content} (${memory.source}, ${memory.id})`
+                    )).join("\n")}\n`);
+                }
+                prompt();
+                continue;
+            }
+
+            if (/^\/forget(?:\s|$)/.test(userInput)) {
+                const [, memoryId, ...extra] = userInput.split(/\s+/);
+                if (!memoryId || extra.length > 0) {
+                    console.log("用法：/forget <memoryId>\n");
+                    prompt();
+                    continue;
+                }
+
+                if (memoryStore.delete(memoryId)) {
+                    console.log(`已删除 Memory ${memoryId}\n`);
+                } else {
+                    console.log(`Memory ${memoryId} 不存在\n`);
+                }
+                prompt();
+                continue;
+            }
+
             try {
                 await agent.run(userInput);
                 process.stdout.write("\n\n");
@@ -166,6 +258,17 @@ export async function runAgentCli(options: {
             prompt();
         }
     } finally {
-        sessionStore.close();
+        let closeError: unknown;
+        try {
+            memoryStore.close();
+        } catch (error: unknown) {
+            closeError = error;
+        }
+        try {
+            sessionStore.close();
+        } catch (error: unknown) {
+            closeError ??= error;
+        }
+        if (closeError) throw closeError;
     }
 }
