@@ -41,6 +41,7 @@ class FakeProvider implements LLMProvider {
 
 class RecordingSessionStore implements SessionStore {
     public readonly appendedMessages: AgentMessage[] = [];
+    /** 记录每次追加消息写入的目标 Session ID。 */
     public readonly appendedSessionIds: string[] = [];
     public readonly savedStates: ConversationContextState[] = [];
 
