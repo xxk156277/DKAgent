@@ -188,6 +188,21 @@ test("find_files 响应已中止的 AbortSignal", async () => {
     });
 });
 
+test("find_files 执行期间中止返回 timeout", async () => {
+    await withTempDir(async (cwd) => {
+        const controller = new AbortController();
+        const resultPromise = createFindFilesTool(cwd).execute(
+            { pattern: "**/*" },
+            context(controller.signal),
+        );
+        controller.abort();
+        const result = await resultPromise;
+
+        assert.equal(result.success, false);
+        assert.equal(result.error?.code, "timeout");
+    });
+});
+
 test("find_files 支持只有排除项的 glob", async () => {
     await withTempDir(async (cwd) => {
         await writeFile(join(cwd, "visible.ts"), "ts", "utf8");

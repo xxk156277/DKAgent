@@ -50,7 +50,9 @@ export function createFindFilesTool(cwd: string): Tool<FindFilesInput, FindFiles
             const path = resolveToolPath(input.path ?? ".", cwd);
             try {
                 if (ctx.abortSignal.aborted) throw createAbortError();
-                if (!(await stat(path)).isDirectory()) throw new Error("搜索路径不是目录");
+                const pathStat = await stat(path);
+                if (ctx.abortSignal.aborted) throw createAbortError();
+                if (!pathStat.isDirectory()) throw new Error("搜索路径不是目录");
 
                 const stream = globbyStream(input.pattern, {
                     cwd: path,
@@ -78,7 +80,9 @@ export function createFindFilesTool(cwd: string): Tool<FindFilesInput, FindFiles
                     }
                 } finally {
                     ctx.abortSignal.removeEventListener("abort", abort);
-                    if (aborted || files.length === limit) await iterator.return?.();
+                    if (aborted || ctx.abortSignal.aborted || files.length === limit) {
+                        await iterator.return?.();
+                    }
                 }
 
                 return { success: true, data: { path, files, total: files.length } };
