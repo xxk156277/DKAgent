@@ -20,14 +20,16 @@
     "kb:build": "cd ../.. && tsx packages/agent/src/knowledge/cli.ts"
   },
   "dependencies": {
-    "@dkagent/trace": "*",
     "@ai-sdk/anthropic": "^4.0.34",
     "@ai-sdk/deepseek": "^3.0.24",
     "@ai-sdk/openai": "^4.0.34",
+    "@dkagent/trace": "*",
+    "@vscode/ripgrep": "^1.18.0",
     "ai": "^7.0.56",
     "anthropic": "^0.0.0",
     "better-sqlite3": "^13.0.3",
     "dotenv": "^17.4.2",
+    "globby": "^16.2.3",
     "openai": "^6.49.0",
     "zod": "^4.4.3"
   }
