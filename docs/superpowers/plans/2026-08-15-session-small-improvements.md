@@ -444,6 +444,26 @@ test("CLI 可以列出、切换和删除非当前 Session", async () => {
     const secondSessionId = created[1];
 
     outputIndex = cli.output().length;
+    cli.child.stdin.write("/switch\n");
+    await cli.waitForOutput(/用法：\/switch <sessionId>/, outputIndex);
+
+    outputIndex = cli.output().length;
+    cli.child.stdin.write(`/switch ${secondSessionId}\n`);
+    await cli.waitForOutput(/已经是当前 Session/, outputIndex);
+
+    outputIndex = cli.output().length;
+    cli.child.stdin.write("/switch missing-session\n");
+    await cli.waitForOutput(/Session missing-session 不存在/, outputIndex);
+
+    outputIndex = cli.output().length;
+    cli.child.stdin.write("/delete\n");
+    await cli.waitForOutput(/用法：\/delete <sessionId>/, outputIndex);
+
+    outputIndex = cli.output().length;
+    cli.child.stdin.write("/delete missing-session\n");
+    await cli.waitForOutput(/Session missing-session 不存在/, outputIndex);
+
+    outputIndex = cli.output().length;
     cli.child.stdin.write("/sessions\n");
     await cli.waitForOutput(
         new RegExp(`\\* ${secondSessionId}[\\s\\S]*  ${firstSessionId}`),
@@ -563,33 +583,7 @@ Expected: 新测试 FAIL，并因 `/sessions` 被当作普通用户消息而等�
 
 这里必须保持顺序：`sessionStore.load()` 成功后先构造 `nextAgent`，最后才更新 `currentSession` 和 `agent` 引用。
 
-- [ ] **Step 5: 增加缺少 ID、重复切换和不存在 Session 的 CLI 断言**
-
-在同一个 CLI 测试中，第一次 `/new` 后、`/sessions` 前依次写入以下命令并断言：
-
-```js
-    outputIndex = cli.output().length;
-    cli.child.stdin.write("/switch\n");
-    await cli.waitForOutput(/用法：\/switch <sessionId>/, outputIndex);
-
-    outputIndex = cli.output().length;
-    cli.child.stdin.write(`/switch ${secondSessionId}\n`);
-    await cli.waitForOutput(/已经是当前 Session/, outputIndex);
-
-    outputIndex = cli.output().length;
-    cli.child.stdin.write("/switch missing-session\n");
-    await cli.waitForOutput(/Session missing-session 不存在/, outputIndex);
-
-    outputIndex = cli.output().length;
-    cli.child.stdin.write("/delete\n");
-    await cli.waitForOutput(/用法：\/delete <sessionId>/, outputIndex);
-
-    outputIndex = cli.output().length;
-    cli.child.stdin.write("/delete missing-session\n");
-    await cli.waitForOutput(/Session missing-session 不存在/, outputIndex);
-```
-
-- [ ] **Step 6: 运行完整 Session 验证**
+- [ ] **Step 5: 运行完整 Session 验证**
 
 Run:
 
@@ -606,7 +600,7 @@ Session 测试全部 PASS
 typecheck:session 退出码 0
 ```
 
-- [ ] **Step 7: 提交 CLI 管理能力**
+- [ ] **Step 6: 提交 CLI 管理能力**
 
 ```bash
 cd /Users/xuxiaokang/apps/DKAgent
