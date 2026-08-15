@@ -119,9 +119,18 @@ export class AgentLoop {
                 ? {}
                 : { onTextDelta: this.options.onTextDelta }),
         };
+        const traceRequest = recalledMemory
+            ? {
+                ...request,
+                systemPrompt: this.createTraceSystemPrompt(
+                    request.systemPrompt,
+                    recalledMemory,
+                ),
+            }
+            : { ...request };
         const response = await this.tracer.span(
             "model.request",
-            request,
+            traceRequest,
             async (modelSpan) => {
                 const result = await this.options.queryEngine.query(request);
                 modelSpan.event("model.response", result, { step });
@@ -198,6 +207,20 @@ export class AgentLoop {
         } catch {
             return "";
         }
+    }
+
+    /** 记忆只供模型使用；所有 Trace 必须使用不含原文的副本。 */
+    private createTraceSystemPrompt(
+        systemPrompt: string | undefined,
+        recalledMemory: string,
+    ): string | undefined {
+        if (!recalledMemory) return systemPrompt;
+        if (!systemPrompt?.includes(recalledMemory)) {
+            return "[RECALLED_MEMORY_REDACTED]";
+        }
+        return systemPrompt
+            .split(recalledMemory)
+            .join("[RECALLED_MEMORY_REDACTED]");
     }
 
     /** 自动提取失败不能影响已生成的最终回答。 */

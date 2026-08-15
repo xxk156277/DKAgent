@@ -387,6 +387,44 @@ test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆",
     ]);
 });
 
+test("召回记忆保留在真实模型请求中，但不进入 model.request Trace", async () => {
+    const memoryFact = "用户偏好先讲结论";
+    const provider = new FakeProvider([textResponse("回答")]);
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: new ToolRegistry(),
+        contextManager: new ContextManager(
+            new ProviderTokenCounter(provider),
+            undefined,
+            tracer,
+        ),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        systemPrompt: "test prompt",
+        memoryReader: {
+            async recall() {
+                return `<recalled_memory>${memoryFact}</recalled_memory>`;
+            },
+        },
+        tracer,
+    });
+
+    await agent.run("问题");
+
+    assert.match(provider.requests[0]?.systemPrompt ?? "", new RegExp(memoryFact));
+    assert.doesNotMatch(JSON.stringify(traceStore.list()), new RegExp(memoryFact));
+    const modelRequestStart = traceStore.list().find((event) => (
+        event.name === "model.request" && event.phase === "start"
+    ));
+    assert.equal(
+        (modelRequestStart?.data as { input: { systemPrompt: string } }).input.systemPrompt,
+        "test prompt\n\n[RECALLED_MEMORY_REDACTED]",
+    );
+});
+
 test("召回记忆只注入 Context System Prompt，不进入历史或 Session", async () => {
     const provider = new FakeProvider([textResponse("回答")]);
     const contextManager = new RecordingContextBuilder();

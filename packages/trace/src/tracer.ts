@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { sanitizeTraceEvent } from "./sanitize.js";
 import type {
   TraceEvent,
   TraceEventName,
@@ -140,7 +141,7 @@ export class Tracer {
       data,
     };
     try {
-      void Promise.resolve(this.sink.emit(event)).catch(() => {
+      void Promise.resolve(this.sink.emit(sanitizeTraceEvent(event))).catch(() => {
         // 异步 Sink 拒绝也必须与 Agent 隔离。
       });
     } catch {
