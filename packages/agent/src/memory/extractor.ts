@@ -107,10 +107,12 @@ export class MemoryExtractor {
                 continue;
             }
             seen.add(identity);
-            candidates.push(candidate);
+
             if (candidates.length === MAX_AUTOMATIC_MEMORIES_PER_TURN) {
-                break;
+                rejectedCount += 1;
+                continue;
             }
+            candidates.push(candidate);
         }
 
         return { candidates, rejectedCount };
@@ -130,6 +132,15 @@ export class MemoryExtractor {
 
     private hasCandidateShape(value: unknown): value is MemoryCandidate {
         if (typeof value !== "object" || value === null || Array.isArray(value)) {
+            return false;
+        }
+
+        const keys = Reflect.ownKeys(value).filter((key) =>
+            Object.prototype.propertyIsEnumerable.call(value, key),
+        );
+        if (keys.length !== 3 || !keys.every((key) =>
+            typeof key === "string" && ["type", "key", "content"].includes(key),
+        )) {
             return false;
         }
 

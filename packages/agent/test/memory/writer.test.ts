@@ -146,6 +146,63 @@ test("Extractor 忽略没有 memories 数组的目标 Tool", async () => {
     assert.deepEqual(candidates, []);
 });
 
+test("Extractor 拒绝含额外字段的候选对象", async () => {
+    const engine = new FakeQueryEngine(toolResponse(
+        "submit_memory_candidates",
+        {
+            memories: [{
+                type: "preference",
+                key: "answer_style",
+                content: "回答时先讲顶层架构",
+                extra: true,
+            }],
+        },
+    ));
+
+    const candidates = await new MemoryExtractor(engine, "main-model").extract({
+        userInput: "以后回答先讲架构",
+        assistantAnswer: "好的",
+        sessionId: "session-1",
+    });
+
+    assert.deepEqual(candidates, []);
+});
+
+test("Extractor 仅保留前三条有效候选，并在 Trace 记录其余有效候选为拒绝", async () => {
+    const traceStore = new MemoryTraceStore();
+    const engine = new FakeQueryEngine(toolResponse(
+        "submit_memory_candidates",
+        {
+            memories: [
+                { type: "profile", key: "target_role", content: "前端 Agent 工程师" },
+                { type: "preference", key: "answer_style", content: "回答时先讲顶层架构" },
+                { type: "decision", key: "memory_v1", content: "采用 SQLite" },
+                { type: "profile", key: "location", content: "上海" },
+            ],
+        },
+    ));
+    const extractor = new MemoryExtractor(engine, "main-model", new Tracer(traceStore));
+
+    const candidates = await extractor.extract({
+        userInput: "记住这些信息",
+        assistantAnswer: "好的",
+        sessionId: "session-1",
+    });
+
+    assert.equal(candidates.length, 3);
+    assert.deepEqual(traceStore.list().at(-1)?.data, {
+        candidateCount: 3,
+        savedCount: 0,
+        rejectedCount: 1,
+        memories: [
+            { type: "profile", key: "target_role" },
+            { type: "preference", key: "answer_style" },
+            { type: "decision", key: "memory_v1" },
+        ],
+    });
+    assert.doesNotMatch(JSON.stringify(traceStore.list()), /前端 Agent 工程师|顶层架构|采用 SQLite|上海/);
+});
+
 test("Writer 写入 automatic 候选并附带 Session ID，单条失败不阻止后续条目", async () => {
     const engine = new FakeQueryEngine(toolResponse(
         "submit_memory_candidates",
