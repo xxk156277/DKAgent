@@ -15,7 +15,10 @@ export type TraceEventName =
   | "model.request"
   | "model.response"
   | "tool.call"
-  | "tool.result";
+  | "tool.result"
+  | "memory.recall"
+  | "memory.extract"
+  | "memory.write";
 
 export interface TraceEvent<TData = unknown> {
   id: string;

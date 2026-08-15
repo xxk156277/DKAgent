@@ -34,6 +34,26 @@ export interface MemoryCandidate {
     content: string;
 }
 
+/** 当前成功 Turn 中可用于自动提取的原始文本。 */
+export interface MemoryCaptureInput {
+    /** 当前 Turn 的原始用户输入。 */
+    userInput: string;
+    /** 当前 Turn 的最终助手文本回答。 */
+    assistantAnswer: string;
+    /** 当前 Turn 所属 Session。 */
+    sessionId: string;
+}
+
+/** 提取稳定 Memory 候选的端口。 */
+export interface MemoryExtractorPort {
+    extract(input: MemoryCaptureInput): Promise<MemoryCandidate[]>;
+}
+
+/** 从一次成功 Turn 中提取并保存稳定记忆。 */
+export interface MemoryWriter {
+    capture(input: MemoryCaptureInput): Promise<void>;
+}
+
 /** 带来源信息的 Memory 写入参数。 */
 export interface MemoryUpsertInput extends MemoryCandidate {
     /** 写入来自显式命令还是自动提取。 */
