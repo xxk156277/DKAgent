@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { createReadFileTool } from "../../src/tools/filesystem/read-file.js";
+import { createWriteFileTool } from "../../src/tools/filesystem/write-file.js";
 import { resolveToolPath } from "../../src/tools/filesystem/path.js";
 import type { ToolContext } from "../../src/tools/types.js";
 
@@ -80,5 +81,37 @@ test("read_file 未指定 limit 时最多返回 500 行", async () => {
 
         assert.equal(result.data?.content.split("\n").length, 500);
         assert.equal(result.data?.totalLines, 501);
+    });
+});
+
+test("write_file 创建父目录和新文件", async () => {
+    await withTempDir(async (cwd) => {
+        const path = join(cwd, "nested", "result.txt");
+        const result = await createWriteFileTool(cwd).execute(
+            { path: "nested/result.txt", content: "你好" },
+            context(),
+        );
+
+        assert.equal(result.success, true);
+        assert.equal(result.data?.overwritten, false);
+        assert.equal(result.data?.bytesWritten, Buffer.byteLength("你好", "utf8"));
+        assert.equal(await readFile(path, "utf8"), "你好");
+    });
+});
+
+test("write_file 覆盖 cwd 外的既有文件", async () => {
+    await withTempDir(async (parent) => {
+        const cwd = join(parent, "project");
+        const path = join(parent, "result.txt");
+        await mkdir(cwd);
+        await writeFile(path, "old", "utf8");
+
+        const result = await createWriteFileTool(cwd).execute(
+            { path: "../result.txt", content: "new" },
+            context(),
+        );
+
+        assert.equal(result.data?.overwritten, true);
+        assert.equal(await readFile(path, "utf8"), "new");
     });
 });
