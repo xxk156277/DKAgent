@@ -95,6 +95,67 @@ export async function runAgentCli(options: {
                 prompt();
                 continue;
             }
+            if (userInput === "/sessions") {
+                const sessions = sessionStore.list();
+                const lines = sessions.map((session) => {
+                    const marker = session.id === currentSession.id ? "*" : " ";
+                    return `${marker} ${session.id}  ${session.updatedAt}`;
+                });
+                console.log(`${lines.join("\n")}\n`);
+                prompt();
+                continue;
+            }
+
+            if (userInput === "/switch" || userInput.startsWith("/switch ")) {
+                const sessionId = userInput.slice("/switch".length).trim();
+                if (!sessionId) {
+                    console.log("用法：/switch <sessionId>\n");
+                    prompt();
+                    continue;
+                }
+                if (sessionId === currentSession.id) {
+                    console.log(`已经是当前 Session ${sessionId}\n`);
+                    prompt();
+                    continue;
+                }
+
+                const snapshot = sessionStore.load(sessionId);
+                if (!snapshot) {
+                    console.log(`Session ${sessionId} 不存在\n`);
+                    prompt();
+                    continue;
+                }
+
+                const nextAgent = createAgent(snapshot);
+                currentSession = snapshot;
+                agent = nextAgent;
+                console.log(`已切换到 Session ${sessionId}\n`);
+                prompt();
+                continue;
+            }
+
+            if (userInput === "/delete" || userInput.startsWith("/delete ")) {
+                const sessionId = userInput.slice("/delete".length).trim();
+                if (!sessionId) {
+                    console.log("用法：/delete <sessionId>\n");
+                    prompt();
+                    continue;
+                }
+                if (sessionId === currentSession.id) {
+                    console.log("不能删除当前 Session，请先执行 /new 或 /switch。\n");
+                    prompt();
+                    continue;
+                }
+                if (!sessionStore.delete(sessionId)) {
+                    console.log(`Session ${sessionId} 不存在\n`);
+                    prompt();
+                    continue;
+                }
+
+                console.log(`已删除 Session ${sessionId}\n`);
+                prompt();
+                continue;
+            }
             try {
                 await agent.run(userInput);
                 process.stdout.write("\n\n");
