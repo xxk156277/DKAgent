@@ -46,10 +46,13 @@ class FakeProvider implements LLMProvider {
 
 const usage = { inputTokens: 1, outputTokens: 1 };
 
-function textResponse(content: string): StreamEvent[] {
+function textResponse(
+    content: string,
+    stopReason: Extract<StreamEvent, { type: "message_end" }>["stopReason"] = "end_turn",
+): StreamEvent[] {
     return [
         { type: "text_delta", content },
-        { type: "message_end", usage, stopReason: "end_turn" },
+        { type: "message_end", usage, stopReason },
     ];
 }
 
@@ -499,6 +502,39 @@ test("成功最终文本追加后按 Session 捕获记忆", async () => {
     });
     assert.equal(await noSessionAgent.run("无 Session 问题"), "无 Session 回答");
     assert.equal(captures.length, 1);
+});
+
+test("max_tokens 和 content_filter 文本仍返回并保存 Session，但不自动捕获记忆", async () => {
+    const provider = new FakeProvider([
+        textResponse("达到输出上限", "max_tokens"),
+        textResponse("触发内容过滤", "content_filter"),
+    ]);
+    const sessionMessages: AgentMessage[] = [];
+    const captures: Array<{ userInput: string; assistantAnswer: string; sessionId: string }> = [];
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: new ToolRegistry(),
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        memoryWriter: {
+            async capture(input) {
+                captures.push(input);
+            },
+        },
+        session: createMemoryTestSession(sessionMessages),
+    });
+
+    assert.equal(await agent.run("问题一"), "达到输出上限");
+    assert.equal(await agent.run("问题二"), "触发内容过滤");
+    assert.deepEqual(captures, []);
+    assert.deepEqual(sessionMessages, [
+        { role: "user", content: "问题一" },
+        { role: "assistant", content: "达到输出上限" },
+        { role: "user", content: "问题二" },
+        { role: "assistant", content: "触发内容过滤" },
+    ]);
 });
 
 test("Memory 失败降级，空文本或循环失败不捕获", async () => {

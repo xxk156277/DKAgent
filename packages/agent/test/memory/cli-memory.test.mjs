@@ -194,6 +194,37 @@ test("/memories 带参数时显示用法且不进入 AgentLoop", () => {
     assert.doesNotMatch(result.stderr, /Agent 运行失败/);
 });
 
+test("/memories 与 /forget 的 Store 异常显示中文错误且 CLI 继续运行", async () => {
+    const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-memory-"));
+    const cli = startCli(workingDirectory);
+
+    try {
+        await cli.waitForOutput(/DKAgent 已创建 Session/);
+        const database = new Database(join(workingDirectory, ".dkagent/memory.db"));
+        try {
+            database.exec("DROP TABLE memories");
+        } finally {
+            database.close();
+        }
+
+        let outputIndex = cli.output().length;
+        cli.child.stdin.write("/memories\n");
+        await cli.waitForOutput(/Memory 操作失败：/, outputIndex);
+
+        outputIndex = cli.output().length;
+        cli.child.stdin.write("/forget memory-id\n");
+        await cli.waitForOutput(/Memory 操作失败：/, outputIndex);
+
+        outputIndex = cli.output().length;
+        cli.child.stdin.write("/new\n");
+        await cli.waitForOutput(/已创建 Session [0-9a-f-]{36}/, outputIndex);
+    } finally {
+        const exited = cli.waitForExit();
+        cli.child.stdin.end();
+        assert.equal(await exited, 0, cli.errorOutput());
+    }
+});
+
 test("Memory 数据库初始化失败时 CLI 明确报错", () => {
     const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-memory-"));
     writeFileSync(join(workingDirectory, ".dkagent"), "not a directory");

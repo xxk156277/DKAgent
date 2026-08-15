@@ -174,6 +174,81 @@ test("非法候选记忆会被拒绝", () => {
     store.close();
 });
 
+test("凭据语义会联合扫描 key/content 并抵抗分隔符与零宽字符绕过", () => {
+    const store = createStore();
+    const input = {
+        type: "preference" as const,
+        source: "explicit" as const,
+        sourceSessionId: "session-1",
+    };
+
+    for (const candidate of [
+        { key: "api_key", content: "服务配置" },
+        { key: "note", content: "保存 API KEY" },
+        { key: "note", content: "保存 access-token" },
+        { key: "note", content: "保存 refresh_token" },
+        { key: "note", content: "保存 a\u200bpi.key：值" },
+        { key: "pass", content: "word 不应该跨字段绕过" },
+    ]) {
+        assert.throws(
+            () => store.upsert({ ...input, ...candidate }),
+            /凭据/,
+            JSON.stringify(candidate),
+        );
+    }
+
+    store.close();
+});
+
+test("合法候选在保存前移除 key/content 中的零宽格式字符", () => {
+    const store = createStore();
+
+    const saved = store.upsert({
+        type: "preference",
+        key: "answer\u200b_style",
+        content: "先\u2060讲架构",
+        source: "explicit",
+        sourceSessionId: "session-1",
+    });
+
+    assert.equal(saved.key, "answer_style");
+    assert.equal(saved.content, "先讲架构");
+    store.close();
+});
+
+test("常见凭据值前缀会被拒绝，普通 token 预算仍可保存", () => {
+    const store = createStore();
+    const input = {
+        type: "preference" as const,
+        key: "provider_value",
+        source: "explicit" as const,
+        sourceSessionId: "session-1",
+    };
+
+    for (const content of [
+        "OpenAI：sk-example",
+        "GitHub：ghp_example",
+        "GitHub：github_pat_example",
+        "Slack：xoxb-example",
+        "Slack：xoxp-example",
+        "AWS：AKIAEXAMPLE",
+        "标点绕过：s\u200bk-example",
+    ]) {
+        assert.throws(
+            () => store.upsert({ ...input, content }),
+            /凭据/,
+            content,
+        );
+    }
+
+    assert.equal(store.upsert({
+        ...input,
+        key: "token_budget",
+        content: "每轮保留 500 token 预算",
+    }).content, "每轮保留 500 token 预算");
+    store.close();
+});
+
 test("非法 source 在读取或写入前被拒绝", () => {
     const store = createStore();
     const explicit = store.upsert({

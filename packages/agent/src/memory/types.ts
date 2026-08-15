@@ -97,6 +97,16 @@ export const MAX_AUTOMATIC_MEMORIES_PER_TURN = 3;
 
 const MEMORY_TYPES: readonly MemoryType[] = ["profile", "preference", "decision"];
 const CREDENTIAL_PATTERN = /apikey|accesstoken|refreshtoken|password|secret|验证码|密码|密钥/i;
+const CREDENTIAL_VALUE_PREFIX_PATTERN = /(?:^|[^a-z0-9])(?:sk-|ghp_|github_pat_|xox[bp]-|akia)[a-z0-9_-]/i;
+const INVISIBLE_FORMAT_PATTERN = /\p{Cf}/gu;
+
+function removeInvisibleFormatCharacters(value: string): string {
+    return value.replace(INVISIBLE_FORMAT_PATTERN, "");
+}
+
+function normalizeCredentialText(value: string): string {
+    return removeInvisibleFormatCharacters(value.normalize("NFKC"));
+}
 
 /** 校验并规范化待保存的 Memory 候选。 */
 export function validateMemoryCandidate(candidate: MemoryCandidate): MemoryCandidate {
@@ -104,17 +114,21 @@ export function validateMemoryCandidate(candidate: MemoryCandidate): MemoryCandi
         throw new Error("Memory 类别不合法");
     }
 
-    const key = candidate.key.trim();
+    const key = removeInvisibleFormatCharacters(candidate.key).trim();
     if (!MEMORY_KEY_PATTERN.test(key)) {
         throw new Error("Memory key 必须是 1～64 位小写英文、数字、点、下划线或短横线");
     }
 
-    const content = candidate.content.trim();
+    const content = removeInvisibleFormatCharacters(candidate.content).trim();
     if (content.length === 0 || content.length > MAX_MEMORY_CONTENT_CHARS) {
         throw new Error(`Memory content 必须是 1～${MAX_MEMORY_CONTENT_CHARS} 个字符`);
     }
-    const normalizedContent = content.replace(/[\s_-]/g, "");
-    if (CREDENTIAL_PATTERN.test(normalizedContent)) {
+    const credentialText = normalizeCredentialText(`${key} ${content}`);
+    const normalizedCredentialTerms = credentialText.replace(/[\s\p{P}\p{S}]/gu, "");
+    if (
+        CREDENTIAL_PATTERN.test(normalizedCredentialTerms)
+        || CREDENTIAL_VALUE_PREFIX_PATTERN.test(credentialText)
+    ) {
         throw new Error("Memory content 不能包含凭据语义");
     }
 

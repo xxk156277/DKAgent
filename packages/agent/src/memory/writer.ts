@@ -17,26 +17,39 @@ export class AutomaticMemoryWriter implements MemoryWriter {
     public async capture(input: MemoryCaptureInput): Promise<void> {
         const candidates = await this.extractor.extract(input);
         let savedCount = 0;
-        let rejectedCount = 0;
+        let ignoredCount = 0;
+        const failures: unknown[] = [];
 
         for (const candidate of candidates) {
             try {
-                this.store.upsert({
+                const saved = this.store.upsert({
                     ...candidate,
                     source: "automatic",
                     sourceSessionId: input.sessionId,
                 });
-                savedCount += 1;
-            } catch {
-                rejectedCount += 1;
+                if (saved.source === "explicit") {
+                    ignoredCount += 1;
+                } else {
+                    savedCount += 1;
+                }
+            } catch (error: unknown) {
+                failures.push(error);
             }
         }
 
         this.tracer.event("memory.write", {
             candidateCount: candidates.length,
             savedCount,
-            rejectedCount,
+            ignoredCount,
+            failedCount: failures.length,
             memories: candidates.map(({ type, key }) => ({ type, key })),
         });
+
+        if (failures.length > 0) {
+            throw new AggregateError(
+                failures,
+                `Memory 自动写入失败：${failures.length} 条`,
+            );
+        }
     }
 }

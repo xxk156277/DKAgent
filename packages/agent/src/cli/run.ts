@@ -61,6 +61,7 @@ export async function runAgentCli(options: {
         }
         throw error;
     }
+    try {
     const memoryExtractor = new MemoryExtractor(queryEngine, config.model, tracer);
     const memoryRetriever = new MemoryRetriever(memoryStore);
     const memoryWriter = new AutomaticMemoryWriter(
@@ -114,7 +115,6 @@ export async function runAgentCli(options: {
         readline.close();
     });
 
-    try {
         for await (const input of readline) {
             const userInput = input.trim();
             if (!userInput) {
@@ -224,13 +224,18 @@ export async function runAgentCli(options: {
                     prompt();
                     continue;
                 }
-                const memories = memoryStore.list();
-                if (memories.length === 0) {
-                    console.log("暂无 Memory\n");
-                } else {
-                    console.log(`${memories.map((memory) => (
-                        `[${memory.type}] ${memory.key} = ${memory.content} (${memory.source}, ${memory.id})`
-                    )).join("\n")}\n`);
+                try {
+                    const memories = memoryStore.list();
+                    if (memories.length === 0) {
+                        console.log("暂无 Memory\n");
+                    } else {
+                        console.log(`${memories.map((memory) => (
+                            `[${memory.type}] ${memory.key} = ${memory.content} (${memory.source}, ${memory.id})`
+                        )).join("\n")}\n`);
+                    }
+                } catch (error: unknown) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    console.log(`Memory 操作失败：${message}\n`);
                 }
                 prompt();
                 continue;
@@ -244,10 +249,15 @@ export async function runAgentCli(options: {
                     continue;
                 }
 
-                if (memoryStore.delete(memoryId)) {
-                    console.log(`已删除 Memory ${memoryId}\n`);
-                } else {
-                    console.log(`Memory ${memoryId} 不存在\n`);
+                try {
+                    if (memoryStore.delete(memoryId)) {
+                        console.log(`已删除 Memory ${memoryId}\n`);
+                    } else {
+                        console.log(`Memory ${memoryId} 不存在\n`);
+                    }
+                } catch (error: unknown) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    console.log(`Memory 操作失败：${message}\n`);
                 }
                 prompt();
                 continue;

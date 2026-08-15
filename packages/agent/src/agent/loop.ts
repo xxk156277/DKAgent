@@ -44,16 +44,18 @@ export class AgentLoop {
             const maxSteps = this.options.maxSteps ?? 4;
 
             for (let step = 1; step <= maxSteps; step += 1) {
-                const answer = await this.tracer.span(
+                const result = await this.tracer.span(
                     "agent.step",
                     { step },
                     (stepSpan) => this.runStep(step, stepSpan, recalledMemory),
                     { step },
                 );
-                if (answer !== undefined) {
-                    turnSpan.setOutput({ answer });
-                    await this.safeCapture(userInput, answer);
-                    return answer;
+                if (result !== undefined) {
+                    turnSpan.setOutput({ answer: result.answer });
+                    if (result.shouldCaptureMemory) {
+                        await this.safeCapture(userInput, result.answer);
+                    }
+                    return result.answer;
                 }
             }
 
@@ -65,7 +67,7 @@ export class AgentLoop {
         step: number,
         stepSpan: TraceSpan,
         recalledMemory: string,
-    ): Promise<string | undefined> {
+    ): Promise<{ answer: string; shouldCaptureMemory: boolean } | undefined> {
         if (this.abortSignal.aborted) throw new Error("Agent Run 已中止");
 
         const systemPrompt = recalledMemory
@@ -145,7 +147,10 @@ export class AgentLoop {
             if (!answer) throw new Error("模型返回空文本");
             this.appendMessage({ role: "assistant", content: answer });
             stepSpan.setOutput({ answer });
-            return answer;
+            return {
+                answer,
+                shouldCaptureMemory: response.stopReason === "end_turn",
+            };
         }
 
         this.appendMessage({
