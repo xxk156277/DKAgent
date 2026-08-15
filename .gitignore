@@ -26,6 +26,7 @@ out/
 .vscode/
 .idea/
 *.swp
+.superpowers
 
 # Local Git worktrees
 .worktrees/

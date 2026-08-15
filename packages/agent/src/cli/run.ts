@@ -37,8 +37,11 @@ export async function runAgentCli(options: {
         tracer,
     );
     const sessionStore = new SqliteSessionStore(".dkagent/sessions.db");
-    const createAgent = (snapshot: SessionSnapshot): AgentLoop =>
-        new AgentLoop({
+
+    const createAgent = (
+        snapshot: SessionSnapshot
+    ): AgentLoop => {
+        return new AgentLoop({
             queryEngine,
             toolRegistry,
             contextManager,
@@ -56,6 +59,8 @@ export async function runAgentCli(options: {
                 store: sessionStore,
             },
         });
+    }
+
 
     const restored = sessionStore.loadLatest();
     let currentSession = restored ?? sessionStore.create();
@@ -69,6 +74,12 @@ export async function runAgentCli(options: {
     readline.setPrompt("> ");
     const prompt = createSafePrompt(readline);
     prompt();
+
+    // 在提示符处按 Ctrl+C 时优雅退出：结束 readline 输入循环，
+    // 循环结束后由 finally 统一调用 sessionStore.close() 保存并关闭数据库。
+    readline.on("SIGINT", () => {
+        readline.close();
+    });
 
     try {
         for await (const input of readline) {

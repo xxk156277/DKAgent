@@ -36,10 +36,25 @@ export class SqliteSessionStore implements SessionStore {
             const absolutePath = resolve(databasePath);
             mkdirSync(dirname(absolutePath), { recursive: true });
         }
-
+        /**
+         * 
+         *  prepare(sql)	    预编译 SQL，返回 Statement 对象
+            transaction(fn)	    把函数包成事务（原子执行、失败回滚）
+            exec(sql)	        执行整段 SQL 脚本
+            pragma(source, options?)	
+                                执行 PRAGMA 语句
+            close()	            关闭连接
+            function / aggregate	
+                                注册自定义 SQL 标量函数 / 聚合函数
+            backup / serialize / loadExtension / table	
+                                备份、序列化、扩展、虚拟表等高级能力
+         */
         this.database = new Database(databasePath);
+        // 开启 外键约束
         this.database.pragma("foreign_keys = ON");
+        // 预写日志 - ，把"写入"先追加到独立的日志文件，再异步合并回主库文件
         this.database.pragma("journal_mode = WAL");
+        // 执行sql
         this.database.exec(`
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -181,6 +196,8 @@ export class SqliteSessionStore implements SessionStore {
 
     /** 关闭数据库连接。 */
     public close(): void {
+        // 关闭前把 WAL 日志合并回主库文件，并截断 WAL，确保外部工具能看到完整数据。
+        this.database.pragma("wal_checkpoint(TRUNCATE)");
         this.database.close();
     }
 
