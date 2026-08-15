@@ -60,6 +60,12 @@ export interface MemoryStore {
     delete(id: string): boolean;
 }
 
+/** Memory 读取端口。 */
+export interface MemoryReader {
+    /** 根据当前用户输入返回可直接注入 System Prompt 的记忆片段。 */
+    recall(query: string): Promise<string>;
+}
+
 /** Memory 语义键允许的格式。 */
 export const MEMORY_KEY_PATTERN = /^[a-z0-9._-]{1,64}$/;
 
