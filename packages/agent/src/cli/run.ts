@@ -218,7 +218,12 @@ export async function runAgentCli(options: {
                 continue;
             }
 
-            if (userInput === "/memories") {
+            if (/^\/memories(?:\s|$)/.test(userInput)) {
+                if (userInput !== "/memories") {
+                    console.log("用法：/memories\n");
+                    prompt();
+                    continue;
+                }
                 const memories = memoryStore.list();
                 if (memories.length === 0) {
                     console.log("暂无 Memory\n");

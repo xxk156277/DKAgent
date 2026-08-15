@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import Database from "better-sqlite3";
 import test from "node:test";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
@@ -184,6 +185,15 @@ test("Memory 参数校验显示中文错误且 CLI 保持运行", () => {
     assert.match(result.stdout, /暂无 Memory/);
 });
 
+test("/memories 带参数时显示用法且不进入 AgentLoop", () => {
+    const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-memory-"));
+    const result = runCli(workingDirectory, "/memories extra\n");
+
+    assertCliSucceeded(result);
+    assert.match(result.stdout, /用法：\/memories/);
+    assert.doesNotMatch(result.stderr, /Agent 运行失败/);
+});
+
 test("Memory 数据库初始化失败时 CLI 明确报错", () => {
     const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-memory-"));
     writeFileSync(join(workingDirectory, ".dkagent"), "not a directory");
@@ -194,9 +204,11 @@ test("Memory 数据库初始化失败时 CLI 明确报错", () => {
     assert.match(result.stderr, /Memory 数据库初始化失败/);
 });
 
-test("/new、/switch、/delete 只管理 Session，不删除 Memory", async () => {
+test("删除写入来源 Session 后仍保留跨 Session Memory", async () => {
     const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-memory-"));
     const cli = startCli(workingDirectory);
+    let memoryId;
+    let secondSessionId;
 
     try {
         const startup = await cli.waitForOutput(
@@ -205,20 +217,20 @@ test("/new、/switch、/delete 只管理 Session，不删除 Memory", async () =
         const firstSessionId = startup[1];
 
         let outputIndex = cli.output().length;
-        cli.child.stdin.write("/remember decision memory_mvp 使用 SQLite\n");
-        const saved = await cli.waitForOutput(
-            /已保存 Memory ([0-9a-f-]{36})/,
-            outputIndex,
-        );
-        const memoryId = saved[1];
-
-        outputIndex = cli.output().length;
         cli.child.stdin.write("/new\n");
         const created = await cli.waitForOutput(
             /已创建 Session ([0-9a-f-]{36})/,
             outputIndex,
         );
-        const secondSessionId = created[1];
+        secondSessionId = created[1];
+
+        outputIndex = cli.output().length;
+        cli.child.stdin.write("/remember decision memory_mvp 使用 SQLite\n");
+        const saved = await cli.waitForOutput(
+            /已保存 Memory ([0-9a-f-]{36})/,
+            outputIndex,
+        );
+        memoryId = saved[1];
 
         outputIndex = cli.output().length;
         cli.child.stdin.write(`/switch ${firstSessionId}\n`);
@@ -244,5 +256,20 @@ test("/new、/switch、/delete 只管理 Session，不删除 Memory", async () =
         const exited = cli.waitForExit();
         cli.child.stdin.end();
         assert.equal(await exited, 0, cli.errorOutput());
+    }
+
+    const database = new Database(
+        join(workingDirectory, ".dkagent/memory.db"),
+        { readonly: true },
+    );
+    try {
+        const memory = database.prepare(`
+            SELECT source_session_id
+            FROM memories
+            WHERE id = ?
+        `).get(memoryId);
+        assert.deepEqual(memory, { source_session_id: secondSessionId });
+    } finally {
+        database.close();
     }
 });
