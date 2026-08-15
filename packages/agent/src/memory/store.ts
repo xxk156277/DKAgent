@@ -63,6 +63,9 @@ export class SqliteMemoryStore implements MemoryStore {
 
     /** 新建或按 type/key 更新记忆，并保护显式记忆不被自动结果覆盖。 */
     public upsert(input: MemoryUpsertInput): MemoryEntry {
+        if (input.source !== "explicit" && input.source !== "automatic") {
+            throw new Error("Memory source 必须是 explicit 或 automatic");
+        }
         const candidate = validateMemoryCandidate(input);
         const write = this.database.transaction(() => {
             const existing = this.database.prepare(`

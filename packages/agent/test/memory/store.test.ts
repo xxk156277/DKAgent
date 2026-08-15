@@ -155,5 +155,43 @@ test("非法候选记忆会被拒绝", () => {
         () => store.upsert({ ...input, key: "style", content: "保存 api key" }),
         /凭据/,
     );
+    for (const credential of [
+        "api-key",
+        "api_key",
+        "apikey",
+        "access-token",
+        "access_token",
+        "accesstoken",
+        "refresh-token",
+        "refresh_token",
+        "refreshtoken",
+    ]) {
+        assert.throws(
+            () => store.upsert({ ...input, key: "style", content: `保存 ${credential}` }),
+            /凭据/,
+        );
+    }
+    store.close();
+});
+
+test("非法 source 在读取或写入前被拒绝", () => {
+    const store = createStore();
+    const explicit = store.upsert({
+        type: "preference",
+        key: "answer_style",
+        content: "先讲架构",
+        source: "explicit",
+        sourceSessionId: "session-1",
+    });
+    const invalidInput = {
+        type: "preference",
+        key: "answer_style",
+        content: "只给代码",
+        source: "manual",
+        sourceSessionId: "session-2",
+    } as unknown as import("../../src/memory/types.js").MemoryUpsertInput;
+
+    assert.throws(() => store.upsert(invalidInput), /source/);
+    assert.deepEqual(store.list(), [explicit]);
     store.close();
 });

@@ -70,7 +70,7 @@ export const MAX_MEMORY_CONTENT_CHARS = 500;
 export const MAX_AUTOMATIC_MEMORIES_PER_TURN = 3;
 
 const MEMORY_TYPES: readonly MemoryType[] = ["profile", "preference", "decision"];
-const CREDENTIAL_PATTERN = /api key|access token|refresh token|password|secret|验证码|密码|密钥/i;
+const CREDENTIAL_PATTERN = /apikey|accesstoken|refreshtoken|password|secret|验证码|密码|密钥/i;
 
 /** 校验并规范化待保存的 Memory 候选。 */
 export function validateMemoryCandidate(candidate: MemoryCandidate): MemoryCandidate {
@@ -87,7 +87,8 @@ export function validateMemoryCandidate(candidate: MemoryCandidate): MemoryCandi
     if (content.length === 0 || content.length > MAX_MEMORY_CONTENT_CHARS) {
         throw new Error(`Memory content 必须是 1～${MAX_MEMORY_CONTENT_CHARS} 个字符`);
     }
-    if (CREDENTIAL_PATTERN.test(content)) {
+    const normalizedContent = content.replace(/[\s_-]/g, "");
+    if (CREDENTIAL_PATTERN.test(normalizedContent)) {
         throw new Error("Memory content 不能包含凭据语义");
     }
 
