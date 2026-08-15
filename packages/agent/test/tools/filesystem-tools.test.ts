@@ -6,6 +6,7 @@ import test from "node:test";
 import type { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { createReadFileTool } from "../../src/tools/filesystem/read-file.js";
 import { createWriteFileTool } from "../../src/tools/filesystem/write-file.js";
+import { createFindFilesTool } from "../../src/tools/filesystem/find-files.js";
 import { resolveToolPath } from "../../src/tools/filesystem/path.js";
 import type { ToolContext } from "../../src/tools/types.js";
 
@@ -113,5 +114,64 @@ test("write_file 覆盖 cwd 外的既有文件", async () => {
 
         assert.equal(result.data?.overwritten, true);
         assert.equal(await readFile(path, "utf8"), "new");
+    });
+});
+
+test("find_files 按 glob 查找并尊重 limit", async () => {
+    await withTempDir(async (cwd) => {
+        await mkdir(join(cwd, "src"));
+        await writeFile(join(cwd, "src", "a.ts"), "a", "utf8");
+        await writeFile(join(cwd, "src", "b.ts"), "b", "utf8");
+        await writeFile(join(cwd, "src", "c.js"), "c", "utf8");
+
+        const result = await createFindFilesTool(cwd).execute(
+            { pattern: "**/*.ts", limit: 1 },
+            context(),
+        );
+
+        assert.equal(result.success, true);
+        assert.equal(result.data?.files.length, 1);
+        assert.match(result.data?.files[0] ?? "", /\.ts$/);
+    });
+});
+
+test("find_files 无匹配时成功返回空数组", async () => {
+    await withTempDir(async (cwd) => {
+        const result = await createFindFilesTool(cwd).execute(
+            { pattern: "**/*.missing" },
+            context(),
+        );
+
+        assert.deepEqual(result.data?.files, []);
+    });
+});
+
+test("find_files 默认尊重 .gitignore", async () => {
+    await withTempDir(async (cwd) => {
+        await mkdir(join(cwd, ".git"));
+        await writeFile(join(cwd, ".gitignore"), "ignored.ts\n", "utf8");
+        await writeFile(join(cwd, "visible.ts"), "visible", "utf8");
+        await writeFile(join(cwd, "ignored.ts"), "ignored", "utf8");
+
+        const result = await createFindFilesTool(cwd).execute(
+            { pattern: "*.ts" },
+            context(),
+        );
+
+        assert.deepEqual(result.data?.files, ["visible.ts"]);
+    });
+});
+
+test("find_files 响应已中止的 AbortSignal", async () => {
+    await withTempDir(async (cwd) => {
+        const controller = new AbortController();
+        controller.abort();
+        const result = await createFindFilesTool(cwd).execute(
+            { pattern: "**/*" },
+            context(controller.signal),
+        );
+
+        assert.equal(result.success, false);
+        assert.equal(result.error?.code, "timeout");
     });
 });
