@@ -39,11 +39,45 @@ export interface TapStepView {
 export interface TapTurnView {
   id: string;
   steps: TapStepView[];
+  rawEvents: TraceEvent[];
 }
 
 export interface TapSessionView {
   id: string;
   turns: TapTurnView[];
+}
+
+export type AgentTurnStatus = "running" | "completed" | "error";
+export type AgentEvaluationStatus = "passed" | "warning" | "failed" | "unknown";
+
+export interface AgentTurnMetrics {
+  status: AgentTurnStatus;
+  durationMs?: number;
+  stepCount: number;
+  modelCallCount: number;
+  toolCallCount: number;
+  successfulToolCallCount?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  compactionCount: number;
+  latestCompaction?: {
+    tokensBefore: number;
+    tokensAfter: number;
+    savedRatio: number;
+  };
+}
+
+export interface AgentEvaluationItem {
+  id: string;
+  label: string;
+  status: AgentEvaluationStatus;
+  summary: string;
+  evidenceEventIds: string[];
+}
+
+export interface AgentTurnAnalysis {
+  metrics: AgentTurnMetrics;
+  evaluations: AgentEvaluationItem[];
 }
 
 /** 上下文裁剪时必须一起展示的消息组。 */

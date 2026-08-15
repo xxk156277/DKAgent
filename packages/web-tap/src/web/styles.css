@@ -1,7 +1,12 @@
 :root {
   font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
-  color: var(--ant-color-text, #1f1f1f);
-  background: var(--ant-color-bg-layout, #f5f5f5);
+  color: var(--ant-color-text, #253247);
+  background: #edf2f7;
+  --tap-navy: #172338;
+  --tap-canvas: #edf2f7;
+  --tap-panel: #ffffff;
+  --tap-border: #dce4ed;
+  --tap-shadow: 0 6px 18px rgba(37, 50, 71, 0.06);
 }
 
 * {
@@ -17,23 +22,137 @@ button {
   font: inherit;
 }
 
-#root,
-.tap-app-shell {
+#root {
   height: 100vh;
   height: 100dvh;
 }
 
 .tap-app-shell {
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
-  background: var(--ant-color-bg-layout, #f5f5f5);
+  background: var(--tap-canvas);
+}
+
+.tap-product-header {
+  display: flex;
+  flex: 0 0 52px;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: 20px;
+  color: #dfe8f5;
+  background: var(--tap-navy);
+}
+
+.tap-product-header .ant-typography {
+  color: inherit;
+}
+
+.tap-brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.tap-brand-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  color: #fff;
+  font: 700 11px/1 "SFMono-Regular", Consolas, monospace;
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 8px;
+  place-items: center;
+}
+
+.tap-mobile-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.tap-mobile-actions .ant-btn {
+  color: inherit;
+}
+
+.tap-connection {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  color: #bdc9d8;
+  font-size: 12px;
+}
+
+.tap-connection-dot {
+  width: 7px;
+  height: 7px;
+  background: currentColor;
+  border-radius: 50%;
+}
+
+.tap-connection.is-live { color: #68d7a7; }
+.tap-connection.is-reconnecting { color: #f0b35a; }
+.tap-connection.is-error { color: #ff8585; }
+
+.tap-app-body,
+.tap-workspace-content,
+.tap-execution-workspace {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tap-app-body {
+  flex: 1 1 auto;
+}
+
+.tap-workspace {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tap-turn-header {
+  display: flex;
+  flex: 0 0 72px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--tap-panel);
+  border-block-end: 1px solid var(--tap-border);
+}
+
+.tap-turn-header .ant-typography {
+  margin: 0;
+}
+
+.tap-turn-header h1.ant-typography {
+  margin-block-end: 3px;
+  font-size: 18px;
+}
+
+.tap-workspace-content {
+  flex: 1 1 auto;
+  gap: 12px;
+  padding: 12px;
+}
+
+.tap-execution-workspace {
+  flex: 1 1 auto;
+  overflow: hidden;
+  background: var(--tap-panel);
+  border: 1px solid var(--tap-border);
+  border-radius: 10px;
+  box-shadow: var(--tap-shadow);
 }
 
 .tap-region {
   min-width: 0;
   padding: 24px;
-  background: var(--ant-color-bg-container, #fff);
+  background: var(--tap-panel);
 }
 
 .tap-region-header {
@@ -48,14 +167,14 @@ button {
 .tap-turn-region {
   flex: 0 0 240px;
   overflow-y: auto;
-  border-inline-end: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-inline-end: 1px solid var(--tap-border);
 }
 
 .tap-detail-region {
   flex: 1 1 auto;
   min-width: 0;
   overflow-y: auto;
-  background: var(--ant-color-bg-layout, #f5f5f5);
+  background: var(--tap-panel);
   scrollbar-width: thin;
   scrollbar-color: var(--ant-color-border-secondary, #d9d9d9) transparent;
 }
@@ -82,10 +201,93 @@ button {
   margin-inline: auto;
 }
 
+.tap-metrics-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+}
+
+.tap-metrics-grid .ant-statistic {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.tap-metrics-grid .ant-statistic-content {
+  overflow-wrap: anywhere;
+  font-size: 18px;
+}
+
+.tap-evaluation-item.ant-list-item {
+  display: grid;
+  gap: 4px;
+}
+
+.tap-evaluation-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .tap-node-region {
-  flex: 0 0 350px;
+  flex: 0 0 300px;
   overflow-y: auto;
-  border-inline-end: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-inline-end: 1px solid var(--tap-border);
+}
+
+.tap-insights-rail {
+  flex: 0 0 320px;
+  min-width: 0;
+  overflow-y: auto;
+  background: var(--tap-panel);
+  border: 1px solid var(--tap-border);
+  border-radius: 10px;
+  box-shadow: var(--tap-shadow);
+  transition: flex-basis 160ms ease;
+}
+
+.tap-insights-rail.is-collapsed {
+  flex-basis: 48px;
+  overflow: hidden;
+}
+
+.tap-insights-rail.is-collapsed .tap-insights-header {
+  justify-content: center;
+  padding-inline: 6px;
+}
+
+.tap-insights-rail.is-collapsed .ant-btn {
+  min-inline-size: 32px;
+  padding-inline: 0;
+}
+
+.tap-insights-rail.is-collapsed .tap-insights-toggle-badge .ant-badge-count {
+  transform: translate(0, -50%);
+}
+
+.tap-insights-header {
+  display: flex;
+  min-height: 52px;
+  padding: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  border-block-end: 1px solid var(--tap-border);
+}
+
+.tap-insights-header .ant-typography {
+  margin: 0;
+}
+
+.tap-insights-content {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.tap-insights-content .ant-card {
+  border-color: var(--tap-border);
+  box-shadow: none;
 }
 
 .tap-turn-list .ant-list-item {
@@ -101,7 +303,8 @@ button {
   cursor: pointer;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--ant-border-radius, 6px);
+  border-radius: 8px;
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
 }
 
 .tap-turn-button {
@@ -294,52 +497,74 @@ button {
   border-radius: var(--ant-border-radius-sm, 4px);
 }
 
-@media (max-width: 959px) {
+@media (max-width: 1279px) and (min-width: 768px) {
+  .tap-turn-region { flex-basis: 208px; }
+  .tap-node-region { flex-basis: 280px; }
+  .tap-workspace-content { gap: 8px; padding: 8px; }
+}
+
+@media (max-width: 767px) {
+  body { overflow-x: hidden; }
+
   #root,
   .tap-app-shell {
+    min-height: 100vh;
+    min-height: 100dvh;
     height: auto;
   }
 
-  .tap-app-shell {
-    flex-wrap: wrap;
+  .tap-app-shell { overflow: visible; }
+
+  .tap-product-header {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 10;
+    padding-inline: 12px;
+  }
+
+  .tap-app-body,
+  .tap-workspace,
+  .tap-workspace-content,
+  .tap-execution-workspace {
+    min-height: 0;
     overflow: visible;
   }
 
-  .tap-detail-region {
-    flex: 0 0 calc(100% - 240px);
-    overflow-y: visible;
+  .tap-workspace-content,
+  .tap-execution-workspace { flex-direction: column; }
+
+  .tap-workspace-content { padding: 8px; }
+
+  .tap-turn-header {
+    min-height: 68px;
+    padding: 10px 12px;
   }
 
-  .tap-node-region {
-    order: 3;
-    flex-basis: 100%;
-    overflow-y: visible;
-    border-block-start: 1px solid var(--ant-color-border-secondary, #f0f0f0);
-    border-inline-end: 0;
-    border-inline-start: 0;
-  }
-}
-
-@media (max-width: 639px) {
-  .tap-turn-region,
   .tap-node-region,
   .tap-detail-region {
-    flex: 0 0 100%;
-  }
-
-  .tap-region {
-    padding: 16px;
-  }
-
-  .tap-turn-region {
-    border-block-end: 0;
-    border-inline-end: 0;
+    flex: 0 0 auto;
+    width: 100%;
+    overflow: visible;
   }
 
   .tap-node-region {
-    order: 0;
-    border-block-start: 0;
+    max-height: none;
     border-inline-end: 0;
+    border-block-end: 1px solid var(--tap-border);
+  }
+
+  .tap-region { padding: 14px; }
+
+  .tap-json-block {
+    overflow-x: auto;
+    white-space: pre;
+    overflow-wrap: normal;
+  }
+
+  .ant-drawer .tap-turn-region {
+    width: 100%;
+    padding: 0;
+    border: 0;
   }
 }
 

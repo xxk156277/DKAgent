@@ -76,6 +76,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 let sequence = 0;
 
 describe("projectEvents", () => {
+  it("keeps every source event once on its Turn projection", () => {
+    sequence = 0;
+    const events = [
+      event("turn.start", "turn-events", { input: "你好" }),
+      event("context.before", "turn-events", beforePayload, 1),
+      event("context.after", "turn-events", afterPayload, 1),
+      event("model.response", "turn-events", { request, response: textResponse }, 1),
+      event("turn.end", "turn-events", { answer: "你好" }, 1),
+    ];
+
+    const turn = projectEvents(events)[0]?.turns[0];
+
+    expect(turn?.rawEvents).toEqual(events);
+  });
+
   it("projects one text Turn into one Step with adjacent model nodes", () => {
     sequence = 0;
     const textTurn = [

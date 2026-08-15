@@ -1,14 +1,30 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { TraceEvent, TraceEventName, TracePhase } from "@dkagent/trace";
+import { renderToString } from "react-dom/server";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TapApp } from "../../src/web/app/TapApp.js";
+import { AgentEvaluationPanel } from "../../src/web/features/agent-metrics/AgentEvaluationPanel.js";
+import type { AgentEvaluationItem } from "../../src/web/model/types.js";
+import { getTapViewport } from "../../src/web/shared/useTapViewport.js";
 import { createTapStore } from "../../src/web/store/tap-store.js";
+
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+Object.defineProperty(globalThis, "ResizeObserver", {
+  configurable: true,
+  value: ResizeObserverMock,
+});
 
 const clipboardWrite = vi.fn<() => Promise<void>>();
 
 beforeEach(() => {
+  setViewportWidth(1440);
   clipboardWrite.mockReset();
   clipboardWrite.mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {
@@ -20,55 +36,125 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TapApp", () => {
-  it("lays out Turn, Node, and Detail as flexible regions in DOM order", () => {
+  it("maps viewport widths to the approved responsive modes", () => {
+    expect(getTapViewport(390)).toBe("mobile");
+    expect(getTapViewport(767)).toBe("mobile");
+    expect(getTapViewport(768)).toBe("compact");
+    expect(getTapViewport(1279)).toBe("compact");
+    expect(getTapViewport(1280)).toBe("wide");
+  });
+
+  it("opens Turn and Agent insight drawers on mobile", async () => {
+    setViewportWidth(390);
+    renderFixture(agentMetricsFixture());
+
+    fireEvent.click(screen.getByRole("button", { name: "打开对话轮次" }));
+    expect(await screen.findByRole("dialog", { name: "对话轮次" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭对话轮次" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "对话轮次" })).not.toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "打开 Agent 指标" }));
+    const drawer = await screen.findByRole("dialog", { name: "Agent 指标" });
+    expect(within(drawer).getByText("12 / 4")).toBeVisible();
+  });
+
+  it("starts with the Agent insight rail collapsed in compact mode", () => {
+    setViewportWidth(1024);
+    renderFixture(agentMetricsFixture());
+
+    expect(screen.getByRole("complementary", { name: "Agent 指标" })).toHaveClass("is-collapsed");
+  });
+
+  it("renders without window for SSR", () => {
+    const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", { configurable: true, value: undefined });
+
+    try {
+      expect(() => renderToString(<TapApp store={createTapStore()} />)).not.toThrow();
+    } finally {
+      if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);
+    }
+  });
+
+  it("closes the Turn drawer and restores focus to its trigger after selecting a Turn", async () => {
+    setViewportWidth(390);
     renderFixture();
 
-    const complementaryRegions = screen.getAllByRole("complementary");
-    expect(complementaryRegions).toHaveLength(2);
-    const turnRegion = complementaryRegions[0]!;
-    const nodeRegion = complementaryRegions[1]!;
-    const detailRegion = screen.getByRole("main");
-    expect([turnRegion, nodeRegion, detailRegion].map((region) => region.className)).toEqual([
-      expect.stringContaining("tap-turn-region"),
-      expect.stringContaining("tap-node-region"),
-      expect.stringContaining("tap-detail-region"),
-    ]);
-    expect(turnRegion.compareDocumentPosition(nodeRegion)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(nodeRegion.compareDocumentPosition(detailRegion)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const trigger = screen.getByRole("button", { name: "打开对话轮次" });
+    fireEvent.click(trigger);
+    const drawer = await screen.findByRole("dialog", { name: "对话轮次" });
+    fireEvent.click(within(drawer).getByRole("button", { name: /^第 2 轮/ }));
 
-    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
-    expect(styles).toMatch(/\.tap-app-shell\s*\{[^}]*display:\s*flex;/s);
-    expect(styles).toMatch(/\.tap-node-region\s*\{[^}]*flex:\s*0\s+0\s+280px;/s);
-    expect(styles).toMatch(/\.tap-detail-region\s*\{[^}]*flex:\s*1\s+1\s+auto;/s);
-    expect(styles).toMatch(/\.tap-detail-region\s*\{[^}]*min-width:\s*0;/s);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "对话轮次" })).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
   });
 
-  it("keeps Flex wrapping and visual order responsive at each breakpoint", () => {
+  it("uses an explicit mobile overflow contract", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
-    const tabletStyles = getMediaBlock(styles, 959);
-    const mobileStyles = getMediaBlock(styles, 639);
 
-    expect(tabletStyles).toMatch(/\.tap-app-shell\s*\{[^}]*flex-wrap:\s*wrap;/s);
-    expect(tabletStyles).toMatch(/\.tap-detail-region\s*\{[^}]*flex:\s*0\s+0\s+calc\(100%\s*-\s*240px\);/s);
-    expect(tabletStyles).toMatch(/\.tap-node-region\s*\{[^}]*order:\s*3;/s);
-    expect(tabletStyles).toMatch(/\.tap-node-region\s*\{[^}]*flex-basis:\s*100%;/s);
-    expect(mobileStyles).toMatch(
-      /\.tap-turn-region,\s*\.tap-node-region,\s*\.tap-detail-region\s*\{[^}]*flex:\s*0\s+0\s+100%;/s,
+    expect(styles).toMatch(/@media\s*\(max-width:\s*767px\)[\s\S]*?body\s*\{[^}]*overflow-x:\s*hidden;/);
+  });
+
+  it("places execution and Agent insights as sibling regions for the selected Turn", () => {
+    renderFixture(agentMetricsFixture());
+
+    const workspace = screen.getByRole("region", { name: "第 1 轮工作区" });
+    const execution = within(workspace).getByRole("region", { name: "执行过程" });
+    const insights = within(workspace).getByRole("complementary", { name: "Agent 指标" });
+    const detail = within(execution).getByRole("main");
+
+    expect(execution.parentElement).toBe(insights.parentElement);
+    expect(execution).toContainElement(detail);
+    expect(insights).not.toContainElement(detail);
+    expect(within(workspace).getByText("Agent 指标汇总当前 Turn，不随 Node 切换")).toBeVisible();
+  });
+
+  it("collapses Agent insights without changing the selected Turn or Node", () => {
+    const { store } = renderFixture(agentMetricsFixture());
+    const selectedTurnId = store.getState().selectedTurnId;
+    const selectedNodeId = store.getState().selectedNodeId;
+
+    fireEvent.click(screen.getByRole("button", { name: "收起 Agent 指标" }));
+
+    const insights = screen.getByRole("complementary", { name: "Agent 指标" });
+    expect(insights).toHaveClass("is-collapsed");
+    expect(within(insights).queryByText("输入 / 输出 Token")).not.toBeInTheDocument();
+    const toggle = within(insights).getByRole("button", { name: "展开 Agent 指标" });
+    expect(within(insights).getByText("0")).toBeVisible();
+    expect(toggle).toBeVisible();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.closest(".tap-insights-toggle-badge")).toContainElement(toggle);
+    expect(store.getState().selectedTurnId).toBe(selectedTurnId);
+    expect(store.getState().selectedNodeId).toBe(selectedNodeId);
+  });
+
+  it("keeps the collapsed Agent insights toggle within its 48px rail", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
+
+    expect(styles).toMatch(/\.tap-insights-rail\.is-collapsed\s*\{[^}]*flex-basis:\s*48px;/s);
+    expect(styles).toMatch(
+      /\.tap-insights-rail\.is-collapsed\s+\.tap-insights-header\s*\{[^}]*padding-inline:\s*6px;/s,
     );
-    expect(mobileStyles).toMatch(/\.tap-node-region\s*\{[^}]*order:\s*0;/s);
+    expect(styles).toMatch(
+      /\.tap-insights-rail\.is-collapsed\s+\.ant-btn\s*\{[^}]*min-inline-size:\s*32px;/s,
+    );
+    expect(styles).toMatch(
+      /\.tap-insights-rail\.is-collapsed\s+\.tap-insights-toggle-badge\s+\.ant-badge-count\s*\{[^}]*transform:\s*translate\(0,\s*-50%\);/s,
+    );
   });
 
-  it("uses one desktop divider and clears obsolete dividers when wrapping", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/web/styles.css"), "utf8");
-    const desktopStyles = styles.slice(0, styles.indexOf("@media"));
-    const tabletStyles = getMediaBlock(styles, 959);
-    const mobileStyles = getMediaBlock(styles, 639);
+  it("keeps Turn-level metrics unchanged when selecting another Node", () => {
+    renderFixture(agentMetricsFixture());
+    const insights = screen.getByRole("complementary", { name: "Agent 指标" });
+    const tokenText = within(insights).getByText("12 / 4").textContent;
 
-    expect(desktopStyles).toMatch(/\.tap-node-region\s*\{[^}]*border-inline-end:\s*1px\s+solid/s);
-    expect(desktopStyles).not.toMatch(/\.tap-node-region\s*\{[^}]*border-inline-start:/s);
-    expect(tabletStyles).toMatch(/\.tap-node-region\s*\{[^}]*border-inline-end:\s*0;/s);
-    expect(mobileStyles).toMatch(/\.tap-turn-region\s*\{[^}]*border-inline-end:\s*0;/s);
-    expect(mobileStyles).toMatch(/\.tap-node-region\s*\{[^}]*border-block-start:\s*0;/s);
+    fireEvent.click(screen.getByRole("button", { name: /模型响应/ }));
+
+    expect(within(insights).getByText("12 / 4")).toHaveTextContent(tokenText ?? "");
   });
 
   it("renders three Turns without Session navigation or breadcrumbs", () => {
@@ -88,8 +174,45 @@ describe("TapApp", () => {
     fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
 
     expect(screen.getByRole("heading", { name: "第 2 轮节点" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Step 1" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Step 2" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Step 1/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Step 2/ })).toBeVisible();
+  });
+
+  it("shows Agent facts, rule checks, and unknown semantic evaluations", () => {
+    renderFixture(agentMetricsFixture());
+
+    const metrics = screen.getByRole("region", { name: "Agent 运行指标" });
+    expect(within(metrics).getByText("已完成")).toBeVisible();
+    expect(within(metrics).getByText("50 毫秒")).toBeVisible();
+    expect(within(metrics).getByText("12 / 4")).toBeVisible();
+    expect(within(metrics).getByText("1 / 1 成功")).toBeVisible();
+    expect(within(metrics).getByText("100 → 60（节省 40.0%）")).toBeVisible();
+
+    const evaluation = screen.getByRole("region", { name: "Agent 轨迹评价" });
+    expect(within(evaluation).getByText("Tool 执行结果")).toBeVisible();
+    expect(within(evaluation).getAllByText("通过").length).toBeGreaterThan(0);
+
+    const traceRules = within(evaluation).getByRole("region", { name: "规则判断（基于 Trace）" });
+    expect(within(traceRules).getByRole("heading", { name: "规则判断（基于 Trace）" })).toBeVisible();
+
+    const pendingEvaluation = within(evaluation).getByRole("region", { name: "待评测（需要外部证据）" });
+    expect(within(pendingEvaluation).getByRole("heading", { name: "待评测（需要外部证据）" })).toBeVisible();
+    expect(within(pendingEvaluation).getByText("幻觉")).toBeVisible();
+    expect(within(pendingEvaluation).getByText("待评测：需要外部事实依据或参考答案")).toBeVisible();
+    expect(within(traceRules).queryByText("幻觉")).not.toBeInTheDocument();
+  });
+
+  it("updates Agent analysis when selecting another Turn", () => {
+    renderFixture(agentMetricsFixtureWithRunningTurn());
+
+    fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
+
+    const metrics = screen.getByRole("region", { name: "Agent 运行指标" });
+    expect(within(metrics).getByText("进行中")).toBeVisible();
+    expect(within(metrics).getAllByText("未记录").length).toBeGreaterThan(0);
+
+    const evaluation = screen.getByRole("region", { name: "Agent 轨迹评价" });
+    expect(within(evaluation).getByText("本轮仍在运行，尚不能判断是否完成")).toBeVisible();
   });
 
   it("marks every non-error node completed after its Turn ends", () => {
@@ -250,10 +373,113 @@ describe("TapApp", () => {
   });
 });
 
+describe("AgentEvaluationPanel", () => {
+  it("renders failed and warning trace rules outside the pending evaluation group", () => {
+    const items: AgentEvaluationItem[] = [
+      {
+        id: "tool_results",
+        label: "Tool 执行结果",
+        status: "failed",
+        summary: "1 个 Tool 调用明确失败",
+        evidenceEventIds: ["tool-result-1"],
+      },
+      {
+        id: "context_compaction",
+        label: "Context 压缩结果",
+        status: "warning",
+        summary: "压缩后 Token 没有下降，需要检查压缩过程",
+        evidenceEventIds: ["compaction-1"],
+      },
+      {
+        id: "answer_quality",
+        label: "最终答案质量",
+        status: "unknown",
+        summary: "待评测：需要参考答案、人工评价或独立评测器",
+        evidenceEventIds: [],
+      },
+    ];
+
+    render(<AgentEvaluationPanel items={items} />);
+
+    const traceRules = screen.getByRole("region", { name: "规则判断（基于 Trace）" });
+    const failedItem = within(traceRules).getByText("Tool 执行结果").closest("li");
+    const warningItem = within(traceRules).getByText("Context 压缩结果").closest("li");
+    expect(failedItem).not.toBeNull();
+    expect(warningItem).not.toBeNull();
+    expect(within(failedItem!).getByText("失败")).toBeVisible();
+    expect(within(warningItem!).getByText("需关注")).toBeVisible();
+
+    const pendingEvaluation = screen.getByRole("region", { name: "待评测（需要外部证据）" });
+    expect(within(pendingEvaluation).queryByText("Tool 执行结果")).not.toBeInTheDocument();
+    expect(within(pendingEvaluation).queryByText("Context 压缩结果")).not.toBeInTheDocument();
+  });
+});
+
 function renderFixture(events = fixtureEvents()) {
   const store = createTapStore();
   store.getState().replaceHistory(events);
   return { store, ...render(<TapApp store={store} />) };
+}
+
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  fireEvent(window, new Event("resize"));
+}
+
+function metricEvent(
+  id: string,
+  traceId: string,
+  name: TraceEvent["name"],
+  phase: TraceEvent["phase"],
+  data: unknown,
+  options: Partial<Pick<TraceEvent, "spanId" | "parentSpanId" | "step" | "durationMs">> = {},
+): TraceEvent {
+  const sequence = Number(id.split("-").at(-1));
+  return {
+    id,
+    traceId,
+    sequence,
+    timestamp: `2026-08-13T00:00:${String(sequence).padStart(2, "0")}.000Z`,
+    name,
+    phase,
+    data,
+    ...options,
+  };
+}
+
+function agentMetricsFixture(): TraceEvent[] {
+  return [
+    metricEvent("metric-1", "turn-1", "agent.turn", "start", { input: { input: "查天气" } }, { spanId: "turn-1" }),
+    metricEvent("metric-2", "turn-1", "agent.step", "start", { input: { step: 1 } }, { spanId: "step-1", parentSpanId: "turn-1", step: 1 }),
+    metricEvent("metric-3", "turn-1", "model.request", "start", { input: { model: "test" } }, { spanId: "model-1", parentSpanId: "step-1", step: 1 }),
+    metricEvent("metric-4", "turn-1", "model.response", "event", {
+      type: "tool_use",
+      usage: { inputTokens: 12, outputTokens: 4 },
+    }, { spanId: "model-1", parentSpanId: "step-1", step: 1 }),
+    metricEvent("metric-5", "turn-1", "tool.call", "start", {
+      input: { id: "call-1", name: "weather", input: { city: "上海" } },
+    }, { spanId: "tool-1", parentSpanId: "step-1", step: 1 }),
+    metricEvent("metric-6", "turn-1", "tool.result", "event", {
+      toolCallId: "call-1",
+      name: "weather",
+      result: { success: true, data: { weather: "晴" } },
+    }, { spanId: "tool-1", parentSpanId: "step-1", step: 1 }),
+    metricEvent("metric-7", "turn-1", "context.compaction.completed", "event", {
+      tokensBefore: 100,
+      tokensAfter: 60,
+      savedRatio: 0.4,
+    }, { spanId: "context-1", parentSpanId: "step-1", step: 1 }),
+    metricEvent("metric-8", "turn-1", "agent.step", "end", { output: {} }, { spanId: "step-1", parentSpanId: "turn-1", step: 1, durationMs: 40 }),
+    metricEvent("metric-9", "turn-1", "agent.turn", "end", { output: { answer: "上海晴" } }, { spanId: "turn-1", durationMs: 50 }),
+  ];
+}
+
+function agentMetricsFixtureWithRunningTurn(): TraceEvent[] {
+  return [
+    ...agentMetricsFixture(),
+    metricEvent("metric-10", "turn-2", "agent.turn", "start", { input: { input: "继续" } }, { spanId: "turn-2" }),
+    metricEvent("metric-11", "turn-2", "agent.step", "start", { input: { step: 1 } }, { spanId: "step-2", parentSpanId: "turn-2", step: 1 }),
+  ];
 }
 
 /** 仅截取指定断点，避免 CSS 契约跨媒体查询误匹配。 */
