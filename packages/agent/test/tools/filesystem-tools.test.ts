@@ -175,3 +175,17 @@ test("find_files 响应已中止的 AbortSignal", async () => {
         assert.equal(result.error?.code, "timeout");
     });
 });
+
+test("find_files 支持只有排除项的 glob", async () => {
+    await withTempDir(async (cwd) => {
+        await writeFile(join(cwd, "visible.ts"), "ts", "utf8");
+        await writeFile(join(cwd, "hidden.js"), "js", "utf8");
+
+        const result = await createFindFilesTool(cwd).execute(
+            { pattern: "!**/*.js" },
+            context(),
+        );
+
+        assert.deepEqual(result.data?.files, ["visible.ts"]);
+    });
+});

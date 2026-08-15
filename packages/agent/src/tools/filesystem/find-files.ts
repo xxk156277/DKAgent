@@ -1,8 +1,7 @@
-import { matchesGlob } from "node:path";
+import { globbyStream } from "globby";
 import type { Tool, ToolResult } from "../types.js";
 import { toolFailure } from "./error.js";
 import { resolveToolPath } from "./path.js";
-import { runRipgrep } from "./ripgrep.js";
 
 export interface FindFilesInput {
     pattern: string;
@@ -17,6 +16,12 @@ export interface FindFilesOutput {
 }
 
 const DEFAULT_LIMIT = 1000;
+
+function createAbortError(): Error {
+    const error = new Error("操作已中止");
+    error.name = "AbortError";
+    return error;
+}
 
 export function createFindFilesTool(cwd: string): Tool<FindFilesInput, FindFilesOutput> {
     return {
@@ -43,14 +48,40 @@ export function createFindFilesTool(cwd: string): Tool<FindFilesInput, FindFiles
 
             const path = resolveToolPath(input.path ?? ".", cwd);
             try {
-                const result = await runRipgrep(["--files", "--no-require-git"], path, ctx.abortSignal);
-                const files = result.stdout
-                    .split("\n")
-                    .filter((file) => file && matchesGlob(file, input.pattern))
-                    .slice(0, limit);
+                if (ctx.abortSignal.aborted) throw createAbortError();
+
+                const stream = globbyStream(input.pattern, {
+                    cwd: path,
+                    gitignore: true,
+                    onlyFiles: true,
+                    dot: true,
+                    followSymbolicLinks: false,
+                    expandDirectories: false,
+                });
+                const iterator = stream[Symbol.asyncIterator]();
+                let aborted = false;
+                const abort = () => {
+                    aborted = true;
+                    void iterator.return?.();
+                };
+                ctx.abortSignal.addEventListener("abort", abort, { once: true });
+
+                const files: string[] = [];
+                try {
+                    while (files.length < limit) {
+                        const next = await iterator.next();
+                        if (aborted || ctx.abortSignal.aborted) throw createAbortError();
+                        if (next.done) break;
+                        files.push(next.value);
+                    }
+                } finally {
+                    ctx.abortSignal.removeEventListener("abort", abort);
+                    if (aborted || files.length === limit) await iterator.return?.();
+                }
+
                 return { success: true, data: { path, files, total: files.length } };
             } catch (error) {
-                const failure = toolFailure(error);
+                const failure = toolFailure(ctx.abortSignal.aborted ? createAbortError() : error);
                 if (failure.error?.message.includes("ENOENT")) {
                     failure.error.message = "未找到 ripgrep，请先安装 rg";
                 }

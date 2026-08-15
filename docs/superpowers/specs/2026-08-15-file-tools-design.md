@@ -13,7 +13,7 @@
 
 ## 设计原则
 
-参考 Pi 的工具参数和路径行为，但使用 DKAgent 自己的 `Tool` 接口、`ToolResult` 和 `ToolRegistry`，不复制 Pi 的 TUI、图片、TypeBox、远程 Operations 与渲染代码。
+参考 Pi 的工具参数和路径行为，但使用 DKAgent 自己的 `Tool` 接口、`ToolResult` 和 `ToolRegistry`，不复制 Pi 的 TUI、图片、TypeBox、远程 Operations 与渲染代码。最小 MVP 以“自研代码和概念最少、最好理解”为准，不以依赖数量最少为目标；成熟依赖已经封装好的能力直接复用。
 
 所有工具在创建时接收同一个 `cwd`：
 
@@ -72,8 +72,9 @@ interface FindFilesInput {
 
 行为：
 
-- 使用 `rg --files --glob` 查找文件。
-- 默认尊重 `.gitignore` 和 ripgrep 自身忽略规则。
+- 使用 `globby` 查找文件，不自行实现目录遍历、glob 或 ignore 解析。
+- 设置 `gitignore: true`，使 `.gitignore` 的排除规则优先于用户 glob。
+- 使用 `globbyStream` 逐项读取，在达到 `limit` 或收到 `AbortSignal` 时停止遍历。
 - 返回相对于搜索目录的文件路径数组。
 - 没有匹配文件时成功返回空数组。
 
@@ -94,7 +95,7 @@ interface GrepFilesInput {
 
 行为：
 
-- 使用 `rg --line-number --color never` 查找内容。
+- 使用 `@vscode/ripgrep` 提供当前平台的 `rgPath`，再执行 `rg --line-number --color never` 查找内容。
 - `literal` 为 `true` 时传入 `--fixed-strings`。
 - `ignoreCase` 为 `true` 时传入 `--ignore-case`。
 - 返回结构化的文件路径、行号和文本。
@@ -117,18 +118,18 @@ interface WriteFileInput {
 - 使用 UTF-8 创建或覆盖文件。
 - 返回实际路径、UTF-8 字节数和是否覆盖既有文件。
 
-## 命令执行
+## 依赖与命令执行
 
-`find_files` 和 `grep_files` 使用 `execFile("rg", args)`，参数通过数组传递，不构造 Shell 字符串。工具把 `ToolContext.abortSignal` 传给子进程，使 Agent 中止时能够终止搜索。
-
-运行环境必须能从 `PATH` 找到 `rg`。如果找不到，工具返回 `service_error`，并明确提示安装 ripgrep。
+- `find_files` 依赖 `globby`，直接使用其 glob、`.gitignore` 和流式遍历能力。
+- `grep_files` 依赖 `@vscode/ripgrep`。该包随当前平台安装预构建的 ripgrep，并导出 `rgPath`，不要求用户额外安装系统命令，也不在运行时下载二进制。
+- `grep_files` 使用 `execFile(rgPath, args)`，参数通过数组传递，不构造 Shell 字符串，并把 `ToolContext.abortSignal` 传给子进程。
 
 ## 错误处理
 
 - 参数非法：`input_error`。
 - 文件无权限：`permission_denied`。
 - 操作被中止：`timeout`。
-- 文件系统或 ripgrep 失败：`service_error`。
+- 文件系统、globby 或 ripgrep 失败：`service_error`。
 - `find_files`、`grep_files` 无结果不是错误。
 
 所有错误通过现有 `ToolResult` 返回，不让预期的文件或搜索错误逃逸到 `Dispatcher`。
@@ -170,6 +171,6 @@ packages/agent/test/tools/
 - 二进制文件及图片读取。
 - 文件权限审批。
 - workspace root 沙箱。
-- 自动下载或打包 ripgrep。
+- 自研外部工具发现、下载或更新管理器。
 - SSH、容器或远程文件系统。
 - 搜索结果语法高亮和终端渲染。
