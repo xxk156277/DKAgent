@@ -39,6 +39,7 @@ export class AgentLoop {
 
     public run(userInput: string): Promise<string> {
         return this.tracer.trace("agent.turn", { input: userInput }, async (turnSpan) => {
+            const recalledMemory = await this.safeRecall(userInput);
             this.appendMessage({ role: "user", content: userInput });
             const maxSteps = this.options.maxSteps ?? 4;
 
@@ -46,11 +47,12 @@ export class AgentLoop {
                 const answer = await this.tracer.span(
                     "agent.step",
                     { step },
-                    (stepSpan) => this.runStep(step, stepSpan),
+                    (stepSpan) => this.runStep(step, stepSpan, recalledMemory),
                     { step },
                 );
                 if (answer !== undefined) {
                     turnSpan.setOutput({ answer });
+                    await this.safeCapture(userInput, answer);
                     return answer;
                 }
             }
@@ -59,13 +61,22 @@ export class AgentLoop {
         });
     }
 
-    private async runStep(step: number, stepSpan: TraceSpan): Promise<string | undefined> {
+    private async runStep(
+        step: number,
+        stepSpan: TraceSpan,
+        recalledMemory: string,
+    ): Promise<string | undefined> {
         if (this.abortSignal.aborted) throw new Error("Agent Run 已中止");
 
+        const systemPrompt = recalledMemory
+            ? [this.options.systemPrompt, recalledMemory]
+                .filter((value): value is string => Boolean(value))
+                .join("\n\n")
+            : this.options.systemPrompt;
         const contextBuildInput: ContextBuildInput = {
-            ...(this.options.systemPrompt === undefined
+            ...(systemPrompt === undefined
                 ? {}
-                : { systemPrompt: this.options.systemPrompt }),
+                : { systemPrompt }),
             messages: [...this.messages],
             tools: this.options.toolRegistry.getSchemas(),
             maxContextTokens: this.options.maxContextTokens,
@@ -166,6 +177,54 @@ export class AgentLoop {
                 toolCallId: dispatched.toolCallId,
                 content: JSON.stringify(dispatched.result),
             });
+        }
+    }
+
+    /** Memory 不可用时仍按无记忆模式完成当前 Turn。 */
+    private async safeRecall(userInput: string): Promise<string> {
+        const reader = this.options.memoryReader;
+        if (!reader) return "";
+
+        try {
+            return await this.tracer.span(
+                "memory.recall",
+                { userInputCharacterCount: userInput.length },
+                async (span) => {
+                    const recalledMemory = await reader.recall(userInput);
+                    span.setOutput({ characterCount: recalledMemory.length });
+                    return recalledMemory;
+                },
+            );
+        } catch {
+            return "";
+        }
+    }
+
+    /** 自动提取失败不能影响已生成的最终回答。 */
+    private async safeCapture(userInput: string, answer: string): Promise<void> {
+        const writer = this.options.memoryWriter;
+        const sessionId = this.options.session?.snapshot.id;
+        if (!writer || !sessionId) return;
+
+        try {
+            await this.tracer.span(
+                "memory.write",
+                {
+                    sessionId,
+                    userInputCharacterCount: userInput.length,
+                    answerCharacterCount: answer.length,
+                },
+                async (span) => {
+                    await writer.capture({
+                        userInput,
+                        assistantAnswer: answer,
+                        sessionId,
+                    });
+                    span.setOutput({ captured: true });
+                },
+            );
+        } catch {
+            // Memory 是附加能力，写入失败不改变已经生成的回答。
         }
     }
 

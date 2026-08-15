@@ -3,6 +3,7 @@ import test from "node:test";
 import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { AgentLoop } from "../../src/agent/loop.js";
 import { AGENT_SYSTEM_PROMPT } from "../../src/agent/prompt.js";
+import type { AgentLoopOptions } from "../../src/agent/types.js";
 import {
     ContextManager,
     ProviderTokenCounter,
@@ -13,13 +14,16 @@ import type {
     ContextSnapshot,
 } from "../../src/context/types.js";
 import type {
+    AgentMessage,
     LLMProvider,
     StreamEvent,
     StreamParams,
 } from "../../src/query-engine/provider.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
+import type { SessionSnapshot, SessionStore } from "../../src/session/types.js";
 import { ToolRegistry } from "../../src/tools/registry.js";
 import type { Tool } from "../../src/tools/types.js";
+import type { MemoryReader, MemoryWriter } from "../../src/memory/types.js";
 
 class FakeProvider implements LLMProvider {
     readonly name = "fake";
@@ -108,6 +112,63 @@ class AdvancingContextBuilder implements ContextBuilder {
             },
         };
     }
+}
+
+/** 记录 AgentLoop 传给 ContextManager 的 System Prompt。 */
+class RecordingContextBuilder implements ContextBuilder {
+    public readonly systemPrompts: Array<string | undefined> = [];
+
+    async build(input: ContextBuildInput): Promise<ContextSnapshot> {
+        this.systemPrompts.push(input.systemPrompt);
+        return {
+            ...(input.systemPrompt === undefined
+                ? {}
+                : { systemPrompt: input.systemPrompt }),
+            messages: [...input.messages],
+            tools: [...input.tools],
+        };
+    }
+}
+
+/** 只实现本组断言会调用的 SessionStore 方法。 */
+function createMemoryTestSession(appendedMessages: AgentMessage[]): NonNullable<
+    AgentLoopOptions["session"]
+> {
+    const snapshot: SessionSnapshot = {
+        id: "session-memory",
+        messages: [],
+        contextState: {
+            summary: "",
+            firstKeptMessageIndex: 0,
+        },
+        createdAt: "2026-08-16T00:00:00.000Z",
+        updatedAt: "2026-08-16T00:00:00.000Z",
+    };
+    const store: SessionStore = {
+        create() {
+            return snapshot;
+        },
+        loadLatest() {
+            return snapshot;
+        },
+        list() {
+            return [];
+        },
+        load(sessionId) {
+            return sessionId === snapshot.id ? snapshot : null;
+        },
+        delete() {
+            return false;
+        },
+        appendMessage(_sessionId, message) {
+            appendedMessages.push(structuredClone(message));
+        },
+        saveContextState() {},
+    };
+    return {
+        snapshot,
+        store,
+    };
 }
 
 test("普通聊天直接返回文本，不执行 Tool", async () => {
@@ -277,6 +338,201 @@ test("Agent 失败时记录 agent.turn error 后原样抛出错误", async () =>
         (errorEvent?.data as { error: { message: string } }).error.message,
         "context failed",
     );
+});
+
+test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆", async () => {
+    const provider = new FakeProvider([
+        [
+            { type: "tool_call_start", index: 0, id: "call-memory", name: "test_tool" },
+            { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+            { type: "tool_call_end", index: 0 },
+            { type: "message_end", usage, stopReason: "tool_use" },
+        ],
+        textResponse("最终回答"),
+    ]);
+    const registry = new ToolRegistry();
+    registry.register({
+        name: "test_tool",
+        description: "测试工具",
+        parameters: { type: "object" },
+        async execute() {
+            return { success: true, data: {} };
+        },
+    });
+    const contextManager = new RecordingContextBuilder();
+    const recallQueries: string[] = [];
+    const reader: MemoryReader = {
+        async recall(query) {
+            recallQueries.push(query);
+            return "<recalled_memory>用户偏好简洁</recalled_memory>";
+        },
+    };
+
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: registry,
+        contextManager,
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        systemPrompt: "test prompt",
+        memoryReader: reader,
+    });
+
+    assert.equal(await agent.run("请使用工具"), "最终回答");
+    assert.deepEqual(recallQueries, ["请使用工具"]);
+    assert.deepEqual(contextManager.systemPrompts, [
+        "test prompt\n\n<recalled_memory>用户偏好简洁</recalled_memory>",
+        "test prompt\n\n<recalled_memory>用户偏好简洁</recalled_memory>",
+    ]);
+});
+
+test("召回记忆只注入 Context System Prompt，不进入历史或 Session", async () => {
+    const provider = new FakeProvider([textResponse("回答")]);
+    const contextManager = new RecordingContextBuilder();
+    const sessionMessages: AgentMessage[] = [];
+    const reader: MemoryReader = {
+        async recall() {
+            return "<recalled_memory>跨 Session 事实</recalled_memory>";
+        },
+    };
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: new ToolRegistry(),
+        contextManager,
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        systemPrompt: "test prompt",
+        memoryReader: reader,
+        session: createMemoryTestSession(sessionMessages),
+    });
+
+    await agent.run("问题");
+
+    assert.equal(
+        contextManager.systemPrompts[0],
+        "test prompt\n\n<recalled_memory>跨 Session 事实</recalled_memory>",
+    );
+    assert.doesNotMatch(JSON.stringify(agent.getMessages()), /跨 Session 事实/);
+    assert.doesNotMatch(JSON.stringify(sessionMessages), /跨 Session 事实/);
+});
+
+test("成功最终文本追加后按 Session 捕获记忆", async () => {
+    const provider = new FakeProvider([textResponse("最终回答")]);
+    const sessionMessages: AgentMessage[] = [];
+    const captures: Array<{ userInput: string; assistantAnswer: string; sessionId: string }> = [];
+    const writer: MemoryWriter = {
+        async capture(input) {
+            assert.deepEqual(sessionMessages.at(-1), {
+                role: "assistant",
+                content: "最终回答",
+            });
+            captures.push(input);
+        },
+    };
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: new ToolRegistry(),
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        memoryWriter: writer,
+        session: createMemoryTestSession(sessionMessages),
+    });
+
+    assert.equal(await agent.run("原始问题"), "最终回答");
+    assert.deepEqual(captures, [{
+        userInput: "原始问题",
+        assistantAnswer: "最终回答",
+        sessionId: "session-memory",
+    }]);
+    assert.deepEqual(sessionMessages.at(-1), { role: "assistant", content: "最终回答" });
+
+    const noSessionAgent = new AgentLoop({
+        queryEngine: new QueryEngine(new FakeProvider([textResponse("无 Session 回答")])),
+        toolRegistry: new ToolRegistry(),
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        memoryWriter: writer,
+    });
+    assert.equal(await noSessionAgent.run("无 Session 问题"), "无 Session 回答");
+    assert.equal(captures.length, 1);
+});
+
+test("Memory 失败降级，空文本或循环失败不捕获", async () => {
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
+    const reader: MemoryReader = {
+        async recall() {
+            throw new Error("recall failed");
+        },
+    };
+    const writer: MemoryWriter = {
+        async capture() {
+            throw new Error("capture failed");
+        },
+    };
+    const normalAgent = new AgentLoop({
+        queryEngine: new QueryEngine(new FakeProvider([textResponse("正常回答")])),
+        toolRegistry: new ToolRegistry(),
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        memoryReader: reader,
+        memoryWriter: writer,
+        tracer,
+        session: createMemoryTestSession([]),
+    });
+
+    assert.equal(await normalAgent.run("问题"), "正常回答");
+    assert.ok(traceStore.list().some((event) => (
+        event.name === "memory.recall" && event.phase === "error"
+    )));
+    assert.ok(traceStore.list().some((event) => (
+        event.name === "memory.write" && event.phase === "error"
+    )));
+
+    const captures: Array<{ userInput: string; assistantAnswer: string; sessionId: string }> = [];
+    const captureRecorder: MemoryWriter = {
+        async capture(input) {
+            captures.push(input);
+        },
+    };
+    const emptyAnswerAgent = new AgentLoop({
+        queryEngine: new QueryEngine(new FakeProvider([textResponse("  ")])),
+        toolRegistry: new ToolRegistry(),
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        memoryWriter: captureRecorder,
+        session: createMemoryTestSession([]),
+    });
+    await assert.rejects(emptyAnswerAgent.run("空文本"), /模型返回空文本/);
+
+    const loopAgent = new AgentLoop({
+        queryEngine: new QueryEngine(new FakeProvider([[
+            { type: "tool_call_start", index: 0, id: "call-loop", name: "test_tool" },
+            { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+            { type: "tool_call_end", index: 0 },
+            { type: "message_end", usage, stopReason: "tool_use" },
+        ]])),
+        toolRegistry: new ToolRegistry(),
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        maxSteps: 1,
+        memoryWriter: captureRecorder,
+        session: createMemoryTestSession([]),
+    });
+    await assert.rejects(loopAgent.run("循环失败"), /Agent 超出最大循环次数/);
+    assert.deepEqual(captures, []);
 });
 
 test("System Prompt 约束普通聊天和诊断 Tool 的使用边界", () => {

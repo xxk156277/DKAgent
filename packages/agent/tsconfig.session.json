@@ -5,6 +5,7 @@
     "src/agent/loop.ts",
     "src/agent/types.ts",
     "src/context/**/*.ts",
+    "src/memory/types.ts",
     "src/query-engine/**/*.ts",
     "src/session/**/*.ts",
     "src/tools/registry.ts",

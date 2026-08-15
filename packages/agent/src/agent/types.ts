@@ -9,6 +9,7 @@ import type {
     SessionSnapshot,
     SessionStore,
 } from "../session/types.js";
+import type { MemoryReader, MemoryWriter } from "../memory/types.js";
 
 /** AgentLoop 当前绑定的 Session。 */
 export interface AgentLoopSessionOptions {
@@ -47,4 +48,8 @@ export interface AgentLoopOptions {
     tracer?: Tracer;
     /** 可选 Session；未提供时保持原有纯内存行为。 */
     session?: AgentLoopSessionOptions;
+    /** 每个 Turn 开始时召回跨 Session 记忆。 */
+    memoryReader?: MemoryReader;
+    /** 成功文本回答后提取并保存稳定记忆。 */
+    memoryWriter?: MemoryWriter;
 }

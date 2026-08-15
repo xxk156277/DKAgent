@@ -6,6 +6,7 @@
     "src/agent/loop.ts",
     "src/agent/dispatcher.ts",
     "src/agent/prompt.ts",
+    "src/memory/types.ts",
     "src/cli/safe-prompt.ts",
     "src/query-engine/index.ts",
     "src/query-engine/provider.ts",
