@@ -60,3 +60,44 @@ test("创建新 Session 后最近 Session 为空且旧消息仍保留", () => {
     assert.notEqual(newSession.id, oldSession.id);
     store.close();
 });
+
+test("可以列出 Session 并按 ID 加载完整快照", () => {
+    const directory = mkdtempSync(join(tmpdir(), "dkagent-session-"));
+    const store = new SqliteSessionStore(join(directory, "sessions.db"));
+    const firstSession = store.create();
+    store.appendMessage(firstSession.id, {
+        role: "user",
+        content: "第一条 Session 的问题",
+    });
+    const secondSession = store.create();
+
+    const sessions = store.list();
+    const loaded = store.load(firstSession.id);
+
+    assert.deepEqual(
+        sessions.map((session) => session.id),
+        [secondSession.id, firstSession.id],
+    );
+    assert.deepEqual(loaded?.messages, [
+        { role: "user", content: "第一条 Session 的问题" },
+    ]);
+    assert.equal(loaded?.id, firstSession.id);
+    assert.equal(store.load("missing-session"), null);
+    store.close();
+});
+
+test("删除 Session 时同时删除关联消息", () => {
+    const directory = mkdtempSync(join(tmpdir(), "dkagent-session-"));
+    const store = new SqliteSessionStore(join(directory, "sessions.db"));
+    const session = store.create();
+    store.appendMessage(session.id, {
+        role: "user",
+        content: "删除后不应保留的消息",
+    });
+
+    assert.equal(store.delete(session.id), true);
+    assert.equal(store.load(session.id), null);
+    assert.deepEqual(store.list(), []);
+    assert.equal(store.delete(session.id), false);
+    store.close();
+});

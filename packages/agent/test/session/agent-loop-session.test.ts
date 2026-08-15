@@ -17,6 +17,7 @@ import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import type {
     SessionSnapshot,
     SessionStore,
+    SessionSummary,
 } from "../../src/session/types.js";
 import { ToolRegistry } from "../../src/tools/registry.js";
 
@@ -40,6 +41,7 @@ class FakeProvider implements LLMProvider {
 
 class RecordingSessionStore implements SessionStore {
     public readonly appendedMessages: AgentMessage[] = [];
+    public readonly appendedSessionIds: string[] = [];
     public readonly savedStates: ConversationContextState[] = [];
 
     public constructor(public readonly snapshot: SessionSnapshot) { }
@@ -52,7 +54,24 @@ class RecordingSessionStore implements SessionStore {
         return this.snapshot;
     }
 
-    public appendMessage(_sessionId: string, message: AgentMessage): void {
+    public list(): SessionSummary[] {
+        return [{
+            id: this.snapshot.id,
+            createdAt: this.snapshot.createdAt,
+            updatedAt: this.snapshot.updatedAt,
+        }];
+    }
+
+    public load(sessionId: string): SessionSnapshot | null {
+        return sessionId === this.snapshot.id ? this.snapshot : null;
+    }
+
+    public delete(sessionId: string): boolean {
+        return sessionId === this.snapshot.id;
+    }
+
+    public appendMessage(sessionId: string, message: AgentMessage): void {
+        this.appendedSessionIds.push(sessionId);
         this.appendedMessages.push(structuredClone(message));
     }
 
@@ -143,6 +162,7 @@ test("AgentLoop 从 SessionSnapshot 恢复历史并继续对话", async () => {
         { role: "user", content: "新问题" },
         { role: "assistant", content: "新回答" },
     ]);
+    assert.deepEqual(store.appendedSessionIds, ["session-1", "session-1"]);
     assert.deepEqual(agent.getContextState(), {
         summary: "旧摘要",
         firstKeptMessageIndex: 1,

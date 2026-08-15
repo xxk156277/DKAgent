@@ -4,7 +4,11 @@ import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
 import type { ConversationContextState } from "../context/types.js";
 import type { AgentMessage } from "../query-engine/provider.js";
-import type { SessionSnapshot, SessionStore } from "./types.js";
+import type {
+    SessionSnapshot,
+    SessionStore,
+    SessionSummary,
+} from "./types.js";
 
 /** sessions 表查询结果。 */
 interface SessionRow {
@@ -24,6 +28,16 @@ interface SessionRow {
 interface MessageRow {
     /** 完整 AgentMessage 的 JSON 文本。 */
     message_json: string;
+}
+
+/** Session 列表元数据查询结果。 */
+interface SessionSummaryRow {
+    /** Session 唯一标识。 */
+    id: string;
+    /** Session 创建时间。 */
+    created_at: string;
+    /** Session 最近更新时间。 */
+    updated_at: string;
 }
 
 /** 使用 SQLite 持久化普通对话消息和 Context 压缩状态。 */
@@ -103,6 +117,37 @@ export class SqliteSessionStore implements SessionStore {
         return snapshot;
     }
 
+    /** 按更新时间从新到旧列出 Session，不读取消息正文。 */
+    public list(): SessionSummary[] {
+        const rows = this.database.prepare(`
+            SELECT id, created_at, updated_at
+            FROM sessions
+            ORDER BY updated_at DESC, rowid DESC
+        `).all() as SessionSummaryRow[];
+
+        return rows.map((row) => ({
+            id: row.id,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+        }));
+    }
+
+    /** 按唯一标识加载 Session 及其完整消息。 */
+    public load(sessionId: string): SessionSnapshot | null {
+        const row = this.database.prepare(`
+            SELECT
+                id,
+                summary,
+                first_kept_message_index,
+                created_at,
+                updated_at
+            FROM sessions
+            WHERE id = ?
+        `).get(sessionId) as SessionRow | undefined;
+
+        return row ? this.buildSnapshot(row) : null;
+    }
+
     /** 加载最近更新的 Session 及其完整消息。 */
     public loadLatest(): SessionSnapshot | null {
         const row = this.database.prepare(`
@@ -118,36 +163,26 @@ export class SqliteSessionStore implements SessionStore {
         `).get() as SessionRow | undefined;
 
         if (!row) return null;
+        return this.buildSnapshot(row);
+    }
 
-        const messageRows = this.database.prepare(`
-            SELECT message_json
-            FROM session_messages
-            WHERE session_id = ?
-            ORDER BY id ASC
-        `).all(row.id) as MessageRow[];
+    /** 以事务方式删除 Session 及其关联消息。 */
+    public delete(sessionId: string): boolean {
+        const remove = this.database.transaction(() => {
+            this.database.prepare(`
+                DELETE FROM session_messages
+                WHERE session_id = ?
+            `).run(sessionId);
 
-        let messages: AgentMessage[];
-        try {
-            messages = messageRows.map((messageRow) =>
-                JSON.parse(messageRow.message_json) as AgentMessage,
-            );
-        } catch (error: unknown) {
-            const message = error instanceof Error
-                ? error.message
-                : String(error);
-            throw new Error(`Session ${row.id} 消息数据损坏：${message}`);
-        }
+            const result = this.database.prepare(`
+                DELETE FROM sessions
+                WHERE id = ?
+            `).run(sessionId);
 
-        return {
-            id: row.id,
-            messages,
-            contextState: {
-                summary: row.summary,
-                firstKeptMessageIndex: row.first_kept_message_index,
-            },
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-        };
+            return result.changes === 1;
+        });
+
+        return remove();
     }
 
     /** 以事务方式追加消息并刷新 Session 更新时间。 */
@@ -199,6 +234,39 @@ export class SqliteSessionStore implements SessionStore {
         // 关闭前把 WAL 日志合并回主库文件，并截断 WAL，确保外部工具能看到完整数据。
         this.database.pragma("wal_checkpoint(TRUNCATE)");
         this.database.close();
+    }
+
+    /** 将 Session 行和关联消息组装为可恢复快照。 */
+    private buildSnapshot(row: SessionRow): SessionSnapshot {
+        const messageRows = this.database.prepare(`
+            SELECT message_json
+            FROM session_messages
+            WHERE session_id = ?
+            ORDER BY id ASC
+        `).all(row.id) as MessageRow[];
+
+        let messages: AgentMessage[];
+        try {
+            messages = messageRows.map((messageRow) =>
+                JSON.parse(messageRow.message_json) as AgentMessage,
+            );
+        } catch (error: unknown) {
+            const message = error instanceof Error
+                ? error.message
+                : String(error);
+            throw new Error(`Session ${row.id} 消息数据损坏：${message}`);
+        }
+
+        return {
+            id: row.id,
+            messages,
+            contextState: {
+                summary: row.summary,
+                firstKeptMessageIndex: row.first_kept_message_index,
+            },
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+        };
     }
 
     /** 刷新 Session 最近更新时间，并校验 Session 存在。 */
