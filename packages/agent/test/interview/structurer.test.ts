@@ -99,6 +99,63 @@ async function runWith(relation: Record<string, unknown>) {
     });
 }
 
+const interruptedAnswerSource = [
+    "面试官 01:00",
+    "请介绍这个项目。",
+    "候选人 01:01",
+    "我先说明项目背景。",
+    "面试官 01:02",
+    "对。",
+    "候选人 01:03",
+    "然后补充项目结果。",
+    "面试官 01:04",
+    "为什么这样设计？",
+    "候选人 01:05",
+    "因为要兼容旧协议。",
+].join("\n");
+
+function interruptedAnswerRelation(answerTurnIds: string[]): Record<string, unknown> {
+    return {
+        clusters: [{
+            id: "cluster-project",
+            title: "项目",
+            questionIds: ["q-project", "q-follow-up"],
+        }],
+        questions: [
+            {
+                id: "q-project",
+                clusterId: "cluster-project",
+                promptSegments: [{ turnId: "turn-0001", text: "请介绍这个项目。" }],
+                answerTurnIds,
+                questionType: "project",
+                scored: true,
+            },
+            {
+                id: "q-follow-up",
+                clusterId: "cluster-project",
+                promptSegments: [{ turnId: "turn-0005", text: "为什么这样设计？" }],
+                answerTurnIds: ["turn-0006"],
+                questionType: "project",
+                scored: true,
+            },
+        ],
+        nonQuestionTurnIds: ["turn-0003"],
+    };
+}
+
+async function runInterrupted(answerTurnIds: string[]) {
+    const transcript = parseTranscript(interruptedAnswerSource);
+    return structureInterview({
+        transcript,
+        correctedTurns: transcript.turns,
+        queryEngine: new QueryEngine(
+            new FakeTextProvider(JSON.stringify(interruptedAnswerRelation(answerTurnIds))),
+        ),
+        model: "fake-model",
+        abortSignal: new AbortController().signal,
+    });
+}
+
 test("同一轮的多个问题单独成题，连续项目追问归入同一簇", async () => {
     const result = await runWith(validRelation());
 
@@ -144,7 +201,65 @@ test("回答只能绑定提问组后紧邻的候选人回答块", async () => {
 
     await assert.rejects(
         () => runWith(relation),
-        /回答不属于提问组后紧邻的候选人回答区间/,
+        /回答轮次必须完整覆盖回答窗口/,
+    );
+});
+
+test("回答轮次不能为空", async () => {
+    const relation = validRelation();
+    const questions = relation.questions as Array<{ answerTurnIds: string[] }>;
+    questions[0]!.answerTurnIds = [];
+
+    await assert.rejects(
+        () => runWith(relation),
+        /回答轮次必须完整覆盖回答窗口/,
+    );
+});
+
+test("回答轮次不能遗漏窗口内的候选人继续回答", async () => {
+    await assert.rejects(
+        () => runInterrupted(["turn-0002"]),
+        /回答轮次必须完整覆盖回答窗口/,
+    );
+});
+
+test("非问题插话不会截断候选人的完整回答窗口", async () => {
+    const result = await runInterrupted(["turn-0002", "turn-0004"]);
+
+    assert.deepEqual(
+        result.questions[0]?.answerTurnIds,
+        ["turn-0002", "turn-0004"],
+    );
+    assert.equal(
+        result.questions[0]?.originalAnswer,
+        "我先说明项目背景。\n然后补充项目结果。",
+    );
+});
+
+test("实际问题没有候选人回答时明确拒绝", async () => {
+    const transcript = parseTranscript("面试官\n请介绍项目。");
+    const relation = {
+        clusters: [{ id: "cluster-1", title: "项目", questionIds: ["q-1"] }],
+        questions: [{
+            id: "q-1",
+            clusterId: "cluster-1",
+            promptSegments: [{ turnId: "turn-0001", text: "请介绍项目。" }],
+            answerTurnIds: [],
+            questionType: "project",
+            scored: true,
+        }],
+        nonQuestionTurnIds: [],
+    };
+
+    await assert.rejects(
+        () => structureInterview({
+            transcript,
+            correctedTurns: transcript.turns,
+            queryEngine: new QueryEngine(new FakeTextProvider(JSON.stringify(relation))),
+            model: "fake-model",
+            abortSignal: new AbortController().signal,
+        }),
+        /实际问题没有候选人回答/,
     );
 });
 

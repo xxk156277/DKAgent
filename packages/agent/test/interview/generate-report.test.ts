@@ -62,13 +62,13 @@ const structuredInterview: StructuredInterview = {
 
 const analyses: QuestionAnalysis[] = [
     completed("q-1", "cluster-project", "project", 78, 0.72, [{
-        factKey: "project.metric",
+        factKey: "cluster-project.metric",
         question: "项目指标具体提升多少？",
         affectedQuestionIds: ["q-1"],
         impact: "medium",
     }]),
     completed("q-2", "cluster-project", "project", 66, 0.84, [{
-        factKey: "project.metric",
+        factKey: "cluster-project.metric",
         question: "首屏指标具体提升多少？",
         affectedQuestionIds: ["q-2"],
         impact: "high",
@@ -81,7 +81,7 @@ const projectFactSets: ProjectFactSet[] = [{
     clusterId: "cluster-project",
     facts: [],
     clarificationCandidates: [{
-        factKey: "project.metric",
+        factKey: "cluster-project.metric",
         question: "首屏指标具体提升多少？",
         affectedQuestionIds: ["q-1"],
         impact: "high",
@@ -224,10 +224,10 @@ test("待确认项按事实键合并、high 优先、影响题数倒序且最多
     assert.equal(new Set(pending.map((item) => item.factKey)).size, pending.length);
     assert.deepEqual(pending.slice(0, 3).map((item) => item.factKey), [
         "high-many",
-        "project.metric",
+        "cluster-project.metric",
         "high-one",
     ]);
-    assert.deepEqual(pending.find((item) => item.factKey === "project.metric")?.affectedQuestionIds, ["q-1", "q-2"]);
+    assert.deepEqual(pending.find((item) => item.factKey === "cluster-project.metric")?.affectedQuestionIds, ["q-1", "q-2"]);
     assert.ok(pending.every((item) => item.impact !== "low"));
 });
 
@@ -350,7 +350,7 @@ test("报告入口再次拒绝空的逐题分析证据", async () => {
 
 test("报告入口拒绝无法回到候选人原文或重复键的项目事实", async () => {
     const validFact = {
-        key: "project.role",
+        key: "cluster-project.role",
         category: "responsibility" as const,
         value: "负责 DSL 渲染链路",
         status: "stated" as const,
@@ -361,6 +361,11 @@ test("报告入口拒绝无法回到候选人原文或重复键的项目事实",
         impact: "high" as const,
     };
     const invalidFactSets: ProjectFactSet[][] = [
+        [{
+            clusterId: "cluster-project",
+            facts: [{ ...validFact, value: "负责全部架构" }],
+            clarificationCandidates: [],
+        }],
         [{
             clusterId: "cluster-project",
             facts: [{ ...validFact, evidenceQuote: "候选人没有说过的内容" }],
@@ -396,6 +401,77 @@ test("报告入口拒绝无法回到候选人原文或重复键的项目事实",
         assert.equal(result.error?.code, "input_error");
         assert.equal(provider.request, undefined);
     }
+});
+
+test("报告入口拒绝未按 clusterId 命名空间的 factKey", async () => {
+    const invalidFactSets: ProjectFactSet[] = [{
+        clusterId: "cluster-project",
+        facts: [{
+            key: "role",
+            category: "responsibility",
+            value: "负责 DSL 渲染链路",
+            status: "stated",
+            evidenceTurnIds: ["q-1-answer"],
+            evidenceQuote: questions[0]!.originalAnswer,
+            affectedQuestionIds: ["q-1"],
+            clarificationQuestion: null,
+            impact: "high",
+        }],
+        clarificationCandidates: [],
+    }];
+    const { provider, context } = toolContext(validSummary);
+
+    const result = await createGenerateReportTool("fake-model").execute(
+        baseInput({ projectFactSets: invalidFactSets }),
+        context,
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "input_error");
+    assert.equal(provider.request, undefined);
+});
+
+test("两个项目簇可分别使用 local role 并组合生成报告", async () => {
+    const facts: ProjectFactSet[] = [
+        {
+            clusterId: "cluster-project",
+            facts: [{
+                key: "cluster-project.role",
+                category: "responsibility",
+                value: "负责 DSL 渲染链路",
+                status: "stated",
+                evidenceTurnIds: ["q-1-answer"],
+                evidenceQuote: questions[0]!.originalAnswer,
+                affectedQuestionIds: ["q-1"],
+                clarificationQuestion: null,
+                impact: "high",
+            }],
+            clarificationCandidates: [],
+        },
+        {
+            clusterId: "cluster-knowledge",
+            facts: [{
+                key: "cluster-knowledge.role",
+                category: "responsibility",
+                value: "宏任务执行完会清空微任务",
+                status: "stated",
+                evidenceTurnIds: ["q-3-answer"],
+                evidenceQuote: questions[2]!.originalAnswer,
+                affectedQuestionIds: ["q-3"],
+                clarificationQuestion: null,
+                impact: "medium",
+            }],
+            clarificationCandidates: [],
+        },
+    ];
+    const { context } = toolContext(validSummary);
+
+    const result = await createGenerateReportTool("fake-model").execute(
+        baseInput({ projectFactSets: facts }),
+        context,
+    );
+
+    assert.equal(result.success, true);
 });
 
 test("拒绝可在问题簇平均中相互抵消的越界维度分", async () => {

@@ -13,7 +13,7 @@ import type {
 import type { Tool } from "../types.js";
 
 const projectFactSchema = z.object({
-    key: z.string().min(1),
+    localKey: z.string().trim().min(1),
     category: z.enum([
         "background",
         "responsibility",
@@ -108,6 +108,14 @@ function validateFacts(input: {
         ) {
             throw new Error(`逐字证据无法回到候选人原文: ${fact.key}`);
         }
+        if (
+            fact.status === "stated"
+            && hasText(fact.value)
+            && hasText(fact.evidenceQuote)
+            && !fact.evidenceQuote.includes(fact.value)
+        ) {
+            throw new Error(`stated value 必须逐字来自 evidenceQuote: ${fact.key}`);
+        }
     }
 }
 
@@ -168,13 +176,20 @@ export function createExtractProjectFactsTool(
                     schema: projectFactsSchema,
                     systemPrompt: [
                         "从当前项目问题簇提取事实，严格输出 JSON。",
+                        "每条事实只返回当前簇内的 localKey（如 role、metric），不得返回完整 key；代码会添加 clusterId 命名空间。",
                         "stated 只表示候选人在原文明确陈述，不代表外部真实性已确认。",
                         "不得根据常识补全职责、指标、上线范围或项目结果。",
                         "unknown 的 value 必须为 null；所有证据只能引用输入中的候选人 turnId。",
                         "stated 和 inferred 必须给出 evidenceQuote，且逐字复制自所引用的候选人轮次；unknown 的 evidenceQuote 必须为 null。",
+                        "stated 的 value 必须是 evidenceQuote 的逐字子串；任何语义概括都必须标为 inferred。",
                         "inferred 仅用于有候选人证据但仍需澄清的推断；不确定时用 unknown。",
                     ].join("\n"),
                     userContent: JSON.stringify({
+                        cluster: {
+                            id: input.cluster.id,
+                            title: input.cluster.title,
+                            keyNamespace: `${input.cluster.id}.`,
+                        },
                         questions: clusterQuestions.map((question) => ({
                             id: question.id,
                             originalQuestion: question.originalQuestion,
@@ -186,7 +201,10 @@ export function createExtractProjectFactsTool(
                         })),
                     }),
                 });
-                const facts: ProjectFact[] = response.facts;
+                const facts: ProjectFact[] = response.facts.map(({ localKey, ...fact }) => ({
+                    ...fact,
+                    key: `${input.cluster.id}.${localKey}`,
+                }));
                 validateFacts({
                     facts,
                     allowedEvidenceTurnIds,

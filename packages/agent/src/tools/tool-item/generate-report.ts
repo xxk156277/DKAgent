@@ -165,6 +165,15 @@ function validateInput(input: GenerateReportInput): void {
                 .flatMap((question) => question.answerTurnIds),
         );
         for (const fact of factSet.facts) {
+            const keyNamespace = `${factSet.clusterId}.`;
+            if (
+                !fact.key.startsWith(keyNamespace)
+                || !fact.key.slice(keyNamespace.length).trim()
+            ) {
+                throw new Error(
+                    `项目事实 key 必须使用问题簇命名空间 ${keyNamespace}: ${fact.key}`,
+                );
+            }
             if (seenFactKeys.has(fact.key)) {
                 throw new Error(`项目事实键重复或冲突: ${fact.key}`);
             }
@@ -196,6 +205,15 @@ function validateInput(input: GenerateReportInput): void {
             }
             if (fact.status === "unknown" && fact.evidenceQuote !== null) {
                 throw new Error(`未知项目事实不得包含逐字证据: ${fact.key}`);
+            }
+            if (
+                fact.status === "stated"
+                && (
+                    !fact.value?.trim()
+                    || !fact.evidenceQuote?.includes(fact.value)
+                )
+            ) {
+                throw new Error(`stated value 必须逐字来自 evidenceQuote: ${fact.key}`);
             }
         }
     }

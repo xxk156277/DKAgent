@@ -38,20 +38,43 @@ function promptTexts(content: string): string[] {
 
 function buildFixtureRelation(transcript: ParsedTranscript): string {
     const questions: Array<Record<string, unknown>> = [];
-    const nonQuestionTurnIds: string[] = [];
+    const nonQuestionTurnIds = transcript.turns
+        .filter((turn) => (
+            turn.speaker === "interviewer"
+            && turn.content === "好的，我们继续。"
+        ))
+        .map((turn) => turn.id);
+    const actualQuestionTurnIds = new Set(
+        transcript.turns
+            .filter((turn) => (
+                turn.speaker === "interviewer"
+                && !nonQuestionTurnIds.includes(turn.id)
+            ))
+            .map((turn) => turn.id),
+    );
 
     for (const [turnIndex, turn] of transcript.turns.entries()) {
         if (turn.speaker !== "interviewer") continue;
         if (turn.content === "好的，我们继续。") {
-            nonQuestionTurnIds.push(turn.id);
             continue;
         }
 
+        let interviewerRunEnd = turnIndex;
+        while (transcript.turns[interviewerRunEnd + 1]?.speaker === "interviewer") {
+            interviewerRunEnd += 1;
+        }
         const answerTurnIds: string[] = [];
-        for (let index = turnIndex + 1; index < transcript.turns.length; index += 1) {
+        for (
+            let index = interviewerRunEnd + 1;
+            index < transcript.turns.length;
+            index += 1
+        ) {
             const next = transcript.turns[index]!;
-            if (next.speaker === "interviewer") break;
-            answerTurnIds.push(next.id);
+            if (
+                next.speaker === "interviewer"
+                && actualQuestionTurnIds.has(next.id)
+            ) break;
+            if (next.speaker === "candidate") answerTurnIds.push(next.id);
         }
         const type = questionType(turn.content);
         for (const text of promptTexts(turn.content)) {

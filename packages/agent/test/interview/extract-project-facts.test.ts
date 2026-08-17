@@ -76,7 +76,7 @@ function context(response: string): ToolContext {
 test("只接受当前项目簇内且能回到候选人原文的事实", async () => {
     const response = JSON.stringify({ facts: [
         {
-            key: "project-a.role",
+            localKey: "role",
             category: "responsibility",
             value: "负责 DSL 渲染链路",
             status: "stated",
@@ -87,7 +87,7 @@ test("只接受当前项目簇内且能回到候选人原文的事实", async ()
             impact: "high",
         },
         {
-            key: "project-a.metric",
+            localKey: "metric",
             category: "metric",
             value: null,
             status: "unknown",
@@ -99,25 +99,43 @@ test("只接受当前项目簇内且能回到候选人原文的事实", async ()
         },
     ] });
 
+    const provider = new FakeTextProvider(response);
     const result = await createExtractProjectFactsTool("fake-model").execute(
         { transcript, cluster, questions },
-        context(response),
+        {
+            queryEngine: new QueryEngine(provider),
+            abortSignal: new AbortController().signal,
+        },
     );
 
     assert.equal(result.success, true);
     assert.equal(result.data?.facts[0]?.status, "stated");
+    assert.deepEqual(
+        result.data?.facts.map((fact) => fact.key),
+        ["project-a.role", "project-a.metric"],
+    );
     assert.deepEqual(result.data?.clarificationCandidates, [{
         factKey: "project-a.metric",
         question: "首屏指标具体提升多少？",
         affectedQuestionIds: ["q-2"],
         impact: "high",
     }]);
+    assert.match(provider.request?.systemPrompt ?? "", /localKey/);
+    const request = provider.request?.messages[0];
+    assert.equal(request?.role, "user");
+    if (request?.role === "user") {
+        assert.deepEqual(JSON.parse(request.content).cluster, {
+            id: "project-a",
+            title: "低代码项目",
+            keyNamespace: "project-a.",
+        });
+    }
 });
 
 test("拒绝没有逐字证据的 stated 和 inferred 事实", async () => {
     for (const status of ["stated", "inferred"] as const) {
         const response = JSON.stringify({ facts: [{
-            key: `project-a.${status}`,
+            localKey: status,
             category: "responsibility",
             value: "负责 DSL 渲染链路",
             status,
@@ -138,7 +156,7 @@ test("拒绝没有逐字证据的 stated 和 inferred 事实", async () => {
 
 test("拒绝不属于所引用候选人轮次的逐字证据", async () => {
     const response = JSON.stringify({ facts: [{
-        key: "project-a.role",
+        localKey: "role",
         category: "responsibility",
         value: "负责全部架构",
         status: "stated",
@@ -158,9 +176,31 @@ test("拒绝不属于所引用候选人轮次的逐字证据", async () => {
     assert.match(result.error?.message ?? "", /逐字证据无法回到候选人原文/);
 });
 
+test("stated 的 value 必须逐字存在于 evidenceQuote", async () => {
+    const response = JSON.stringify({ facts: [{
+        localKey: "role",
+        category: "responsibility",
+        value: "负责全部架构",
+        status: "stated",
+        evidenceTurnIds: ["turn-0002"],
+        evidenceQuote: "我负责 DSL 渲染链路。",
+        affectedQuestionIds: ["q-1"],
+        clarificationQuestion: null,
+        impact: "high",
+    }] });
+
+    const result = await createExtractProjectFactsTool("fake-model").execute(
+        { transcript, cluster, questions },
+        context(response),
+    );
+
+    assert.equal(result.success, false);
+    assert.match(result.error?.message ?? "", /stated value 必须逐字来自 evidenceQuote/);
+});
+
 test("拒绝重复或冲突的事实键", async () => {
     const fact = {
-        key: "project-a.role",
+        localKey: "role",
         category: "responsibility",
         value: "负责 DSL 渲染链路",
         status: "stated",
@@ -186,7 +226,7 @@ test("拒绝重复或冲突的事实键", async () => {
 
 test("拒绝引用其他问题簇或面试官轮次的事实", async () => {
     const response = JSON.stringify({ facts: [{
-        key: "project-a.role",
+        localKey: "role",
         category: "responsibility",
         value: "负责全部架构",
         status: "stated",

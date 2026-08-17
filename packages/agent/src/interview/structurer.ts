@@ -79,6 +79,7 @@ export async function structureInterview(input: StructureInput): Promise<Structu
             "每个面试官轮次必须出现在至少一个 promptSegments 中，或列入 nonQuestionTurnIds。",
             "追问单独成题，但同一项目的连续追问归入同一 cluster。",
             "寒暄、反问和流程问题保留，questionType=procedural 且 scored=false。",
+            "answerTurnIds 必须包含当前提问组之后、下一个实际问题之前的全部候选人轮次；面试官的非问题插话不截断回答。",
             "不得改写原文；promptSegments.text 必须是 originalContent 的原文子串。",
         ].join("\n"),
         userContent: JSON.stringify(input.transcript.turns.map((turn) => ({
@@ -109,6 +110,7 @@ export async function structureInterview(input: StructureInput): Promise<Structu
     const promptTurnIds = relation.questions.flatMap(
         (question) => question.promptSegments.map((segment) => segment.turnId),
     );
+    const actualQuestionTurnIds = new Set(promptTurnIds);
     for (const question of relation.questions) {
         for (const segment of question.promptSegments) {
             const turn = originalById.get(segment.turnId);
@@ -135,18 +137,22 @@ export async function structureInterview(input: StructureInput): Promise<Structu
             throw new Error(`问题片段跨越了多个提问组: ${question.id}`);
         }
         const interviewerRunEnd = [...interviewerRunEnds][0]!;
-        const allowedAnswerTurnIds = new Set<string>();
-        for (
-            let index = interviewerRunEnd + 1;
-            input.transcript.turns[index]?.speaker === "candidate";
-            index += 1
-        ) {
-            allowedAnswerTurnIds.add(input.transcript.turns[index]!.id);
+        const expectedAnswerTurnIds: string[] = [];
+        for (let index = interviewerRunEnd + 1; index < input.transcript.turns.length; index += 1) {
+            const turn = input.transcript.turns[index]!;
+            if (turn.speaker === "interviewer" && actualQuestionTurnIds.has(turn.id)) {
+                break;
+            }
+            if (turn.speaker === "candidate") expectedAnswerTurnIds.push(turn.id);
         }
-        if (question.answerTurnIds.some((turnId) => !allowedAnswerTurnIds.has(turnId))) {
-            throw new Error(
-                `回答不属于提问组后紧邻的候选人回答区间: ${question.id}`,
-            );
+        if (!expectedAnswerTurnIds.length) {
+            throw new Error(`实际问题没有候选人回答: ${question.id}`);
+        }
+        if (
+            findDuplicates(question.answerTurnIds).length
+            || !sameMembers(question.answerTurnIds, expectedAnswerTurnIds)
+        ) {
+            throw new Error(`回答轮次必须完整覆盖回答窗口: ${question.id}`);
         }
         if (question.questionType === "procedural" && question.scored) {
             throw new Error(`流程性问题不得评分: ${question.id}`);

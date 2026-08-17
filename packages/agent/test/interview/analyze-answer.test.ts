@@ -57,7 +57,7 @@ const expression: ExpressionAnalysis = {
 const projectFacts: ProjectFactSet = {
     clusterId: cluster.id,
     facts: [{
-        key: "project.role",
+        key: "cluster-project.role",
         category: "responsibility",
         value: "负责 DSL 渲染链路",
         status: "stated",
@@ -500,7 +500,7 @@ test("clarification 只能引用当前簇 questionId", async () => {
     const response = {
         ...validProjectResponse,
         clarificationCandidates: [{
-            factKey: "project.metric",
+            factKey: "cluster-project.metric",
             question: "指标口径是什么？",
             affectedQuestionIds: ["q-outside"],
             impact: "high",
