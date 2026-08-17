@@ -4,6 +4,7 @@
     "src/interview/**/*.ts",
     "src/query-engine/**/*.ts",
     "src/tools/types.ts",
+    "src/tools/tool-item/analyze-expression.ts",
     "src/tools/tool-item/preprocess-transcript.ts",
     "src/tools/tool-item/extract-project-facts.ts",
     "test/interview/**/*.ts"
