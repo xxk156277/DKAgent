@@ -25,6 +25,7 @@ const projectFactSchema = z.object({
     value: z.string().nullable(),
     status: z.enum(["stated", "inferred", "unknown"]),
     evidenceTurnIds: z.array(z.string().min(1)),
+    evidenceQuote: z.string().nullable(),
     affectedQuestionIds: z.array(z.string().min(1)),
     clarificationQuestion: z.string().nullable(),
     impact: z.enum(["high", "medium", "low"]),
@@ -55,7 +56,13 @@ function validateFacts(input: {
     facts: ProjectFact[];
     allowedEvidenceTurnIds: Set<string>;
     allowedQuestionIds: Set<string>;
+    candidateContentByTurnId: Map<string, string>;
 }): void {
+    const factKeys = input.facts.map((fact) => fact.key);
+    if (new Set(factKeys).size !== factKeys.length) {
+        throw new Error("事实键重复或冲突");
+    }
+
     for (const fact of input.facts) {
         if (fact.affectedQuestionIds.some((id) => !input.allowedQuestionIds.has(id))) {
             throw new Error(`事实引用了当前问题簇外的问题: ${fact.key}`);
@@ -64,20 +71,42 @@ function validateFacts(input: {
             throw new Error(`事实引用了非候选人回答轮次: ${fact.key}`);
         }
 
-        if (fact.status === "stated" && (!hasText(fact.value) || !fact.evidenceTurnIds.length)) {
-            throw new Error(`明确事实必须有值和候选人证据: ${fact.key}`);
+        if (
+            fact.status === "stated"
+            && (!hasText(fact.value) || !fact.evidenceTurnIds.length || !hasText(fact.evidenceQuote))
+        ) {
+            throw new Error(`明确事实必须有值、候选人轮次和逐字证据: ${fact.key}`);
         }
         if (
             fact.status === "unknown"
-            && (fact.value !== null || fact.evidenceTurnIds.length || !hasText(fact.clarificationQuestion))
+            && (
+                fact.value !== null
+                || fact.evidenceTurnIds.length
+                || fact.evidenceQuote !== null
+                || !hasText(fact.clarificationQuestion)
+            )
         ) {
             throw new Error(`未知事实必须没有值和证据，并给出澄清问题: ${fact.key}`);
         }
         if (
             fact.status === "inferred"
-            && (!hasText(fact.value) || !fact.evidenceTurnIds.length || !hasText(fact.clarificationQuestion))
+            && (
+                !hasText(fact.value)
+                || !fact.evidenceTurnIds.length
+                || !hasText(fact.evidenceQuote)
+                || !hasText(fact.clarificationQuestion)
+            )
         ) {
-            throw new Error(`推断事实必须有值、候选人证据和澄清问题: ${fact.key}`);
+            throw new Error(`推断事实必须有值、候选人轮次、逐字证据和澄清问题: ${fact.key}`);
+        }
+        if (
+            fact.status !== "unknown"
+            && hasText(fact.evidenceQuote)
+            && !fact.evidenceTurnIds.some((turnId) => (
+                input.candidateContentByTurnId.get(turnId)?.includes(fact.evidenceQuote!)
+            ))
+        ) {
+            throw new Error(`逐字证据无法回到候选人原文: ${fact.key}`);
         }
     }
 }
@@ -142,6 +171,7 @@ export function createExtractProjectFactsTool(
                         "stated 只表示候选人在原文明确陈述，不代表外部真实性已确认。",
                         "不得根据常识补全职责、指标、上线范围或项目结果。",
                         "unknown 的 value 必须为 null；所有证据只能引用输入中的候选人 turnId。",
+                        "stated 和 inferred 必须给出 evidenceQuote，且逐字复制自所引用的候选人轮次；unknown 的 evidenceQuote 必须为 null。",
                         "inferred 仅用于有候选人证据但仍需澄清的推断；不确定时用 unknown。",
                     ].join("\n"),
                     userContent: JSON.stringify({
@@ -161,6 +191,12 @@ export function createExtractProjectFactsTool(
                     facts,
                     allowedEvidenceTurnIds,
                     allowedQuestionIds: new Set(input.cluster.questionIds),
+                    candidateContentByTurnId: new Map(
+                        [...allowedEvidenceTurnIds].map((turnId) => [
+                            turnId,
+                            turnById.get(turnId)!.content,
+                        ]),
+                    ),
                 });
 
                 return {

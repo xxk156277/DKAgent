@@ -137,6 +137,89 @@ test("回答只能引用候选人轮次", async () => {
     await assert.rejects(() => runWith(relation), /回答引用了非候选人轮次/);
 });
 
+test("回答只能绑定提问组后紧邻的候选人回答块", async () => {
+    const relation = validRelation();
+    const questions = relation.questions as Array<{ answerTurnIds: string[] }>;
+    questions[0]!.answerTurnIds = ["turn-0004"];
+
+    await assert.rejects(
+        () => runWith(relation),
+        /回答不属于提问组后紧邻的候选人回答区间/,
+    );
+});
+
+test("连续多个面试官提问共享其后紧邻的候选人回答块", async () => {
+    const consecutiveSource = [
+        "面试官 01:00",
+        "先介绍项目。",
+        "面试官 01:01",
+        "你负责什么？",
+        "候选人 01:02",
+        "我负责 DSL 渲染链路。",
+    ].join("\n");
+    const transcript = parseTranscript(consecutiveSource);
+    const relation = {
+        clusters: [{
+            id: "cluster-1",
+            title: "项目",
+            questionIds: ["q-1", "q-2"],
+        }],
+        questions: [
+            {
+                id: "q-1",
+                clusterId: "cluster-1",
+                promptSegments: [{ turnId: "turn-0001", text: "先介绍项目。" }],
+                answerTurnIds: ["turn-0003"],
+                questionType: "project",
+                scored: true,
+            },
+            {
+                id: "q-2",
+                clusterId: "cluster-1",
+                promptSegments: [{ turnId: "turn-0002", text: "你负责什么？" }],
+                answerTurnIds: ["turn-0003"],
+                questionType: "project",
+                scored: true,
+            },
+        ],
+        nonQuestionTurnIds: [],
+    };
+
+    const result = await structureInterview({
+        transcript,
+        correctedTurns: transcript.turns,
+        queryEngine: new QueryEngine(new FakeTextProvider(JSON.stringify(relation))),
+        model: "fake-model",
+        abortSignal: new AbortController().signal,
+    });
+
+    assert.deepEqual(
+        result.questions.map((question) => question.answerTurnIds),
+        [["turn-0003"], ["turn-0003"]],
+    );
+});
+
+test("按原文位置规范化问题、追问和问题簇顺序", async () => {
+    const relation = validRelation();
+    const questions = relation.questions as Array<{ id: string }>;
+    relation.questions = [questions[2]!, questions[1]!, questions[0]!, questions[3]!];
+    const clusters = relation.clusters as Array<{ id: string; questionIds: string[] }>;
+    clusters[0]!.questionIds = ["q-3", "q-2", "q-1"];
+    relation.clusters = [clusters[1]!, clusters[0]!];
+
+    const result = await runWith(relation);
+
+    assert.deepEqual(
+        result.questions.map((question) => question.id),
+        ["q-1", "q-2", "q-3", "q-4"],
+    );
+    assert.deepEqual(
+        result.clusters.map((item) => item.id),
+        ["cluster-1", "cluster-2"],
+    );
+    assert.deepEqual(result.clusters[0]?.questionIds, ["q-1", "q-2", "q-3"]);
+});
+
 test("问题与问题簇的双向关系必须一致", async () => {
     const relation = validRelation();
     const clusters = relation.clusters as Array<{ questionIds: string[] }>;
@@ -161,4 +244,15 @@ test("流程性问题不得参与评分", async () => {
     questions[3]!.scored = true;
 
     await assert.rejects(() => runWith(relation), /流程性问题不得评分/);
+});
+
+test("非流程题不得由模型下调为不评分", async () => {
+    const relation = validRelation();
+    const questions = relation.questions as Array<{
+        questionType: string;
+        scored: boolean;
+    }>;
+    questions[0]!.scored = false;
+
+    await assert.rejects(() => runWith(relation), /非流程题必须评分/);
 });

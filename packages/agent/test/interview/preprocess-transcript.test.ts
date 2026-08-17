@@ -83,6 +83,55 @@ test("模型返回非法 JSON 时返回 service_error", async () => {
     assert.equal(result.error?.code, "service_error");
 });
 
+test("保护标点分隔卡壳和显式停顿痕迹", async () => {
+    const transcript = parseTranscript([
+        "面试官",
+        "你负责什么？",
+        "候选人",
+        "我，我负责前端，这个…方案用了 reat。",
+    ].join("\n"));
+    const response = JSON.stringify({ corrections: [
+        {
+            turnId: "turn-0002",
+            original: "我，我负责前端",
+            replacement: "我负责前端",
+            confidence: 0.99,
+            reason: "删除卡壳",
+        },
+        {
+            turnId: "turn-0002",
+            original: "这个…方案",
+            replacement: "这个方案",
+            confidence: 0.99,
+            reason: "删除停顿",
+        },
+        {
+            turnId: "turn-0002",
+            original: "reat",
+            replacement: "React",
+            confidence: 0.99,
+            reason: "技术名词误识别",
+        },
+    ] });
+
+    const result = await createPreprocessTranscriptTool("fake-model").execute(
+        { transcript },
+        {
+            queryEngine: new QueryEngine(new FakeTextProvider(response)),
+            abortSignal: new AbortController().signal,
+        },
+    );
+
+    assert.deepEqual(
+        result.data?.corrections.map((item) => item.original),
+        ["reat"],
+    );
+    assert.equal(
+        result.data?.correctedTurns[1]?.content,
+        "我，我负责前端，这个…方案用了 React。",
+    );
+});
+
 test("接受 JSON 代码围栏但拒绝额外字段", async () => {
     const transcript = parseTranscript("面试官\n问题\n候选人\n回答");
     const fenced = "```json\n{\"corrections\": [], \"unexpected\": true}\n```";

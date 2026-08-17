@@ -66,6 +66,25 @@ test("先簇内平均再让问题簇等权", () => {
     assert.deepEqual(result.coverage, { analyzed: 3, expected: 3 });
 });
 
+test("簇内 60.4 与 60.5 使用未取整精度参与簇等权汇总", () => {
+    const result = scoreInterview({
+        questions: questions.slice(0, 3),
+        clusters: clusters.slice(0, 2),
+        analyses: [
+            completed("q-1", 60.3),
+            completed("q-2", 60.5),
+            completed("q-3", 60.5),
+        ],
+    });
+
+    assert.deepEqual(
+        result.clusterScores.map((cluster) => cluster.dimensions.contentQuality),
+        [60, 61],
+    );
+    assert.equal(result.dimensions.contentQuality, 60);
+    assert.equal(result.totalScore, 60);
+});
+
 test("失败题和流程题不按零分进入分母", () => {
     const result = scoreInterview({
         questions,

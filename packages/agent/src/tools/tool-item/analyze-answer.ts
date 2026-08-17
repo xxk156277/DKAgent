@@ -21,7 +21,7 @@ const observationSchema = z.object({
     id: z.string().min(1),
     text: z.string().min(1),
     impact: z.string().min(1),
-    evidenceTurnIds: z.array(z.string().min(1)),
+    evidenceTurnIds: z.array(z.string().min(1)).min(1),
 }).strict();
 
 const clarificationSchema = z.object({
@@ -68,6 +68,9 @@ const SEMANTIC_DIMENSIONS: SemanticDimension[] = [
     "followUpHandling",
 ];
 
+// 未经用户确认的推断事实最多支持“中”置信度。
+export const INFERRED_PROJECT_FACT_CONFIDENCE_CAP = 0.79;
+
 function sameMembers(left: string[], right: string[]): boolean {
     const sortedLeft = [...left].sort();
     const sortedRight = [...right].sort();
@@ -104,6 +107,9 @@ function validateEvidence(
     allowedTurnIds: Set<string>,
 ): void {
     for (const observation of observations) {
+        if (!observation.evidenceTurnIds.length) {
+            throw new Error(`分析证据不能为空: ${observation.id}`);
+        }
         if (observation.evidenceTurnIds.some((turnId) => !allowedTurnIds.has(turnId))) {
             throw new Error(`分析证据不属于当前问题: ${observation.id}`);
         }
@@ -240,6 +246,18 @@ export function createAnalyzeAnswerTool(
                 let confidence = response.confidence;
                 if (input.question.questionType === "project" && !input.projectFacts) {
                     confidence = Math.min(confidence, 0.54);
+                }
+                if (
+                    input.question.questionType === "project"
+                    && input.projectFacts?.facts.some((fact) => (
+                        fact.status === "inferred"
+                        && fact.affectedQuestionIds.includes(input.question.id)
+                    ))
+                ) {
+                    confidence = Math.min(
+                        confidence,
+                        INFERRED_PROJECT_FACT_CONFIDENCE_CAP,
+                    );
                 }
                 if (input.question.questionType === "knowledge" && references.length === 0) {
                     confidence = Math.min(confidence, 0.79);

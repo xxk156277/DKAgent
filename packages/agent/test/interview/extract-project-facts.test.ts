@@ -81,6 +81,7 @@ test("只接受当前项目簇内且能回到候选人原文的事实", async ()
             value: "负责 DSL 渲染链路",
             status: "stated",
             evidenceTurnIds: ["turn-0002"],
+            evidenceQuote: "我负责 DSL 渲染链路。",
             affectedQuestionIds: ["q-1"],
             clarificationQuestion: null,
             impact: "high",
@@ -91,6 +92,7 @@ test("只接受当前项目簇内且能回到候选人原文的事实", async ()
             value: null,
             status: "unknown",
             evidenceTurnIds: [],
+            evidenceQuote: null,
             affectedQuestionIds: ["q-2"],
             clarificationQuestion: "首屏指标具体提升多少？",
             impact: "high",
@@ -112,6 +114,76 @@ test("只接受当前项目簇内且能回到候选人原文的事实", async ()
     }]);
 });
 
+test("拒绝没有逐字证据的 stated 和 inferred 事实", async () => {
+    for (const status of ["stated", "inferred"] as const) {
+        const response = JSON.stringify({ facts: [{
+            key: `project-a.${status}`,
+            category: "responsibility",
+            value: "负责 DSL 渲染链路",
+            status,
+            evidenceTurnIds: ["turn-0002"],
+            affectedQuestionIds: ["q-1"],
+            clarificationQuestion: status === "inferred" ? "你是否负责该链路？" : null,
+            impact: "high",
+        }] });
+
+        const result = await createExtractProjectFactsTool("fake-model").execute(
+            { transcript, cluster, questions },
+            context(response),
+        );
+
+        assert.equal(result.success, false);
+    }
+});
+
+test("拒绝不属于所引用候选人轮次的逐字证据", async () => {
+    const response = JSON.stringify({ facts: [{
+        key: "project-a.role",
+        category: "responsibility",
+        value: "负责全部架构",
+        status: "stated",
+        evidenceTurnIds: ["turn-0002"],
+        evidenceQuote: "我只参与了一个模块。",
+        affectedQuestionIds: ["q-1"],
+        clarificationQuestion: null,
+        impact: "high",
+    }] });
+
+    const result = await createExtractProjectFactsTool("fake-model").execute(
+        { transcript, cluster, questions },
+        context(response),
+    );
+
+    assert.equal(result.success, false);
+    assert.match(result.error?.message ?? "", /逐字证据无法回到候选人原文/);
+});
+
+test("拒绝重复或冲突的事实键", async () => {
+    const fact = {
+        key: "project-a.role",
+        category: "responsibility",
+        value: "负责 DSL 渲染链路",
+        status: "stated",
+        evidenceTurnIds: ["turn-0002"],
+        evidenceQuote: "我负责 DSL 渲染链路。",
+        affectedQuestionIds: ["q-1"],
+        clarificationQuestion: null,
+        impact: "high",
+    } as const;
+    const response = JSON.stringify({ facts: [
+        fact,
+        { ...fact, value: "负责全部架构" },
+    ] });
+
+    const result = await createExtractProjectFactsTool("fake-model").execute(
+        { transcript, cluster, questions },
+        context(response),
+    );
+
+    assert.equal(result.success, false);
+    assert.match(result.error?.message ?? "", /事实键重复或冲突/);
+});
+
 test("拒绝引用其他问题簇或面试官轮次的事实", async () => {
     const response = JSON.stringify({ facts: [{
         key: "project-a.role",
@@ -119,6 +191,7 @@ test("拒绝引用其他问题簇或面试官轮次的事实", async () => {
         value: "负责全部架构",
         status: "stated",
         evidenceTurnIds: ["turn-0001"],
+        evidenceQuote: "低代码项目里你负责什么？",
         affectedQuestionIds: ["q-outside"],
         clarificationQuestion: null,
         impact: "high",

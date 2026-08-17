@@ -77,6 +77,7 @@ export interface ProjectFact {
     value: string | null;
     status: ProjectFactStatus;
     evidenceTurnIds: string[];
+    evidenceQuote: string | null;
     affectedQuestionIds: string[];
     clarificationQuestion: string | null;
     impact: EvidenceImpact;

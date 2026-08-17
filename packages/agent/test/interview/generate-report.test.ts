@@ -328,6 +328,76 @@ test("拒绝逐题分析引用未知原文轮次", async () => {
     assert.equal(provider.request, undefined);
 });
 
+test("报告入口再次拒绝空的逐题分析证据", async () => {
+    const first = analyses[0]!;
+    assert.equal(first.status, "completed");
+    if (first.status !== "completed") return;
+    const invalidAnalyses: QuestionAnalysis[] = [{
+        ...first,
+        strengths: [{ ...first.strengths[0]!, evidenceTurnIds: [] }],
+    }, ...analyses.slice(1)];
+    const { provider, context } = toolContext(validSummary);
+
+    const result = await createGenerateReportTool("fake-model").execute(
+        baseInput({ analyses: invalidAnalyses }),
+        context,
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "input_error");
+    assert.equal(provider.request, undefined);
+});
+
+test("报告入口拒绝无法回到候选人原文或重复键的项目事实", async () => {
+    const validFact = {
+        key: "project.role",
+        category: "responsibility" as const,
+        value: "负责 DSL 渲染链路",
+        status: "stated" as const,
+        evidenceTurnIds: ["q-1-answer"],
+        evidenceQuote: questions[0]!.originalAnswer,
+        affectedQuestionIds: ["q-1"],
+        clarificationQuestion: null,
+        impact: "high" as const,
+    };
+    const invalidFactSets: ProjectFactSet[][] = [
+        [{
+            clusterId: "cluster-project",
+            facts: [{ ...validFact, evidenceQuote: "候选人没有说过的内容" }],
+            clarificationCandidates: [],
+        }],
+        [{
+            clusterId: "cluster-project",
+            facts: [validFact, { ...validFact, value: "负责全部架构" }],
+            clarificationCandidates: [],
+        }],
+        [
+            {
+                clusterId: "cluster-project",
+                facts: [validFact],
+                clarificationCandidates: [],
+            },
+            {
+                clusterId: "cluster-project",
+                facts: [{ ...validFact, value: "负责全部架构" }],
+                clarificationCandidates: [],
+            },
+        ],
+    ];
+
+    for (const facts of invalidFactSets) {
+        const { provider, context } = toolContext(validSummary);
+        const result = await createGenerateReportTool("fake-model").execute(
+            baseInput({ projectFactSets: facts }),
+            context,
+        );
+
+        assert.equal(result.success, false);
+        assert.equal(result.error?.code, "input_error");
+        assert.equal(provider.request, undefined);
+    }
+});
+
 test("拒绝可在问题簇平均中相互抵消的越界维度分", async () => {
     const invalidAnalyses = analyses.map((analysis) => {
         if (analysis.status !== "completed") return analysis;

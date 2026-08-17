@@ -62,6 +62,7 @@ const projectFacts: ProjectFactSet = {
         value: "负责 DSL 渲染链路",
         status: "stated",
         evidenceTurnIds: ["turn-a1"],
+        evidenceQuote: "这是候选人的回答",
         affectedQuestionIds: [projectQuestion.id],
         clarificationQuestion: null,
         impact: "high",
@@ -197,6 +198,28 @@ test("项目事实提取失败时置信度上限为 0.54", async () => {
     assert.equal(result.data?.status, "completed");
     if (result.data?.status === "completed") {
         assert.equal(result.data.confidence, 0.54);
+    }
+});
+
+test("相关项目事实仍为 inferred 时置信度固定封顶为 0.79", async () => {
+    const inferredFacts: ProjectFactSet = {
+        ...projectFacts,
+        facts: projectFacts.facts.map((fact) => ({
+            ...fact,
+            status: "inferred" as const,
+            clarificationQuestion: "你是否独立负责该链路？",
+        })),
+    };
+    const { context } = toolContext({ ...validProjectResponse, confidence: 0.95 });
+
+    const result = await createAnalyzeAnswerTool("fake-model").execute(
+        projectInput({ projectFacts: inferredFacts }),
+        context,
+    );
+
+    assert.equal(result.data?.status, "completed");
+    if (result.data?.status === "completed") {
+        assert.equal(result.data.confidence, 0.79);
     }
 });
 
@@ -347,6 +370,35 @@ test("拒绝不存在的证据轮次", async () => {
     );
 
     assert.equal(result.success, false);
+});
+
+test("strength 和 issue 都必须至少引用一个当前问题轮次", async () => {
+    const invalidResponses = [
+        {
+            ...validProjectResponse,
+            strengths: [{
+                ...validProjectResponse.strengths[0],
+                evidenceTurnIds: [],
+            }],
+        },
+        {
+            ...validProjectResponse,
+            issues: [{
+                ...validProjectResponse.issues[0],
+                evidenceTurnIds: [],
+            }],
+        },
+    ];
+
+    for (const response of invalidResponses) {
+        const { context } = toolContext(response);
+        const result = await createAnalyzeAnswerTool("fake-model").execute(
+            projectInput(),
+            context,
+        );
+
+        assert.equal(result.success, false);
+    }
 });
 
 test("拒绝题型不适用的维度分", async () => {

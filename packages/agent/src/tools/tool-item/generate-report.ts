@@ -71,9 +71,10 @@ function inputError(message: string): ToolResult<GenerateReportOutput> {
 function validateInput(input: GenerateReportInput): void {
     const questionIds = input.structuredInterview.questions.map((question) => question.id);
     const knownQuestionIds = new Set(questionIds);
-    const knownTurnIds = new Set(
-        input.structuredInterview.transcript.turns.map((turn) => turn.id),
+    const turnById = new Map(
+        input.structuredInterview.transcript.turns.map((turn) => [turn.id, turn]),
     );
+    const knownTurnIds = new Set(turnById.keys());
     if (knownQuestionIds.size !== questionIds.length) {
         throw new Error("结构化面试包含重复问题 ID");
     }
@@ -129,7 +130,16 @@ function validateInput(input: GenerateReportInput): void {
                 ...question.promptTurnIds,
                 ...question.answerTurnIds,
             ]);
-            const unknownEvidenceId = [...analysis.strengths, ...analysis.issues]
+            const observations = [...analysis.strengths, ...analysis.issues];
+            const emptyEvidenceObservation = observations.find(
+                (observation) => observation.evidenceTurnIds.length === 0,
+            );
+            if (emptyEvidenceObservation) {
+                throw new Error(
+                    `逐题分析证据不能为空: ${analysis.questionId}.${emptyEvidenceObservation.id}`,
+                );
+            }
+            const unknownEvidenceId = observations
                 .flatMap((observation) => observation.evidenceTurnIds)
                 .find((turnId) => !knownTurnIds.has(turnId) || !allowedTurnIds.has(turnId));
             if (unknownEvidenceId) {
@@ -138,22 +148,54 @@ function validateInput(input: GenerateReportInput): void {
         }
     }
 
+    const seenFactKeys = new Set<string>();
     for (const factSet of input.projectFactSets) {
-        if (!clusterById.has(factSet.clusterId)) {
+        const cluster = clusterById.get(factSet.clusterId);
+        if (!cluster) {
             throw new Error(`项目事实引用未知问题簇: ${factSet.clusterId}`);
         }
+        const factKeys = factSet.facts.map((fact) => fact.key);
+        if (new Set(factKeys).size !== factKeys.length) {
+            throw new Error(`项目事实键重复或冲突: ${factSet.clusterId}`);
+        }
+        const clusterQuestionIds = new Set(cluster.questionIds);
+        const clusterAnswerTurnIds = new Set(
+            input.structuredInterview.questions
+                .filter((question) => question.clusterId === factSet.clusterId)
+                .flatMap((question) => question.answerTurnIds),
+        );
         for (const fact of factSet.facts) {
+            if (seenFactKeys.has(fact.key)) {
+                throw new Error(`项目事实键重复或冲突: ${fact.key}`);
+            }
+            seenFactKeys.add(fact.key);
             const unknownEvidenceId = fact.evidenceTurnIds.find(
-                (turnId) => !knownTurnIds.has(turnId),
+                (turnId) => !knownTurnIds.has(turnId)
+                    || turnById.get(turnId)?.speaker !== "candidate"
+                    || !clusterAnswerTurnIds.has(turnId),
             );
             if (unknownEvidenceId) {
-                throw new Error(`项目事实引用未知原文轮次: ${unknownEvidenceId}`);
+                throw new Error(`项目事实引用未知或越界候选人轮次: ${unknownEvidenceId}`);
             }
             const unknownQuestionId = fact.affectedQuestionIds.find(
-                (id) => !knownQuestionIds.has(id),
+                (id) => !knownQuestionIds.has(id) || !clusterQuestionIds.has(id),
             );
             if (unknownQuestionId) {
-                throw new Error(`项目事实引用未知问题: ${unknownQuestionId}`);
+                throw new Error(`项目事实引用未知或越界问题: ${unknownQuestionId}`);
+            }
+            if (
+                fact.status !== "unknown"
+                && (
+                    !fact.evidenceQuote?.trim()
+                    || !fact.evidenceTurnIds.some((turnId) => (
+                        turnById.get(turnId)?.content.includes(fact.evidenceQuote!)
+                    ))
+                )
+            ) {
+                throw new Error(`项目事实逐字证据无法回到候选人原文: ${fact.key}`);
+            }
+            if (fact.status === "unknown" && fact.evidenceQuote !== null) {
+                throw new Error(`未知项目事实不得包含逐字证据: ${fact.key}`);
             }
         }
     }

@@ -27,6 +27,13 @@ function round(value: number | null): number | null {
     return value === null ? null : Math.round(value);
 }
 
+function roundDimensions(scores: DimensionScores): DimensionScores {
+    return Object.fromEntries(DIMENSIONS.map((dimension) => [
+        dimension,
+        round(scores[dimension]),
+    ])) as DimensionScores;
+}
+
 export function calculateQuestionScore(scores: DimensionScores): number | null {
     let weighted = 0;
     let weights = 0;
@@ -59,33 +66,36 @@ export function scoreInterview(input: {
     const completedByQuestion = new Map(
         completed.map((item) => [item.questionId, item]),
     );
-    const clusterScores = input.clusters.flatMap((cluster) => {
+    const rawClusterScores = input.clusters.flatMap((cluster) => {
         const items = cluster.questionIds
             .map((questionId) => completedByQuestion.get(questionId))
             .filter((item) => item !== undefined);
         if (!items.length) return [];
         const dimensions = Object.fromEntries(DIMENSIONS.map((dimension) => [
             dimension,
-            round(mean(items.flatMap((item) => {
+            mean(items.flatMap((item) => {
                 const value = item.dimensionScores[dimension];
                 return value === null ? [] : [value];
-            }))),
+            })),
         ])) as DimensionScores;
         return [{ clusterId: cluster.id, dimensions }];
     });
-    const dimensions = Object.fromEntries(DIMENSIONS.map((dimension) => [
+    const rawDimensions = Object.fromEntries(DIMENSIONS.map((dimension) => [
         dimension,
-        round(mean(clusterScores.flatMap((cluster) => {
+        mean(rawClusterScores.flatMap((cluster) => {
             const value = cluster.dimensions[dimension];
             return value === null ? [] : [value];
-        }))),
+        })),
     ])) as DimensionScores;
-    const totalScore = calculateQuestionScore(dimensions);
+    const totalScore = calculateQuestionScore(rawDimensions);
     if (totalScore === null) throw new Error("没有可评分维度");
     return {
         totalScore,
-        dimensions,
-        clusterScores,
+        dimensions: roundDimensions(rawDimensions),
+        clusterScores: rawClusterScores.map((cluster) => ({
+            clusterId: cluster.clusterId,
+            dimensions: roundDimensions(cluster.dimensions),
+        })),
         coverage: {
             analyzed: completed.length,
             expected: scoredQuestionIds.size,

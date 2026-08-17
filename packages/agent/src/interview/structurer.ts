@@ -92,6 +92,9 @@ export async function structureInterview(input: StructureInput): Promise<Structu
     const originalById = new Map(
         input.transcript.turns.map((turn) => [turn.id, turn]),
     );
+    const turnIndexById = new Map(
+        input.transcript.turns.map((turn, index) => [turn.id, index]),
+    );
     const interviewerIds = input.transcript.turns
         .filter((turn) => turn.speaker === "interviewer")
         .map((turn) => turn.id);
@@ -119,8 +122,37 @@ export async function structureInterview(input: StructureInput): Promise<Structu
                 throw new Error(`回答引用了非候选人轮次: ${turnId}`);
             }
         }
+        const interviewerRunEnds = new Set(
+            question.promptSegments.map((segment) => {
+                let index = turnIndexById.get(segment.turnId)!;
+                while (input.transcript.turns[index + 1]?.speaker === "interviewer") {
+                    index += 1;
+                }
+                return index;
+            }),
+        );
+        if (interviewerRunEnds.size !== 1) {
+            throw new Error(`问题片段跨越了多个提问组: ${question.id}`);
+        }
+        const interviewerRunEnd = [...interviewerRunEnds][0]!;
+        const allowedAnswerTurnIds = new Set<string>();
+        for (
+            let index = interviewerRunEnd + 1;
+            input.transcript.turns[index]?.speaker === "candidate";
+            index += 1
+        ) {
+            allowedAnswerTurnIds.add(input.transcript.turns[index]!.id);
+        }
+        if (question.answerTurnIds.some((turnId) => !allowedAnswerTurnIds.has(turnId))) {
+            throw new Error(
+                `回答不属于提问组后紧邻的候选人回答区间: ${question.id}`,
+            );
+        }
         if (question.questionType === "procedural" && question.scored) {
             throw new Error(`流程性问题不得评分: ${question.id}`);
+        }
+        if (question.questionType !== "procedural" && !question.scored) {
+            throw new Error(`非流程题必须评分: ${question.id}`);
         }
     }
 
@@ -164,12 +196,54 @@ export async function structureInterview(input: StructureInput): Promise<Structu
         }
     }
 
+    const segmentPosition = (segment: { turnId: string; text: string }): [number, number] => {
+        const turn = originalById.get(segment.turnId)!;
+        return [turnIndexById.get(segment.turnId)!, turn.content.indexOf(segment.text)];
+    };
+    const comparePosition = (left: [number, number], right: [number, number]): number => (
+        left[0] - right[0] || left[1] - right[1]
+    );
+    const orderedQuestionRelations = relation.questions
+        .map((question, modelIndex) => ({
+            modelIndex,
+            question: {
+                ...question,
+                promptSegments: [...question.promptSegments].sort((left, right) => (
+                    comparePosition(segmentPosition(left), segmentPosition(right))
+                )),
+                answerTurnIds: [...question.answerTurnIds].sort((left, right) => (
+                    turnIndexById.get(left)! - turnIndexById.get(right)!
+                )),
+            },
+        }))
+        .sort((left, right) => (
+            comparePosition(
+                segmentPosition(left.question.promptSegments[0]!),
+                segmentPosition(right.question.promptSegments[0]!),
+            ) || left.modelIndex - right.modelIndex
+        ))
+        .map(({ question }) => question);
+    const questionOrder = new Map(
+        orderedQuestionRelations.map((question, index) => [question.id, index]),
+    );
+    const orderedClusters = relation.clusters
+        .map((cluster) => ({
+            ...cluster,
+            questionIds: [...cluster.questionIds].sort((left, right) => (
+                questionOrder.get(left)! - questionOrder.get(right)!
+            )),
+        }))
+        .sort((left, right) => (
+            questionOrder.get(left.questionIds[0]!)!
+            - questionOrder.get(right.questionIds[0]!)!
+        ));
+
     const readTurns = (ids: string[]): TranscriptTurn[] => ids.map((turnId) => {
         const turn = originalById.get(turnId);
         if (!turn) throw new Error(`轮次不存在: ${turnId}`);
         return turn;
     });
-    const questions = relation.questions.map((question): InterviewQuestion => {
+    const questions = orderedQuestionRelations.map((question): InterviewQuestion => {
         const promptTurns = readTurns(
             question.promptSegments.map((segment) => segment.turnId),
         );
@@ -192,7 +266,7 @@ export async function structureInterview(input: StructureInput): Promise<Structu
 
     return {
         questions,
-        clusters: relation.clusters,
+        clusters: orderedClusters,
         nonQuestionTurnIds: relation.nonQuestionTurnIds,
     };
 }

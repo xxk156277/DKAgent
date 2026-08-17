@@ -39,10 +39,44 @@ function countOccurrences(text: string, token: string): number {
     return count;
 }
 
+function countPauseMarks(text: string): number {
+    return text.match(/…|\.{3}|—{2}/g)?.length ?? 0;
+}
+
+function countPunctuationSeparatedRepetitions(text: string): number {
+    let count = 0;
+    for (let size = 1; size <= 6; size += 1) {
+        for (let index = 0; index + size < text.length; index += 1) {
+            const repeated = text.slice(index, index + size);
+            if (!/^[\p{L}\p{N}]+$/u.test(repeated)) continue;
+
+            let nextIndex = index + size;
+            while (/[，,、；;：:\s…—-]/u.test(text[nextIndex] ?? "")) {
+                nextIndex += 1;
+            }
+            if (nextIndex === index + size) continue;
+            if (text.slice(nextIndex, nextIndex + size) === repeated) {
+                count += 1;
+                index = nextIndex + size - 1;
+            }
+        }
+    }
+    return count;
+}
+
 function removesProtectedExpression(original: string, replacement: string): boolean {
     if (PROTECTED_FILLERS.some((token) => (
         countOccurrences(replacement, token) < countOccurrences(original, token)
     ))) {
+        return true;
+    }
+    if (countPauseMarks(replacement) < countPauseMarks(original)) {
+        return true;
+    }
+    if (
+        countPunctuationSeparatedRepetitions(replacement)
+        < countPunctuationSeparatedRepetitions(original)
+    ) {
         return true;
     }
 
