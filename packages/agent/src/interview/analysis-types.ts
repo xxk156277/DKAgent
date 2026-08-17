@@ -119,3 +119,34 @@ export interface InterviewScore {
     clusterScores: ClusterScore[];
     coverage: { analyzed: number; expected: number };
 }
+
+export interface ReportReferenceItem {
+    text: string;
+    questionIds: string[];
+}
+
+export interface ReportQuestionItem {
+    questionId: string;
+    originalQuestion: string;
+    originalAnswer: string;
+    label: string;
+    issues: string[];
+    improvements: string[];
+    score: number | null;
+    confidenceLabel: "高" | "中" | "低" | null;
+    confidenceReason: string | null;
+    status: "completed" | "failed" | "not_scored";
+}
+
+export interface InterviewReport {
+    stage: "provisional" | "final";
+    notice: string | null;
+    score: InterviewScore;
+    summaryStatus: "completed" | "failed";
+    levelSummary: string;
+    strengths: ReportReferenceItem[];
+    coreIssues: ReportReferenceItem[];
+    priorityImprovements: ReportReferenceItem[];
+    pendingClarifications: ClarificationCandidate[];
+    questions: ReportQuestionItem[];
+}

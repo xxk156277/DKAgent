@@ -144,7 +144,7 @@ Skill按问题簇顺序遍历全部具体问题：
 
 ## 9. 当前实现状态
 
-- 已实现：带角色长稿的确定性轮次解析、受约束纠错Diff、具体问题与问题簇结构化。
-- 已验证：83轮脱敏长稿覆盖一轮多问、连续追问、非提问发言、连续同角色、口头表达保留和原文证据。
-- 尚未接入：Agent入口、`diagnose-transcript` Skill、单题分析、报告和Memory时间线。
+- 已实现：长稿结构化、项目事实提取、文本表达分析、逐题分析、问题簇等权评分和暂定两层报告。
+- 已验证：FakeProvider 场景覆盖项目题、知识题、开放题、流程题、部分失败、证据越界和固定 Markdown 顺序。
+- 尚未接入：Agent入口、`diagnose-transcript` Skill、用户确认后的局部重跑、最终报告和Memory时间线。
 - 验证入口：`npm run test:interview -w @dkagent/agent`。
