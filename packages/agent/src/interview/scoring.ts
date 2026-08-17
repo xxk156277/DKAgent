@@ -1,4 +1,5 @@
 import type {
+    CompletedQuestionAnalysis,
     DimensionScores,
     GlobalDimension,
     InterviewScore,
@@ -46,8 +47,14 @@ export function scoreInterview(input: {
     clusters: QuestionCluster[];
     analyses: QuestionAnalysis[];
 }): InterviewScore {
+    const scoredQuestionIds = new Set(
+        input.questions
+            .filter((question) => question.scored)
+            .map((question) => question.id),
+    );
     const completed = input.analyses.filter(
-        (item) => item.status === "completed",
+        (item): item is CompletedQuestionAnalysis => item.status === "completed"
+            && scoredQuestionIds.has(item.questionId),
     );
     const completedByQuestion = new Map(
         completed.map((item) => [item.questionId, item]),
@@ -81,7 +88,7 @@ export function scoreInterview(input: {
         clusterScores,
         coverage: {
             analyzed: completed.length,
-            expected: input.questions.filter((question) => question.scored).length,
+            expected: scoredQuestionIds.size,
         },
     };
 }

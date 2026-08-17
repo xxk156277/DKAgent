@@ -82,6 +82,19 @@ test("失败题和流程题不按零分进入分母", () => {
     assert.deepEqual(result.coverage, { analyzed: 2, expected: 3 });
 });
 
+test("误传 completed 的不评分题不会污染分数或覆盖率", () => {
+    const result = scoreInterview({
+        questions,
+        clusters,
+        analyses: [completed("q-1", 80), completed("q-4", 0)],
+    });
+
+    assert.equal(result.totalScore, 80);
+    assert.deepEqual(result.clusterScores.map((cluster) => cluster.clusterId), ["c-1"]);
+    assert.equal(result.clusterScores[0]?.dimensions.contentQuality, 80);
+    assert.deepEqual(result.coverage, { analyzed: 1, expected: 3 });
+});
+
 test("没有任何可评分维度时拒绝生成分数", () => {
     assert.throws(
         () => scoreInterview({
