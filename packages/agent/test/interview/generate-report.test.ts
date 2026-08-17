@@ -328,6 +328,28 @@ test("拒绝逐题分析引用未知原文轮次", async () => {
     assert.equal(provider.request, undefined);
 });
 
+test("拒绝可在问题簇平均中相互抵消的越界维度分", async () => {
+    const invalidAnalyses = analyses.map((analysis) => {
+        if (analysis.status !== "completed") return analysis;
+        return {
+            ...analysis,
+            dimensionScores: {
+                ...analysis.dimensionScores,
+                contentQuality: analysis.questionId === "q-1" ? 200 : -100,
+            },
+        };
+    });
+    const { provider, context } = toolContext(validSummary);
+    const result = await createGenerateReportTool("fake-model").execute(
+        baseInput({ analyses: invalidAnalyses }),
+        context,
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "input_error");
+    assert.equal(provider.request, undefined);
+});
+
 test("置信度边界按固定阈值显示", () => {
     assert.equal(confidenceLabel(0.8), "高");
     assert.equal(confidenceLabel(0.55), "中");

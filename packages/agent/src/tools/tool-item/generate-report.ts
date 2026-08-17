@@ -102,6 +102,17 @@ function validateInput(input: GenerateReportInput): void {
             throw new Error(`逐题分析的问题簇不一致: ${analysis.questionId}`);
         }
         if (analysis.status === "completed") {
+            for (const [dimension, value] of Object.entries(analysis.dimensionScores)) {
+                if (value !== null && (
+                    !Number.isFinite(value)
+                    || value < 0
+                    || value > 100
+                )) {
+                    throw new Error(
+                        `维度分数越界: ${analysis.questionId}.${dimension}`,
+                    );
+                }
+            }
             if (analysis.score !== null && (
                 !Number.isFinite(analysis.score)
                 || analysis.score < 0
