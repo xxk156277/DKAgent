@@ -233,6 +233,46 @@ test("知识题没有参考资料时置信度上限为 0.79 且权衡维度不�
     }
 });
 
+test("知识题忽略空字符串和纯空白参考资料", async () => {
+    const knowledgeQuestion = question({ id: "q-knowledge", questionType: "knowledge" });
+    const knowledgeCluster = { ...cluster, questionIds: [knowledgeQuestion.id] };
+    const response = {
+        ...validProjectResponse,
+        strengths: [],
+        issues: [],
+        improvements: [],
+        dimensions: {
+            contentQuality: 85,
+            depthAndEvidence: 75,
+            analysisAndTradeoffs: null,
+            followUpHandling: null,
+        },
+        confidence: 0.95,
+    };
+
+    for (const references of [[""], ["   "]]) {
+        const { provider, context } = toolContext(response);
+        const result = await createAnalyzeAnswerTool("fake-model").execute({
+            question: knowledgeQuestion,
+            cluster: knowledgeCluster,
+            clusterQuestions: [knowledgeQuestion],
+            projectFacts: null,
+            expression: { ...expression, questionId: knowledgeQuestion.id },
+            references,
+        }, context);
+
+        assert.equal(result.data?.status, "completed");
+        if (result.data?.status === "completed") {
+            assert.equal(result.data.confidence, 0.79);
+        }
+        const requestContent = provider.request?.messages[0];
+        assert.equal(requestContent?.role, "user");
+        if (requestContent?.role === "user") {
+            assert.equal("references" in JSON.parse(requestContent.content), false);
+        }
+    }
+});
+
 test("知识题有参考资料时才把资料提供给模型", async () => {
     const knowledgeQuestion = question({ id: "q-knowledge", questionType: "knowledge" });
     const knowledgeCluster = { ...cluster, questionIds: [knowledgeQuestion.id] };
@@ -255,13 +295,15 @@ test("知识题有参考资料时才把资料提供给模型", async () => {
         clusterQuestions: [knowledgeQuestion],
         projectFacts: null,
         expression: { ...expression, questionId: knowledgeQuestion.id },
-        references: ["事件循环先执行同步任务"],
+        references: ["  事件循环先执行同步任务  "],
     }, context);
 
     const requestContent = provider.request?.messages[0];
     assert.equal(requestContent?.role, "user");
     if (requestContent?.role === "user") {
-        assert.match(requestContent.content, /事件循环先执行同步任务/);
+        assert.deepEqual(JSON.parse(requestContent.content).references, [
+            "事件循环先执行同步任务",
+        ]);
     }
 });
 

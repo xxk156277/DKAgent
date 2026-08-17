@@ -192,7 +192,9 @@ export function createAnalyzeAnswerTool(
                 if (questionIndex > 0) applicableDimensions.add("followUpHandling");
 
                 const references = input.question.questionType === "knowledge"
-                    ? input.references ?? []
+                    ? (input.references ?? [])
+                        .map((reference) => reference.trim())
+                        .filter((reference) => reference.length > 0)
                     : [];
                 const response = await queryModelJson({
                     queryEngine: ctx.queryEngine,
