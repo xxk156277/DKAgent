@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/interview/**/*.ts",
+    "src/query-engine/**/*.ts",
+    "src/tools/types.ts",
+    "src/tools/tool-item/preprocess-transcript.ts",
+    "test/interview/**/*.ts"
+  ]
+}
