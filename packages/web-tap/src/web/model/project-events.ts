@@ -2,31 +2,33 @@ import type { TraceEvent } from "@dkagent/trace";
 import { createContextDiff } from "./context-diff.js";
 import type { TapNodeKind, TapNodeView, TapSessionView, TapStepView, TapTurnView } from "./types.js";
 
-const CURRENT_SESSION_ID = "current";
-
 /** 将 Trace 投影为当前详情页需要的 Session → Turn → Step → Node。 */
 export function projectEvents(events: TraceEvent[]): TapSessionView[] {
+  const sessions: TapSessionView[] = [];
+  const sessionMap = new Map<string, TapSessionView>();
   const turns = new Map<string, TapTurnView>();
   const stepMaps = new Map<string, Map<number, TapStepView>>();
   const latestSteps = new Map<string, number>();
   const contextBefore = new Map<string, TraceEvent>();
-  const session: TapSessionView = { id: CURRENT_SESSION_ID, turns: [] };
 
   for (const event of sortEvents(events)) {
-    const turn = getTurn(turns, session, event.traceId);
+    const sessionId = event.sessionId ?? "unlinked";
+    const session = getSession(sessionMap, sessions, sessionId);
+    const turnKey = `${sessionId}:${event.traceId}`;
+    const turn = getTurn(turns, session, turnKey, event.traceId);
     turn.rawEvents.push(event);
-    const stepNumber = resolveStep(event, latestSteps.get(event.traceId));
-    latestSteps.set(event.traceId, Math.max(latestSteps.get(event.traceId) ?? 1, stepNumber));
-    const step = getStep(stepMaps, event.traceId, turn, stepNumber);
+    const stepNumber = resolveStep(event, latestSteps.get(turnKey));
+    latestSteps.set(turnKey, Math.max(latestSteps.get(turnKey) ?? 1, stepNumber));
+    const step = getStep(stepMaps, turnKey, turn, stepNumber);
 
     if (event.name === "context.build" && event.phase === "start") {
-      contextBefore.set(`${event.traceId}:${stepNumber}`, event);
+      contextBefore.set(`${turnKey}:${stepNumber}`, event);
     }
-    const nodes = toNodes(event, stepNumber, contextBefore.get(`${event.traceId}:${stepNumber}`));
+    const nodes = toNodes(event, stepNumber, contextBefore.get(`${turnKey}:${stepNumber}`));
     step.nodes.push(...nodes);
   }
 
-  return session.turns.length === 0 ? [] : [session];
+  return sessions;
 }
 
 function toNodes(event: TraceEvent, step: number, before?: TraceEvent): TapNodeView[] {
@@ -172,11 +174,29 @@ function resolveStep(event: TraceEvent, latestStep?: number): number {
   return event.step ?? latestStep ?? 1;
 }
 
-function getTurn(turns: Map<string, TapTurnView>, session: TapSessionView, traceId: string): TapTurnView {
-  const existing = turns.get(traceId);
+function getSession(
+  sessionMap: Map<string, TapSessionView>,
+  sessions: TapSessionView[],
+  sessionId: string,
+): TapSessionView {
+  const existing = sessionMap.get(sessionId);
+  if (existing) return existing;
+  const session = { id: sessionId, turns: [] };
+  sessionMap.set(sessionId, session);
+  sessions.push(session);
+  return session;
+}
+
+function getTurn(
+  turns: Map<string, TapTurnView>,
+  session: TapSessionView,
+  turnKey: string,
+  traceId: string,
+): TapTurnView {
+  const existing = turns.get(turnKey);
   if (existing) return existing;
   const turn: TapTurnView = { id: traceId, steps: [], rawEvents: [] };
-  turns.set(traceId, turn);
+  turns.set(turnKey, turn);
   session.turns.push(turn);
   return turn;
 }

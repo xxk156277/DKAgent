@@ -14,6 +14,7 @@ function event(
 ): TraceEvent {
   return {
     id,
+    sessionId: _sessionId,
     traceId: turnId,
     sequence,
     timestamp: `2026-08-12T00:00:0${sequence}.000Z`,
@@ -72,7 +73,7 @@ describe("createTapStore", () => {
     ]);
 
     expect(store.getState()).toMatchObject({
-      selectedSessionId: "current",
+      selectedSessionId: "session-1",
       selectedTurnId: "turn-2",
       selectedNodeId: "turn-2:1:turn_start:latest",
       followLive: true,
@@ -153,7 +154,7 @@ describe("createTapStore", () => {
     ]);
 
     expect(store.getState()).toMatchObject({
-      selectedSessionId: "current",
+      selectedSessionId: "session-a",
       selectedTurnId: "turn-a-latest",
       selectedNodeId: "turn-a-latest:1:turn_end:a-latest",
     });
@@ -184,7 +185,7 @@ describe("createTapStore", () => {
     store.getState().replaceHistory([event("first", "turn-1", 1)]);
     const state = store.getState();
 
-    expect(selectSessions(state).map((session) => session.id)).toEqual(["current"]);
+    expect(selectSessions(state).map((session) => session.id)).toEqual(["session-1"]);
     expect(selectTurns(state).map((turn) => turn.id)).toEqual(["turn-1"]);
     expect(selectNodes(state).map((node) => node.id)).toEqual(["turn-1:1:turn_start:first"]);
   });
@@ -223,6 +224,23 @@ describe("createTapStore", () => {
 
     expect(source.url).toBe("/api/events/stream");
     expect(store.getState().events.map((item) => item.id)).toEqual(["history", "live"]);
+  });
+
+  it("按当前 Session 读取历史并忽略其他 Session 的 SSE", async () => {
+    const store = createTapStore();
+    const requestedUrls: string[] = [];
+    const fetch = async (url: string) => {
+      requestedUrls.push(url);
+      return { json: async () => [event("history", "turn-history", 1, "turn.start", "session-1")] };
+    };
+
+    connectEventFeed(store, { sessionId: "session-1", fetch, EventSource: FakeEventSource });
+    await Promise.resolve();
+    await Promise.resolve();
+    FakeEventSource.latest!.message(event("other", "turn-other", 2, "turn.start", "session-2"));
+
+    expect(requestedUrls).toEqual(["/api/sessions/session-1/events"]);
+    expect(store.getState().events.map((item) => item.id)).toEqual(["history"]);
   });
 
   it("reloads history on SSE open and marks errors as reconnecting", async () => {

@@ -36,6 +36,84 @@ button {
   background: var(--tap-canvas);
 }
 
+.tap-session-page,
+.tap-session-detail-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--tap-canvas);
+}
+
+.tap-session-product-header,
+.tap-session-backbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tap-session-product-header {
+  height: 52px;
+  padding-inline: 24px;
+  color: #dfe8f5;
+  background: var(--tap-navy);
+}
+
+.tap-session-product-header .ant-typography { color: inherit; }
+.tap-readonly-status { color: #68d7a7; font-size: 12px; }
+
+.tap-session-list-main {
+  width: min(920px, calc(100% - 32px));
+  margin: 0 auto;
+  padding-block: 48px;
+}
+
+.tap-session-list-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.tap-session-list-heading .ant-typography { margin: 0; }
+.tap-session-list-main > .ant-input-affix-wrapper { margin-bottom: 16px; }
+.tap-session-list-item { padding-bottom: 10px; }
+.tap-session-loading { padding-block: 40px; color: #667085; text-align: center; }
+
+.tap-session-link {
+  display: flex;
+  width: 100%;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  color: inherit;
+  background: var(--tap-panel);
+  border: 1px solid var(--tap-border);
+  border-radius: 10px;
+  box-shadow: var(--tap-shadow);
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+
+.tap-session-link:hover { border-color: #84adff; transform: translateY(-1px); }
+.tap-session-link:focus-visible { outline: 3px solid #84adff; outline-offset: 2px; }
+.tap-session-link-copy { display: grid; min-width: 0; gap: 5px; }
+.tap-session-id { overflow: hidden; font-family: "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.tap-session-meta { display: flex; flex: 0 0 auto; gap: 12px; align-items: center; color: #667085; font-size: 12px; }
+
+.tap-session-error,
+.tap-session-state {
+  display: grid;
+  gap: 16px;
+  justify-items: start;
+  padding: 48px;
+}
+
+.tap-session-detail-shell { display: flex; flex-direction: column; }
+.tap-session-detail-shell .tap-app-shell { flex: 1 1 auto; height: auto; }
+.tap-session-backbar { flex: 0 0 40px; padding-inline: 18px; background: #fff; border-bottom: 1px solid var(--tap-border); }
+.tap-session-history { display: grid; width: min(900px, calc(100% - 32px)); gap: 20px; margin: 0 auto; padding-block: 28px; }
+.tap-session-history h2.ant-typography { margin-block: 0 12px; }
+.tap-session-message { margin-bottom: 10px; }
+
 .tap-product-header {
   display: flex;
   flex: 0 0 52px;

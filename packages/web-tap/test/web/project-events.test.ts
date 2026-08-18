@@ -31,10 +31,12 @@ function event(
   turnId: string,
   payload: unknown,
   step?: number,
+  sessionId = "session-1",
 ): TraceEvent {
   const mapped = legacyEvent(type, payload);
   return {
     id: `event-${turnId}-${type}-${step ?? 0}`,
+    sessionId,
     traceId: turnId,
     sequence: sequence += 1,
     timestamp: "2026-08-12T00:00:00.000Z",
@@ -76,6 +78,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 let sequence = 0;
 
 describe("projectEvents", () => {
+  it("按 sessionId 分组且未关联事件进入 unlinked 观察组", () => {
+    sequence = 0;
+    const sessionA = event("turn.start", "turn-a", { input: "A" }, 1, "session-a");
+    const sessionB = event("turn.start", "turn-b", { input: "B" }, 1, "session-b");
+    const { sessionId: _sessionId, ...unlinked } = event("turn.start", "turn-old", { input: "旧" });
+
+    const sessions = projectEvents([sessionA, sessionB, unlinked]);
+
+    expect(sessions.map((session) => session.id)).toEqual(["session-a", "session-b", "unlinked"]);
+    expect(sessions.map((session) => session.turns[0]?.id)).toEqual(["turn-a", "turn-b", "turn-old"]);
+  });
+
   it("keeps every source event once on its Turn projection", () => {
     sequence = 0;
     const events = [

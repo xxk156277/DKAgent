@@ -1,7 +1,7 @@
 import { App as AntdApp, ConfigProvider } from "antd";
 import { createRoot } from "react-dom/client";
 
-import { TapApp } from "./app/TapApp.js";
+import { WebTapRouter } from "./app/WebTapRouter.js";
 import "./styles.css";
 
 const rootElement = document.getElementById("root");
@@ -13,7 +13,7 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <ConfigProvider>
     <AntdApp>
-      <TapApp />
+      <WebTapRouter />
     </AntdApp>
   </ConfigProvider>,
 );

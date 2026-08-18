@@ -21,6 +21,8 @@ import { useTapViewport } from "../shared/useTapViewport.js";
 
 interface TapAppProps {
   store?: StoreApi<TapState>;
+  sessionId?: string;
+  connectLive?: boolean;
 }
 
 const tapTheme = {
@@ -31,7 +33,7 @@ const tapTheme = {
 } as const;
 
 /** TAP 工作区入口；Store 可注入，事件连接仍只在顶层建立一次。 */
-export function TapApp({ store = tapStore }: TapAppProps) {
+export function TapApp({ store = tapStore, sessionId, connectLive = true }: TapAppProps) {
   const turns = useStore(store, selectTurns);
   const nodes = useStore(store, selectNodes);
   const connectionStatus = useStore(store, (state) => state.connectionStatus);
@@ -45,7 +47,12 @@ export function TapApp({ store = tapStore }: TapAppProps) {
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [metricsCollapsed, setMetricsCollapsed] = useState(viewport !== "wide");
 
-  useEffect(() => connectEventFeed(store), [store]);
+  useEffect(
+    () => connectLive
+      ? connectEventFeed(store, sessionId ? { sessionId } : {})
+      : undefined,
+    [connectLive, sessionId, store],
+  );
 
   useEffect(() => {
     setMetricsCollapsed(viewport !== "wide");

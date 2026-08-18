@@ -14,6 +14,7 @@ type FetchEvents = (url: string) => Promise<{ json(): Promise<TraceEvent[]> }>;
 const connectionEpochs = new WeakMap<StoreApi<TapState>, number>();
 
 export interface EventFeedOptions {
+  sessionId?: string;
   fetch?: FetchEvents;
   EventSource?: EventSourceConstructor;
 }
@@ -25,6 +26,9 @@ export function connectEventFeed(
 ): () => void {
   const fetchEvents = options.fetch ?? ((url: string) => globalThis.fetch(url));
   const EventSourceImpl = options.EventSource ?? globalThis.EventSource as unknown as EventSourceConstructor;
+  const historyUrl = options.sessionId
+    ? `/api/sessions/${encodeURIComponent(options.sessionId)}/events`
+    : "/api/events";
   const connectionEpoch = (connectionEpochs.get(store) ?? 0) + 1;
   connectionEpochs.set(store, connectionEpoch);
   if (!EventSourceImpl) {
@@ -38,7 +42,7 @@ export function connectEventFeed(
   const loadHistory = async (): Promise<void> => {
     const currentRequest = ++requestEpoch;
     try {
-      const response = await fetchEvents("/api/events");
+      const response = await fetchEvents(historyUrl);
       const events = await response.json();
       // 同一连接的历史快照都可按事件 ID 合并；不能因后续请求已开始而丢弃完整历史。
       if (isCurrentConnection()) {
@@ -61,7 +65,10 @@ export function connectEventFeed(
   source.onmessage = (message) => {
     if (!isCurrentConnection()) return;
     try {
-      store.getState().appendEvent(JSON.parse(message.data) as TraceEvent);
+      const event = JSON.parse(message.data) as TraceEvent;
+      if (!options.sessionId || event.sessionId === options.sessionId) {
+        store.getState().appendEvent(event);
+      }
     } catch {
       store.getState().setConnectionStatus("error");
     }
