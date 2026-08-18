@@ -612,7 +612,10 @@ test("Memory 失败降级，空文本或循环失败不捕获", async () => {
 test("System Prompt 只定义面试成长 Agent 的稳定核心契约", () => {
     assert.match(AGENT_SYSTEM_PROMPT, /面试成长 Agent/);
     assert.match(AGENT_SYSTEM_PROMPT, /准备面试、复盘表现、识别能力差距/);
+    assert.match(AGENT_SYSTEM_PROMPT, /关于用户经历、动态事实、外部或私有数据的事实结论/);
     assert.match(AGENT_SYSTEM_PROMPT, /用户材料、能力返回结果或当前上下文直接支撑/);
+    assert.match(AGENT_SYSTEM_PROMPT, /可靠的通用面试知识可以直接回答/);
+    assert.match(AGENT_SYSTEM_PROMPT, /可能变化或无法确定的信息必须标记为“不确定”，必要时使用能力验证/);
     assert.match(AGENT_SYSTEM_PROMPT, /推断/);
     assert.match(AGENT_SYSTEM_PROMPT, /待确认.*不确定/);
     assert.match(AGENT_SYSTEM_PROMPT, /运行时提供的能力元数据/);
