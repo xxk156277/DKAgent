@@ -1,6 +1,16 @@
 export type TracePhase = "start" | "event" | "end" | "error";
 
 /** Trace 使用英文技术名；中文显示由 Tap 负责。 */
+export type TraceModule =
+  | "agent"
+  | "context"
+  | "memory"
+  | "skill"
+  | "tool"
+  | "model"
+  | "session";
+
+/** Trace 使用英文技术名；中文显示由 Tap 负责。 */
 export type TraceEventName =
   | "agent.turn"
   | "agent.step"
@@ -18,10 +28,14 @@ export type TraceEventName =
   | "tool.result"
   | "memory.recall"
   | "memory.extract"
-  | "memory.write";
+  | "memory.write"
+  | "skill.run"
+  | "skill.stage";
 
 export interface TraceEvent<TData = unknown> {
   sessionId?: string;
+  module?: TraceModule;
+  operation?: string;
   id: string;
   traceId: string;
   spanId?: string;
@@ -49,6 +63,8 @@ export interface TraceStore extends TraceSink {
 
 export interface TraceEventOptions {
   step?: number;
+  module?: TraceModule;
+  operation?: string;
 }
 
 export interface TraceSpan {

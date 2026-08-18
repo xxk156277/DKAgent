@@ -27,3 +27,28 @@ test("未绑定 Session 时保持旧事件兼容", async () => {
 
   assert.equal(store.list().every((event) => event.sessionId === undefined), true);
 });
+
+test("Skill Span 的生命周期和子 Event 继承 module 与 operation", async () => {
+  const store = new MemoryTraceStore();
+  const tracer = new Tracer(store);
+
+  await tracer.trace("agent.turn", { input: "分析答案" }, async () => tracer.span(
+    "skill.stage",
+    { stage: "analyze" },
+    async (span) => {
+      tracer.event("model.request", { prompt: "答案" });
+      span.event("model.response", { output: "分析结果" });
+    },
+    { module: "skill", operation: "analyze_answer" },
+  ));
+
+  const skillEvents = store.list().filter((event) => event.name !== "agent.turn");
+  assert.deepEqual(skillEvents.map((event) => event.name), [
+    "skill.stage",
+    "model.request",
+    "model.response",
+    "skill.stage",
+  ]);
+  assert.equal(skillEvents.every((event) => event.module === "skill"), true);
+  assert.equal(skillEvents.every((event) => event.operation === "analyze_answer"), true);
+});

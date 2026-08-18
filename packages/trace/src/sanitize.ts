@@ -17,6 +17,9 @@ export function sanitizeTraceEvent(event: TraceEvent): TraceEvent {
     return JSON.parse(serialized) as TraceEvent;
   } catch (error: unknown) {
     return {
+      ...(event.sessionId === undefined ? {} : { sessionId: event.sessionId }),
+      ...(event.module === undefined ? {} : { module: event.module }),
+      ...(event.operation === undefined ? {} : { operation: event.operation }),
       id: event.id,
       traceId: event.traceId,
       ...(event.spanId === undefined ? {} : { spanId: event.spanId }),

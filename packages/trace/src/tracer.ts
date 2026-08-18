@@ -5,6 +5,7 @@ import type {
   TraceEvent,
   TraceEventName,
   TraceEventOptions,
+  TraceModule,
   TraceOperation,
   TraceSink,
   TraceSpan,
@@ -15,6 +16,8 @@ interface ActiveTraceContext {
   traceId?: string;
   spanId?: string;
   step?: number;
+  module?: TraceModule;
+  operation?: string;
 }
 
 /** 轻量结构化 Tracer：负责关联关系，业务模块只描述发生了什么。 */
@@ -54,11 +57,15 @@ export class Tracer {
   ): Promise<T> {
     const active = this.context.getStore();
     const step = options.step ?? active?.step;
+    const module = options.module ?? active?.module;
+    const operationName = options.operation ?? active?.operation;
     return this.runSpan(name, input, operation, {
       ...(active?.sessionId === undefined ? {} : { sessionId: active.sessionId }),
       traceId: active?.traceId ?? randomUUID(),
       ...(active?.spanId === undefined ? {} : { parentSpanId: active.spanId }),
       ...(step === undefined ? {} : { step }),
+      ...(module === undefined ? {} : { module }),
+      ...(operationName === undefined ? {} : { operation: operationName }),
     });
   }
 
@@ -66,11 +73,15 @@ export class Tracer {
   public event(name: TraceEventName, data: unknown, options: TraceEventOptions = {}): void {
     const active = this.context.getStore();
     const step = options.step ?? active?.step;
+    const module = options.module ?? active?.module;
+    const operationName = options.operation ?? active?.operation;
     this.publish(name, "event", data, {
       ...(active?.sessionId === undefined ? {} : { sessionId: active.sessionId }),
       traceId: active?.traceId ?? randomUUID(),
       ...(active?.spanId === undefined ? {} : { spanId: active.spanId }),
       ...(step === undefined ? {} : { step }),
+      ...(module === undefined ? {} : { module }),
+      ...(operationName === undefined ? {} : { operation: operationName }),
     });
   }
 
@@ -78,7 +89,14 @@ export class Tracer {
     name: TraceEventName,
     input: unknown,
     operation: TraceOperation<T>,
-    parent: { sessionId?: string; traceId: string; parentSpanId?: string; step?: number },
+    parent: {
+      sessionId?: string;
+      traceId: string;
+      parentSpanId?: string;
+      step?: number;
+      module?: TraceModule;
+      operation?: string;
+    },
   ): Promise<T> {
     const spanId = randomUUID();
     const startedAt = Date.now();
@@ -86,12 +104,16 @@ export class Tracer {
     const span: TraceSpan = {
       event: (eventName, data, options = {}) => {
         const step = options.step ?? parent.step;
+        const module = options.module ?? parent.module;
+        const operationName = options.operation ?? parent.operation;
         this.publish(eventName, "event", data, {
           ...(parent.sessionId === undefined ? {} : { sessionId: parent.sessionId }),
           traceId: parent.traceId,
           spanId,
           ...(parent.parentSpanId === undefined ? {} : { parentSpanId: parent.parentSpanId }),
           ...(step === undefined ? {} : { step }),
+          ...(module === undefined ? {} : { module }),
+          ...(operationName === undefined ? {} : { operation: operationName }),
         });
       },
       setOutput: (value) => {
@@ -107,6 +129,8 @@ export class Tracer {
           traceId: parent.traceId,
           spanId,
           ...(parent.step === undefined ? {} : { step: parent.step }),
+          ...(parent.module === undefined ? {} : { module: parent.module }),
+          ...(parent.operation === undefined ? {} : { operation: parent.operation }),
         },
         () => operation(span),
       );
@@ -141,6 +165,8 @@ export class Tracer {
       spanId?: string;
       parentSpanId?: string;
       step?: number;
+      module?: TraceModule;
+      operation?: string;
       durationMs?: number;
     },
   ): void {
@@ -157,6 +183,8 @@ export class Tracer {
       name,
       phase,
       ...(context.step === undefined ? {} : { step: context.step }),
+      ...(context.module === undefined ? {} : { module: context.module }),
+      ...(context.operation === undefined ? {} : { operation: context.operation }),
       data,
     };
     try {
