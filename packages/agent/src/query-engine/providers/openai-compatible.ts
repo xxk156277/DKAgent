@@ -199,7 +199,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         const openAIRequest: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
             model: request.model,
             messages: toOpenAIMessages(request.messages, request.systemPrompt),
-            max_tokens: request.maxTokens ?? 4096,
+            max_tokens: request.maxTokens ?? 20000,
             temperature: request.temperature ?? 0,
             stream: true,
             stream_options: { include_usage: true },
