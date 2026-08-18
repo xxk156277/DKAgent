@@ -6,6 +6,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "test": "cd ../.. && tsx --test packages/trace/test/*.test.ts",
     "typecheck": "tsc --noEmit"
   }
 }

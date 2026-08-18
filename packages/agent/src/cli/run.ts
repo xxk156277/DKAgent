@@ -283,7 +283,10 @@ export async function runAgentCli(options: {
             }
 
             try {
-                await agent.run(userInput);
+                await tracer.withSession(
+                    currentSession.id,
+                    () => agent.run(userInput),
+                );
                 process.stdout.write("\n\n");
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);

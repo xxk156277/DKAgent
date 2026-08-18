@@ -11,7 +11,8 @@ import type {
 } from "./types.js";
 
 interface ActiveTraceContext {
-  traceId: string;
+  sessionId?: string;
+  traceId?: string;
   spanId?: string;
   step?: number;
 }
@@ -23,13 +24,25 @@ export class Tracer {
 
   public constructor(private readonly sink?: TraceSink) {}
 
+  /** 在日志上下文绑定当前 Session，业务模块无需重复传递关联字段。 */
+  public withSession<T>(
+    sessionId: string,
+    operation: () => T | Promise<T>,
+  ): T | Promise<T> {
+    return this.context.run({ ...this.context.getStore(), sessionId }, operation);
+  }
+
   /** 每次用户输入创建新的根 Trace。 */
   public trace<T>(
     name: TraceEventName,
     input: unknown,
     operation: TraceOperation<T>,
   ): Promise<T> {
-    return this.runSpan(name, input, operation, { traceId: randomUUID() });
+    const active = this.context.getStore();
+    return this.runSpan(name, input, operation, {
+      traceId: randomUUID(),
+      ...(active?.sessionId === undefined ? {} : { sessionId: active.sessionId }),
+    });
   }
 
   /** 在当前 Trace 中创建子操作；没有上层时也可独立工作。 */
@@ -42,6 +55,7 @@ export class Tracer {
     const active = this.context.getStore();
     const step = options.step ?? active?.step;
     return this.runSpan(name, input, operation, {
+      ...(active?.sessionId === undefined ? {} : { sessionId: active.sessionId }),
       traceId: active?.traceId ?? randomUUID(),
       ...(active?.spanId === undefined ? {} : { parentSpanId: active.spanId }),
       ...(step === undefined ? {} : { step }),
@@ -53,6 +67,7 @@ export class Tracer {
     const active = this.context.getStore();
     const step = options.step ?? active?.step;
     this.publish(name, "event", data, {
+      ...(active?.sessionId === undefined ? {} : { sessionId: active.sessionId }),
       traceId: active?.traceId ?? randomUUID(),
       ...(active?.spanId === undefined ? {} : { spanId: active.spanId }),
       ...(step === undefined ? {} : { step }),
@@ -63,7 +78,7 @@ export class Tracer {
     name: TraceEventName,
     input: unknown,
     operation: TraceOperation<T>,
-    parent: { traceId: string; parentSpanId?: string; step?: number },
+    parent: { sessionId?: string; traceId: string; parentSpanId?: string; step?: number },
   ): Promise<T> {
     const spanId = randomUUID();
     const startedAt = Date.now();
@@ -72,6 +87,7 @@ export class Tracer {
       event: (eventName, data, options = {}) => {
         const step = options.step ?? parent.step;
         this.publish(eventName, "event", data, {
+          ...(parent.sessionId === undefined ? {} : { sessionId: parent.sessionId }),
           traceId: parent.traceId,
           spanId,
           ...(parent.parentSpanId === undefined ? {} : { parentSpanId: parent.parentSpanId }),
@@ -87,6 +103,7 @@ export class Tracer {
     try {
       const result = await this.context.run(
         {
+          ...(parent.sessionId === undefined ? {} : { sessionId: parent.sessionId }),
           traceId: parent.traceId,
           spanId,
           ...(parent.step === undefined ? {} : { step: parent.step }),
@@ -119,6 +136,7 @@ export class Tracer {
     phase: TraceEvent["phase"],
     data: unknown,
     context: {
+      sessionId?: string;
       traceId: string;
       spanId?: string;
       parentSpanId?: string;
@@ -128,6 +146,7 @@ export class Tracer {
   ): void {
     if (!this.sink) return;
     const event: TraceEvent = {
+      ...(context.sessionId === undefined ? {} : { sessionId: context.sessionId }),
       id: randomUUID(),
       traceId: context.traceId,
       ...(context.spanId === undefined ? {} : { spanId: context.spanId }),

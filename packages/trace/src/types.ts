@@ -21,6 +21,7 @@ export type TraceEventName =
   | "memory.write";
 
 export interface TraceEvent<TData = unknown> {
+  sessionId?: string;
   id: string;
   traceId: string;
   spanId?: string;
