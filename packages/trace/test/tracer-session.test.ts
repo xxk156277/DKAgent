@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MemoryTraceStore, Tracer } from "../src/index.js";
+import { MemoryTraceStore, Tracer, type TraceModule } from "../src/index.js";
 
 test("withSession 让根 Trace、子 Span 和 Event 继承 sessionId", async () => {
   const store = new MemoryTraceStore();
@@ -51,4 +51,10 @@ test("Skill Span 的生命周期和子 Event 继承 module 与 operation", async
   ]);
   assert.equal(skillEvents.every((event) => event.module === "skill"), true);
   assert.equal(skillEvents.every((event) => event.operation === "analyze_answer"), true);
+});
+
+test("TraceModule 可从公共入口导入", () => {
+  const module: TraceModule = "skill";
+
+  assert.equal(module, "skill");
 });

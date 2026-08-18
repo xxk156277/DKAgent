@@ -6,6 +6,7 @@ export type {
   TraceEventName,
   TraceEventOptions,
   TraceListener,
+  TraceModule,
   TraceOperation,
   TracePhase,
   TraceSink,
