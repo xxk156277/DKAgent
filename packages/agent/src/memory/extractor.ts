@@ -3,9 +3,11 @@ import type { QueryEngine } from "../query-engine/query-engine.js";
 import type { ModelRequest, ModelResponse, ToolSchema } from "../query-engine/provider.js";
 import {
     MAX_AUTOMATIC_MEMORIES_PER_TURN,
+    MEMORY_KEY_PATTERN,
     validateMemoryCandidate,
     type MemoryCandidate,
     type MemoryCaptureInput,
+    type MemoryType,
 } from "./types.js";
 
 const SUBMIT_MEMORY_CANDIDATES_TOOL: ToolSchema = {
@@ -44,16 +46,28 @@ type MemoryExtractionEngine = Pick<QueryEngine, "query">;
 
 const MEMORY_INPUT_REDACTED = "[MEMORY_INPUT_REDACTED]";
 const MEMORY_CONTENT_REDACTED = "[MEMORY_CONTENT_REDACTED]";
+const MEMORY_EXTRACTION_REQUEST_FAILED = "Memory extraction model request failed";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readCandidateIdentities(value: unknown): Array<{ type?: unknown; key?: unknown }> {
+function isMemoryType(value: unknown): value is MemoryType {
+    return value === "profile" || value === "preference" || value === "decision";
+}
+
+function readCandidateIdentities(value: unknown): Array<{ type?: MemoryType; key?: string }> {
     if (!Array.isArray(value)) return [];
-    return value.map((candidate) => isRecord(candidate)
-        ? { type: candidate.type, key: candidate.key }
-        : {});
+    return value.map((candidate) => {
+        if (!isRecord(candidate)) return {};
+
+        return {
+            ...(isMemoryType(candidate.type) ? { type: candidate.type } : {}),
+            ...(typeof candidate.key === "string" && MEMORY_KEY_PATTERN.test(candidate.key)
+                ? { key: candidate.key }
+                : {}),
+        };
+    });
 }
 
 function createMemoryTraceRequest(request: ModelRequest, input: MemoryCaptureInput) {
@@ -133,7 +147,12 @@ export class MemoryExtractor {
                     "model.request",
                     createMemoryTraceRequest(request, input),
                     async (modelSpan) => {
-                        const result = await this.queryEngine.query(request);
+                        let result: ModelResponse;
+                        try {
+                            result = await this.queryEngine.query(request);
+                        } catch {
+                            throw new Error(MEMORY_EXTRACTION_REQUEST_FAILED);
+                        }
                         const safeResponse = createMemoryTraceResponse(result);
                         modelSpan.event("model.response", safeResponse);
                         modelSpan.setOutput(safeResponse);

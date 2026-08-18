@@ -3,6 +3,7 @@ import test from "node:test";
 import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { AgentLoop } from "../../src/agent/loop.js";
 import { AGENT_SYSTEM_PROMPT } from "../../src/agent/prompt.js";
+import { MemoryExtractor } from "../../src/memory/extractor.js";
 import type { AgentLoopOptions } from "../../src/agent/types.js";
 import {
     ContextManager,
@@ -623,6 +624,32 @@ test("Memory 失败降级，空文本或循环失败不捕获", async () => {
     });
     await assert.rejects(loopAgent.run("循环失败"), /Agent 超出最大循环次数/);
     assert.deepEqual(captures, []);
+});
+
+test("MemoryExtractor 模型错误不影响 AgentLoop 最终回答", async () => {
+    const userInput = "用户原文仍应正常回答";
+    const answer = "正常最终回答";
+    const extractor = new MemoryExtractor({
+        async query() {
+            throw new Error(`${userInput}; ${answer}; 候选正文`);
+        },
+    }, "memory-model");
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(new FakeProvider([textResponse(answer)])),
+        toolRegistry: new ToolRegistry(),
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        memoryWriter: {
+            async capture(input) {
+                await extractor.extract(input);
+            },
+        },
+        session: createMemoryTestSession([]),
+    });
+
+    assert.equal(await agent.run(userInput), answer);
 });
 
 test("System Prompt 约束普通聊天和诊断 Tool 的使用边界", () => {

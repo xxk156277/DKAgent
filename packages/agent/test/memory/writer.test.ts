@@ -25,6 +25,14 @@ class FakeQueryEngine {
     }
 }
 
+class ThrowingQueryEngine {
+    public constructor(private readonly error: Error) {}
+
+    public query(): Promise<ModelResponse> {
+        return Promise.reject(this.error);
+    }
+}
+
 class TrackingMemoryStore implements MemoryStore {
     public readonly inputs: MemoryUpsertInput[] = [];
 
@@ -141,6 +149,42 @@ test("Extractor 把闭合标签和伪指令只作为 JSON 字段值传递", asyn
     assert.doesNotMatch(payload ?? "", /<user_input>|<assistant_answer>/);
 });
 
+test("Extractor 将模型错误替换为固定安全错误后再写入 Trace", async () => {
+    const input = {
+        userInput: "用户原文不得出现在模型错误 Trace",
+        assistantAnswer: "回答原文不得出现在模型错误 Trace",
+        sessionId: "session-1",
+    };
+    const candidateContent = "候选正文不得出现在模型错误 Trace";
+    const traceStore = new MemoryTraceStore();
+    const extractor = new MemoryExtractor(
+        new ThrowingQueryEngine(new Error([
+            input.userInput,
+            input.assistantAnswer,
+            candidateContent,
+        ].join("; "))),
+        "main-model",
+        new Tracer(traceStore),
+    );
+
+    await assert.rejects(
+        extractor.extract(input),
+        /Memory extraction model request failed/,
+    );
+
+    const events = traceStore.list();
+    assert.deepEqual(
+        events.filter((event) => event.phase === "error").map((event) => event.name),
+        ["model.request", "memory.extract"],
+    );
+    const serializedEvents = JSON.stringify(events);
+    assert.doesNotMatch(
+        serializedEvents,
+        new RegExp([input.userInput, input.assistantAnswer, candidateContent].join("|")),
+    );
+    assert.match(serializedEvents, /Memory extraction model request failed/);
+});
+
 test("Extractor 只解析目标 Tool，并过滤非法、敏感、重复候选且最多保留三条", async () => {
     const engine = new FakeQueryEngine({
         type: "tool_use",
@@ -228,6 +272,61 @@ test("Extractor 拒绝含额外字段的候选对象", async () => {
     });
 
     assert.deepEqual(candidates, []);
+});
+
+test("Extractor Trace 只保留合法候选 type/key，不序列化畸形身份原文", async () => {
+    const leakedType = "畸形 type 原文";
+    const leakedKey = "畸形 key 原文";
+    const leakedContent = "畸形候选正文";
+    const traceStore = new MemoryTraceStore();
+    const engine = new FakeQueryEngine(toolResponse(
+        "submit_memory_candidates",
+        {
+            memories: [
+                {
+                    type: { nested: leakedType },
+                    key: leakedKey,
+                    content: leakedContent,
+                },
+                {
+                    type: "preference",
+                    key: "answer_style",
+                    content: "回答时先讲结论",
+                },
+            ],
+        },
+    ));
+
+    const candidates = await new MemoryExtractor(
+        engine,
+        "main-model",
+        new Tracer(traceStore),
+    ).extract({
+        userInput: "提取候选",
+        assistantAnswer: "好的",
+        sessionId: "session-1",
+    });
+
+    assert.deepEqual(candidates, [
+        { type: "preference", key: "answer_style", content: "回答时先讲结论" },
+    ]);
+    const responseData = traceStore.list().find((event) => (
+        event.name === "model.response"
+    ))?.data as {
+        toolCalls: Array<{ candidates: Array<Record<string, unknown>> }>;
+    };
+    assert.deepEqual(responseData.toolCalls[0]?.candidates, [
+        { content: "[MEMORY_CONTENT_REDACTED]" },
+        {
+            type: "preference",
+            key: "answer_style",
+            content: "[MEMORY_CONTENT_REDACTED]",
+        },
+    ]);
+    assert.doesNotMatch(
+        JSON.stringify(traceStore.list()),
+        new RegExp([leakedType, leakedKey, leakedContent].join("|")),
+    );
 });
 
 test("Extractor 以脱敏嵌套 Span 记录模型提取，并统计其余有效候选为拒绝", async () => {
