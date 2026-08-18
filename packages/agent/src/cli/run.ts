@@ -15,6 +15,7 @@ import { QueryEngine } from "../query-engine/query-engine.js";
 import {
     SqliteSessionStore,
     type SessionSnapshot,
+    type SessionStore,
 } from "../session/index.js";
 import {
     AutomaticMemoryWriter,
@@ -37,6 +38,7 @@ import { createSafePrompt } from "./safe-prompt.js";
  */
 export async function runAgentCli(options: {
     tracer?: Tracer;
+    sessionStore?: SessionStore;
 } = {}): Promise<void> {
     const config = loadConfig();
     const provider = new OpenAICompatibleProvider(config.apiKey, config.baseURL);
@@ -69,16 +71,20 @@ export async function runAgentCli(options: {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Memory 数据库初始化失败：${message}`);
     }
-    let sessionStore: SqliteSessionStore;
-    try {
-        sessionStore = new SqliteSessionStore(".dkagent/sessions.db");
-    } catch (error: unknown) {
+    let ownedSessionStore: SqliteSessionStore | undefined;
+    let sessionStore = options.sessionStore;
+    if (!sessionStore) {
         try {
-            memoryStore.close();
-        } catch {
-            // Session 初始化失败时，Memory 关闭失败不能掩盖原始错误。
+            ownedSessionStore = new SqliteSessionStore(".dkagent/sessions.db");
+            sessionStore = ownedSessionStore;
+        } catch (error: unknown) {
+            try {
+                memoryStore.close();
+            } catch {
+                // Session 初始化失败时，Memory 关闭失败不能掩盖原始错误。
+            }
+            throw error;
         }
-        throw error;
     }
     try {
     const memoryExtractor = new MemoryExtractor(queryEngine, config.model, tracer);
@@ -301,10 +307,12 @@ export async function runAgentCli(options: {
         } catch (error: unknown) {
             closeError = error;
         }
-        try {
-            sessionStore.close();
-        } catch (error: unknown) {
-            closeError ??= error;
+        if (ownedSessionStore) {
+            try {
+                ownedSessionStore.close();
+            } catch (error: unknown) {
+                closeError ??= error;
+            }
         }
         try {
             knowledgeDatabase?.close();

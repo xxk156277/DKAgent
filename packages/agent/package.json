@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./cli": "./src/cli/run.ts"
+    "./cli": "./src/cli/run.ts",
+    "./session": "./src/session/index.ts"
   },
   "scripts": {
     "agent": "cd ../.. && tsx packages/agent/src/index.ts",

@@ -65,6 +65,58 @@ test("提供 Vite 首页、静态资源、历史事件和 SSE", async (t) => {
   controller.abort();
 });
 
+test("提供只读 Session 列表、详情和对应 Trace", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "dkagent-tap-server-"));
+  const webRoot = await createWebRoot(directory);
+  const store = new MemoryTraceStore();
+  store.emit({ ...event, sessionId: "session-1" });
+  store.emit({ ...event, id: "event-2", traceId: "turn-2", sessionId: "session-2" });
+  const sessions = {
+    list: () => [{
+      id: "session-1",
+      createdAt: "2026-08-18T00:00:00.000Z",
+      updatedAt: "2026-08-18T00:01:00.000Z",
+      preview: "你好",
+      messageCount: 2,
+      turnCount: 1,
+      hasTrace: true,
+    }],
+    load: (sessionId: string) => sessionId === "session-1" ? {
+      id: sessionId,
+      createdAt: "2026-08-18T00:00:00.000Z",
+      updatedAt: "2026-08-18T00:01:00.000Z",
+      messages: [{ role: "user", content: "你好" }],
+      contextSummary: "",
+    } : null,
+  };
+  const server = await startTapServer({ store, sessions, webRoot, port: 0 });
+  t.after(() => server.close());
+
+  assert.deepEqual(
+    await fetch(`${server.url}api/sessions`).then((response) => response.json()),
+    sessions.list(),
+  );
+  assert.deepEqual(
+    await fetch(`${server.url}api/sessions/session-1`).then((response) => response.json()),
+    sessions.load("session-1"),
+  );
+  assert.equal((await fetch(`${server.url}api/sessions/missing`)).status, 404);
+  const events = await fetch(`${server.url}api/sessions/session-1/events`).then(
+    (response) => response.json() as Promise<TraceEvent[]>,
+  );
+  assert.deepEqual(events.map((item) => item.id), ["event-1"]);
+});
+
+test("Session 详情前端路由回退首页且缺失静态资源仍为 404", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "dkagent-tap-server-"));
+  const webRoot = await createWebRoot(directory);
+  const server = await startTapServer({ store: new MemoryTraceStore(), webRoot, port: 0 });
+  t.after(() => server.close());
+
+  assert.equal(await fetch(`${server.url}sessions/session-1`).then((response) => response.text()), '<div id="root"></div>');
+  assert.equal((await fetch(`${server.url}assets/missing.js`)).status, 404);
+});
+
 test("拒绝目录穿越且缺失资源不回退到首页", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "dkagent-tap-server-"));
   const webRoot = await createWebRoot(directory);

@@ -5,6 +5,7 @@ import type { ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { TraceStore } from "@dkagent/trace";
+import type { TapSessionReader } from "./session-reader.js";
 
 export interface TapServerHandle {
   url: string;
@@ -14,6 +15,7 @@ export interface TapServerHandle {
 /** 启动只读 Tap Viewer；所有观测端异常都与 Agent 主流程隔离。 */
 export async function startTapServer(options: {
   store: TraceStore;
+  sessions?: TapSessionReader;
   webRoot: string;
   host?: string;
   port?: number;
@@ -44,7 +46,14 @@ export async function startTapServer(options: {
   try {
     const webRoot = await validateWebRoot(options.webRoot);
     server = createServer((request, response) => {
-      void handleRequest(request.url, response, options.store, clients, webRoot);
+      void handleRequest(
+        request.url,
+        response,
+        options.store,
+        options.sessions,
+        clients,
+        webRoot,
+      );
     });
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => reject(error);
@@ -78,17 +87,17 @@ async function handleRequest(
   url: string | undefined,
   response: ServerResponse,
   store: TraceStore,
+  sessions: TapSessionReader | undefined,
   clients: Set<ServerResponse>,
   webRoot: string,
 ): Promise<void> {
   try {
-    if (url === "/api/events") {
-      const events = store.list();
-      response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify(events));
+    const pathname = new URL(url ?? "/", "http://127.0.0.1").pathname;
+    if (pathname === "/api/events") {
+      sendJson(response, 200, store.list());
       return;
     }
-    if (url === "/api/events/stream") {
+    if (pathname === "/api/events/stream") {
       response.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
@@ -100,7 +109,32 @@ async function handleRequest(
       response.once("error", () => clients.delete(response));
       return;
     }
-    const file = await resolveStaticFile(url, webRoot);
+    if (pathname === "/api/sessions") {
+      sendJson(response, 200, sessions?.list() ?? []);
+      return;
+    }
+    const sessionEventsMatch = /^\/api\/sessions\/([^/]+)\/events$/u.exec(pathname);
+    if (sessionEventsMatch) {
+      const sessionId = decodeURIComponent(sessionEventsMatch[1] ?? "");
+      sendJson(response, 200, store.list().filter((event) => event.sessionId === sessionId));
+      return;
+    }
+    const sessionMatch = /^\/api\/sessions\/([^/]+)$/u.exec(pathname);
+    if (sessionMatch) {
+      const session = sessions?.load(decodeURIComponent(sessionMatch[1] ?? ""));
+      if (!session) {
+        sendJson(response, 404, { error: "Session 不存在" });
+        return;
+      }
+      sendJson(response, 200, session);
+      return;
+    }
+    if (pathname.startsWith("/api/")) {
+      sendJson(response, 404, { error: "接口不存在" });
+      return;
+    }
+    const file = await resolveStaticFile(pathname, webRoot)
+      ?? (isPageRoute(pathname) ? join(webRoot, "index.html") : undefined);
     if (!file) {
       response.writeHead(404).end();
       return;
@@ -111,6 +145,15 @@ async function handleRequest(
     if (!response.headersSent) response.writeHead(500, { "content-type": "application/json; charset=utf-8" });
     response.end(JSON.stringify({ error: "Tap Viewer 读取失败" }));
   }
+}
+
+function sendJson(response: ServerResponse, status: number, value: unknown): void {
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(value));
+}
+
+function isPageRoute(pathname: string): boolean {
+  return !pathname.startsWith("/api/") && extname(pathname) === "";
 }
 
 /** 启动前验证构建产物，失败时由组合根降级到 Agent-only。 */
