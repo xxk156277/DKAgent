@@ -48,7 +48,7 @@ export class MemoryExtractor {
         private readonly queryEngine: MemoryExtractionEngine,
         private readonly model: string,
         private readonly tracer: Tracer = new Tracer(),
-    ) {}
+    ) { }
 
     public async extract(input: MemoryCaptureInput): Promise<MemoryCandidate[]> {
         const request: ModelRequest = {
@@ -131,6 +131,8 @@ export class MemoryExtractor {
     }
 
     private hasCandidateShape(value: unknown): value is MemoryCandidate {
+        // value 必须是对象，不能为null 或者 Array
+        // value自身属性必须是三个，且key是string，并在"type", "key", "content"之一
         if (typeof value !== "object" || value === null || Array.isArray(value)) {
             return false;
         }
