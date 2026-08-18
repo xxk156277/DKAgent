@@ -126,13 +126,30 @@ test("真实 Registry 分析 500 行以上文字稿并写出完整暂定报告",
             tracer: new Tracer(invalidJsonStore),
         });
         assert.equal(invalidJsonResult.success, false);
-        const requestError = invalidJsonStore.list().find((event) => (
+        const invalidJsonEvents = invalidJsonStore.list();
+        const requestError = invalidJsonEvents.find((event) => (
             event.name === "model.request" && event.phase === "error"
         ));
         assert.ok(requestError?.spanId);
-        assert.ok(invalidJsonStore.list().some((event) => (
+        assert.ok(invalidJsonEvents.some((event) => (
             event.name === "model.response" && event.spanId === requestError.spanId
         )));
+        const modelResponseIndex = invalidJsonEvents.findIndex((event) => (
+            event.name === "model.response"
+        ));
+        const preprocessErrorIndex = invalidJsonEvents.findIndex((event) => (
+            event.name === "skill.stage"
+                && event.operation === "preprocess_transcript"
+                && event.phase === "error"
+        ));
+        const skillRunErrorIndex = invalidJsonEvents.findIndex((event) => (
+            event.name === "skill.run"
+                && event.operation === "diagnose-transcript"
+                && event.phase === "error"
+        ));
+        assert.ok(modelResponseIndex >= 0);
+        assert.ok(preprocessErrorIndex > modelResponseIndex);
+        assert.ok(skillRunErrorIndex > preprocessErrorIndex);
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
