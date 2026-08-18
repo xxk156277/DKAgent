@@ -1,6 +1,6 @@
 import { Tracer } from "@dkagent/trace";
 import type { QueryEngine } from "../query-engine/query-engine.js";
-import type { ModelRequest, ToolSchema } from "../query-engine/provider.js";
+import type { ModelRequest, ModelResponse, ToolSchema } from "../query-engine/provider.js";
 import {
     MAX_AUTOMATIC_MEMORIES_PER_TURN,
     validateMemoryCandidate,
@@ -42,6 +42,63 @@ const EXTRACTION_SYSTEM_PROMPT = `你负责提取用户的长期 Memory。
 
 type MemoryExtractionEngine = Pick<QueryEngine, "query">;
 
+const MEMORY_INPUT_REDACTED = "[MEMORY_INPUT_REDACTED]";
+const MEMORY_CONTENT_REDACTED = "[MEMORY_CONTENT_REDACTED]";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readCandidateIdentities(value: unknown): Array<{ type?: unknown; key?: unknown }> {
+    if (!Array.isArray(value)) return [];
+    return value.map((candidate) => isRecord(candidate)
+        ? { type: candidate.type, key: candidate.key }
+        : {});
+}
+
+function createMemoryTraceRequest(request: ModelRequest, input: MemoryCaptureInput) {
+    return {
+        model: request.model,
+        systemPrompt: request.systemPrompt,
+        messages: [{ role: "user" as const, content: MEMORY_INPUT_REDACTED }],
+        tools: request.tools,
+        maxTokens: request.maxTokens,
+        temperature: request.temperature,
+        inputSummary: {
+            userInputCharacterCount: input.userInput.length,
+            answerCharacterCount: input.assistantAnswer.length,
+        },
+    };
+}
+
+function createMemoryTraceResponse(response: ModelResponse) {
+    if (response.type === "text") {
+        return {
+            type: response.type,
+            content: MEMORY_CONTENT_REDACTED,
+            usage: response.usage,
+            stopReason: response.stopReason,
+        };
+    }
+
+    return {
+        type: response.type,
+        toolCalls: response.toolCalls.map((call) => ({
+            id: call.id,
+            name: call.name,
+            candidates: (call.name === SUBMIT_MEMORY_CANDIDATES_TOOL.name
+                ? readCandidateIdentities(call.input.memories)
+                : []).map(({ type, key }) => ({
+                type,
+                key,
+                content: MEMORY_CONTENT_REDACTED,
+            })),
+        })),
+        usage: response.usage,
+        stopReason: response.stopReason,
+    };
+}
+
 /** 从单个成功 Turn 的用户输入和最终回答中提取稳定 Memory 候选。 */
 export class MemoryExtractor {
     public constructor(
@@ -65,18 +122,37 @@ export class MemoryExtractor {
             maxTokens: 500,
             temperature: 0,
         };
-        const response = await this.queryEngine.query(request);
-        const memories = response.type === "tool_use"
-            ? this.parseCandidates(response.toolCalls)
-            : { candidates: [], rejectedCount: 0 };
-
-        this.tracer.event("memory.extract", {
-            candidateCount: memories.candidates.length,
-            savedCount: 0,
-            rejectedCount: memories.rejectedCount,
-            memories: memories.candidates.map(({ type, key }) => ({ type, key })),
-        });
-        return memories.candidates;
+        return this.tracer.span(
+            "memory.extract",
+            {
+                userInputCharacterCount: input.userInput.length,
+                answerCharacterCount: input.assistantAnswer.length,
+            },
+            async (extractSpan) => {
+                const response = await this.tracer.span(
+                    "model.request",
+                    createMemoryTraceRequest(request, input),
+                    async (modelSpan) => {
+                        const result = await this.queryEngine.query(request);
+                        const safeResponse = createMemoryTraceResponse(result);
+                        modelSpan.event("model.response", safeResponse);
+                        modelSpan.setOutput(safeResponse);
+                        return result;
+                    },
+                    { module: "memory", operation: "extract" },
+                );
+                const parsed = response.type === "tool_use"
+                    ? this.parseCandidates(response.toolCalls)
+                    : { candidates: [], rejectedCount: 0 };
+                extractSpan.setOutput({
+                    candidateCount: parsed.candidates.length,
+                    rejectedCount: parsed.rejectedCount,
+                    memories: parsed.candidates.map(({ type, key }) => ({ type, key })),
+                });
+                return parsed.candidates;
+            },
+            { module: "memory", operation: "extract" },
+        );
     }
 
     private parseCandidates(toolCalls: ReadonlyArray<{

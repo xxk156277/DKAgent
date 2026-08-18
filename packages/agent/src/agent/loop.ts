@@ -208,6 +208,7 @@ export class AgentLoop {
                     span.setOutput({ characterCount: recalledMemory.length });
                     return recalledMemory;
                 },
+                { module: "memory", operation: "recall" },
             );
         } catch {
             return "";
@@ -250,6 +251,7 @@ export class AgentLoop {
                     });
                     span.setOutput({ captured: true });
                 },
+                { module: "memory", operation: "write" },
             );
         } catch {
             // Memory 是附加能力，写入失败不改变已经生成的回答。

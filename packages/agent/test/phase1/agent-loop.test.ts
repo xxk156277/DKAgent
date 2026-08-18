@@ -364,6 +364,8 @@ test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆",
     });
     const contextManager = new RecordingContextBuilder();
     const recallQueries: string[] = [];
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
     const reader: MemoryReader = {
         async recall(query) {
             recallQueries.push(query);
@@ -380,10 +382,16 @@ test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆",
         maxOutputTokens: 100,
         systemPrompt: "test prompt",
         memoryReader: reader,
+        tracer,
     });
 
     assert.equal(await agent.run("请使用工具"), "最终回答");
     assert.deepEqual(recallQueries, ["请使用工具"]);
+    const recallEvents = traceStore.list().filter((event) => event.name === "memory.recall");
+    assert.deepEqual(recallEvents.map((event) => event.phase), ["start", "end"]);
+    assert.ok(recallEvents.every((event) => (
+        event.module === "memory" && event.operation === "recall"
+    )));
     assert.deepEqual(contextManager.systemPrompts, [
         "test prompt\n\n<recalled_memory>用户偏好简洁</recalled_memory>",
         "test prompt\n\n<recalled_memory>用户偏好简洁</recalled_memory>",
@@ -462,6 +470,8 @@ test("召回记忆只注入 Context System Prompt，不进入历史或 Session",
 test("成功最终文本追加后按 Session 捕获记忆", async () => {
     const provider = new FakeProvider([textResponse("最终回答")]);
     const sessionMessages: AgentMessage[] = [];
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
     const captures: Array<{ userInput: string; assistantAnswer: string; sessionId: string }> = [];
     const writer: MemoryWriter = {
         async capture(input) {
@@ -481,6 +491,7 @@ test("成功最终文本追加后按 Session 捕获记忆", async () => {
         maxOutputTokens: 100,
         memoryWriter: writer,
         session: createMemoryTestSession(sessionMessages),
+        tracer,
     });
 
     assert.equal(await agent.run("原始问题"), "最终回答");
@@ -490,6 +501,11 @@ test("成功最终文本追加后按 Session 捕获记忆", async () => {
         sessionId: "session-memory",
     }]);
     assert.deepEqual(sessionMessages.at(-1), { role: "assistant", content: "最终回答" });
+    const writeEvents = traceStore.list().filter((event) => event.name === "memory.write");
+    assert.deepEqual(writeEvents.map((event) => event.phase), ["start", "end"]);
+    assert.ok(writeEvents.every((event) => (
+        event.module === "memory" && event.operation === "write"
+    )));
 
     const noSessionAgent = new AgentLoop({
         queryEngine: new QueryEngine(new FakeProvider([textResponse("无 Session 回答")])),
