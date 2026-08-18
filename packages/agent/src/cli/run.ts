@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { Tracer } from "@dkagent/trace";
 import { createInterface } from "node:readline";
+import { existsSync } from "node:fs";
 import { AgentLoop } from "../agent/loop.js";
 import { AGENT_SYSTEM_PROMPT } from "../agent/prompt.js";
 import { loadConfig } from "../config.js";
@@ -23,6 +24,12 @@ import {
     type MemoryType,
 } from "../memory/index.js";
 import { createToolRegistry } from "../tools/index.js";
+import {
+    KnowledgeRepository,
+    KnowledgeSearch,
+    openKnowledgeDatabase,
+} from "../knowledge/index.js";
+import { createKnowledgeReferenceRetriever } from "../skills/knowledge-reference-retriever.js";
 import { createSafePrompt } from "./safe-prompt.js";
 
 /**
@@ -34,7 +41,19 @@ export async function runAgentCli(options: {
     const config = loadConfig();
     const provider = new OpenAICompatibleProvider(config.apiKey, config.baseURL);
     const queryEngine = new QueryEngine(provider);
-    const toolRegistry = createToolRegistry();
+    const knowledgeDatabase = config.knowledgeDatabasePath
+        && existsSync(config.knowledgeDatabasePath)
+        ? openKnowledgeDatabase(config.knowledgeDatabasePath)
+        : undefined;
+    const referenceRetriever = knowledgeDatabase
+        ? createKnowledgeReferenceRetriever(
+            new KnowledgeSearch(new KnowledgeRepository(knowledgeDatabase)),
+        )
+        : undefined;
+    const toolRegistry = createToolRegistry({
+        model: config.model,
+        ...(referenceRetriever ? { referenceRetriever } : {}),
+    });
     // 摘要复用统一 QueryEngine；Compressor 不直接依赖具体 Provider。
     const tracer = options.tracer ?? new Tracer();
     const compressor = new Compressor(queryEngine, tracer);
@@ -281,6 +300,11 @@ export async function runAgentCli(options: {
         }
         try {
             sessionStore.close();
+        } catch (error: unknown) {
+            closeError ??= error;
+        }
+        try {
+            knowledgeDatabase?.close();
         } catch (error: unknown) {
             closeError ??= error;
         }

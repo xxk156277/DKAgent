@@ -119,6 +119,21 @@ test("write_file 覆盖 cwd 外的既有文件", async () => {
     });
 });
 
+test("write_file 在 overwrite=false 时拒绝覆盖既有文件", async () => {
+    await withTempDir(async (cwd) => {
+        await writeFile(join(cwd, "report.md"), "old", "utf8");
+        const result = await createWriteFileTool(cwd).execute(
+            { path: "report.md", content: "new", overwrite: false },
+            context(),
+        );
+
+        assert.equal(result.success, false);
+        assert.equal(result.error?.code, "input_error");
+        assert.match(result.error?.message ?? "", /目标文件已存在/);
+        assert.equal(await readFile(join(cwd, "report.md"), "utf8"), "old");
+    });
+});
+
 test("find_files 按 glob 查找并尊重 limit", async () => {
     await withTempDir(async (cwd) => {
         await mkdir(join(cwd, "src"));
@@ -294,11 +309,11 @@ test("grep_files 响应已中止的 AbortSignal", async () => {
 test("createToolRegistry 注册文件工具，并把 cwd 下传给 read_file", async () => {
     await withTempDir(async (cwd) => {
         await writeFile(join(cwd, "notes.txt"), "from custom cwd", "utf8");
-        const registry = createToolRegistry(cwd);
+        const registry = createToolRegistry({ cwd, model: "fake-model" });
 
         assert.deepEqual(
             registry.list().map((tool) => tool.name),
-            ["split_qa_pairs", "read_file", "find_files", "grep_files", "write_file"],
+            ["read_file", "find_files", "grep_files", "write_file", "analyze_interview"],
         );
 
         const result = await registry.resolve("read_file").execute({ path: "notes.txt" }, context());
