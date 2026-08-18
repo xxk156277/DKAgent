@@ -115,6 +115,8 @@ export function createPreprocessTranscriptTool(
                     queryEngine: ctx.queryEngine,
                     model,
                     abortSignal: ctx.abortSignal,
+                    tracer: ctx.tracer,
+                    traceOperation: "preprocess_transcript",
                     schema: correctionSchema,
                     systemPrompt: [
                         "你只识别明显的转写错误，严格输出 JSON。",

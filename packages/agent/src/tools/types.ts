@@ -1,4 +1,5 @@
 import type { QueryEngine } from "../query-engine/query-engine.js";
+import type { Tracer } from "@dkagent/trace";
 
 export interface Tool<TInput = unknown, TOutput = unknown> {
     readonly name: string;
@@ -21,6 +22,7 @@ export interface ToolResult<T = unknown> {
 export interface ToolContext {
     queryEngine: QueryEngine;
     abortSignal: AbortSignal;
+    tracer?: Tracer;
 }
 
 export interface ToolSchema {

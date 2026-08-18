@@ -178,6 +178,7 @@ export class AgentLoop {
                         {
                             queryEngine: this.options.queryEngine,
                             abortSignal: this.abortSignal,
+                            tracer: this.tracer,
                         },
                     );
                     toolSpan.event("tool.result", result, { step });

@@ -52,6 +52,8 @@ export function createAnalyzeExpressionTool(
                     queryEngine: ctx.queryEngine,
                     model,
                     abortSignal: ctx.abortSignal,
+                    tracer: ctx.tracer,
+                    traceOperation: "analyze_expression",
                     schema: judgementSchema,
                     systemPrompt: [
                         "只基于输入中的候选人原回答，判断文本表达是否影响理解，严格输出 JSON。",

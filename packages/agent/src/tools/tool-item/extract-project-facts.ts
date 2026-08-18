@@ -173,6 +173,8 @@ export function createExtractProjectFactsTool(
                     queryEngine: ctx.queryEngine,
                     model,
                     abortSignal: ctx.abortSignal,
+                    tracer: ctx.tracer,
+                    traceOperation: "extract_project_facts",
                     schema: projectFactsSchema,
                     systemPrompt: [
                         "从当前项目问题簇提取事实，严格输出 JSON。",

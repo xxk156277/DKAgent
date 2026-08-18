@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { createToolRegistry } from "../../src/tools/index.js";
 import type { ToolContext } from "../../src/tools/types.js";
@@ -71,9 +72,11 @@ test("真实 Registry 分析 500 行以上文字稿并写出完整暂定报告",
             model: "fake-model",
             now: () => new Date(2026, 7, 18, 10, 20, 30),
         });
+        const traceStore = new MemoryTraceStore();
         const context: ToolContext = {
             queryEngine: new QueryEngine(provider),
             abortSignal: new AbortController().signal,
+            tracer: new Tracer(traceStore),
         };
         const result = await registry.resolve("analyze_interview").execute({
             transcriptPath,
@@ -89,6 +92,47 @@ test("真实 Registry 分析 500 行以上文字稿并写出完整暂定报告",
         assert.match(markdown, /原问题：你还有问题吗/);
         assert.match(markdown, /分数：不参与评分/);
         assert.equal(provider.remainingResponses, 0);
+
+        const traceEvents = traceStore.list();
+        assert.ok(traceEvents.some((event) => event.name === "skill.run"));
+        assert.ok(traceEvents.some((event) => (
+            event.name === "skill.stage" && event.operation === "analyze_answer"
+        )));
+        assert.equal(
+            traceEvents.filter((event) => (
+                event.name === "model.request" && event.phase === "start"
+            )).length,
+            8,
+        );
+        assert.equal(
+            traceEvents.filter((event) => event.name === "model.response").length,
+            8,
+        );
+        assert.equal(
+            traceEvents.filter((event) => event.name === "tool.call").length,
+            0,
+        );
+
+        const invalidJsonStore = new MemoryTraceStore();
+        const invalidJsonRegistry = createToolRegistry({
+            cwd: directory,
+            model: "fake-model",
+        });
+        const invalidJsonResult = await invalidJsonRegistry.resolve("analyze_interview").execute({
+            transcriptPath,
+        }, {
+            queryEngine: new QueryEngine(new FakeTextProvider(["not-json"])),
+            abortSignal: new AbortController().signal,
+            tracer: new Tracer(invalidJsonStore),
+        });
+        assert.equal(invalidJsonResult.success, false);
+        const requestError = invalidJsonStore.list().find((event) => (
+            event.name === "model.request" && event.phase === "error"
+        ));
+        assert.ok(requestError?.spanId);
+        assert.ok(invalidJsonStore.list().some((event) => (
+            event.name === "model.response" && event.spanId === requestError.spanId
+        )));
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
