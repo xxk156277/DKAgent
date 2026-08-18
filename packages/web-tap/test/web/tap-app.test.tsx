@@ -266,6 +266,44 @@ describe("TapApp", () => {
     expect(within(detail).getByText("模型")).toBeVisible();
   });
 
+  it("renders Memory operations and internal model calls with Chinese details", () => {
+    renderFixture([
+      {
+        id: "memory-turn-start", traceId: "memory-turn", sequence: 1,
+        timestamp: "2026-08-18T00:00:01.000Z", name: "agent.turn", phase: "start",
+        data: { input: { input: "记住这段对话" } },
+      },
+      {
+        id: "memory-extract-start", traceId: "memory-turn", sequence: 2,
+        timestamp: "2026-08-18T00:00:02.000Z", name: "memory.extract", phase: "start",
+        module: "memory", operation: "extract",
+        data: { input: { userInputCharacterCount: 6, answerCharacterCount: 8 } },
+      },
+      {
+        id: "memory-model-response", traceId: "memory-turn", sequence: 3,
+        timestamp: "2026-08-18T00:00:03.000Z", name: "model.response", phase: "event",
+        module: "memory", operation: "extract",
+        data: { type: "text", content: "## 记忆提取\n\n已生成安全摘要", usage: { inputTokens: 4, outputTokens: 2 } },
+      },
+      {
+        id: "memory-turn-end", traceId: "memory-turn", sequence: 4,
+        timestamp: "2026-08-18T00:00:04.000Z", name: "agent.turn", phase: "end",
+        data: { output: { answer: "完成" } },
+      },
+    ]);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /提取记忆/ })[0]!);
+    expect(screen.getByRole("heading", { name: "提取记忆" })).toBeVisible();
+    expect(within(screen.getByRole("main")).getByText("记忆")).toBeVisible();
+    expect(screen.getByRole("row", { name: "用户输入字符数 6" })).toBeVisible();
+    expect(screen.getByText("原始 JSON")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: /提取记忆 · 模型响应/ }));
+    expect(screen.getByRole("heading", { name: "提取记忆 · 模型响应" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "记忆提取", level: 2 })).toBeVisible();
+    expect(screen.getByText("原始 JSON")).toBeVisible();
+  });
+
   it("renders model response stop reason and usage semantically", () => {
     renderFixture();
     fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));

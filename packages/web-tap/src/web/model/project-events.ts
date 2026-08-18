@@ -84,6 +84,18 @@ function nodeDefinition(event: TraceEvent): {
   title: string;
   status: TapNodeView["status"];
 } {
+  if (event.name === "memory.recall") {
+    return operationDefinition("memory_operation", event, "召回记忆");
+  }
+  if (event.name === "memory.extract") {
+    return operationDefinition("memory_operation", event, "提取记忆");
+  }
+  if (event.name === "memory.write") {
+    return operationDefinition("memory_operation", event, "写入记忆");
+  }
+  if (event.name === "skill.run" || event.name === "skill.stage") {
+    return operationDefinition("skill_operation", event, operationLabel(event.operation) ?? "技能操作");
+  }
   if (event.phase === "error") {
     return {
       kind: event.name === "agent.turn" ? "turn_error" : "unknown",
@@ -104,12 +116,56 @@ function nodeDefinition(event: TraceEvent): {
     case "context.summary.request": return { kind: "context_summary_request", title: "摘要模型请求", status: "running" };
     case "context.summary.response": return { kind: "context_summary_response", title: "摘要模型响应", status: "completed" };
     case "context.compaction.completed": return { kind: "context_compaction_completed", title: "Context 压缩完成", status: "completed" };
-    case "model.request": return { kind: "model_request", title: "模型请求", status: "running" };
-    case "model.response": return { kind: "model_response", title: "模型响应", status: "completed" };
+    case "model.request": return { kind: "model_request", title: modelTitle(event, "请求"), status: "running" };
+    case "model.response": return { kind: "model_response", title: modelTitle(event, "响应"), status: "completed" };
     case "tool.call": return { kind: "tool_call", title: "Tool 调用", status: "running" };
     case "tool.result": return { kind: "tool_result", title: "Tool 结果", status: "completed" };
     default: return { kind: "unknown", title: "未知事件", status: "completed" };
   }
+}
+
+function operationDefinition(
+  kind: Extract<TapNodeKind, "memory_operation" | "skill_operation">,
+  event: TraceEvent,
+  title: string,
+): { kind: TapNodeKind; title: string; status: TapNodeView["status"] } {
+  if (event.phase === "start") return { kind, title, status: "running" };
+  if (event.phase === "error") return { kind, title: `${title}失败`, status: "error" };
+  return {
+    kind,
+    title: `${title}${event.phase === "event" ? "结果" : "完成"}`,
+    status: "completed",
+  };
+}
+
+const operationLabels: Record<string, string> = {
+  recall: "召回记忆",
+  extract: "提取记忆",
+  write: "写入记忆",
+  persist: "持久化记忆",
+  "diagnose-transcript": "分析面试记录",
+  read_transcript: "读取并解析面试稿",
+  preprocess_transcript: "纠错预处理",
+  structure_interview: "构建问答结构",
+  extract_project_facts: "提取项目事实",
+  analyze_expression: "分析表达",
+  retrieve_reference: "检索参考资料",
+  analyze_answer: "分析回答",
+  generate_report: "生成分析报告",
+  generate_report_summary: "生成报告总结",
+  evaluate_job_match: "分析岗位匹配",
+  write_report: "写入分析报告",
+};
+
+function operationLabel(operation: string | undefined): string | undefined {
+  return operation === undefined ? undefined : operationLabels[operation] ?? operation;
+}
+
+function modelTitle(event: TraceEvent, phase: "请求" | "响应"): string {
+  const operation = event.module === "memory" || event.module === "skill"
+    ? operationLabel(event.operation)
+    : undefined;
+  return operation ? `${operation} · 模型${phase}` : `模型${phase}`;
 }
 
 function derivedTrimNode(before: TraceEvent, after: TraceEvent, step: number): TapNodeView {
@@ -142,7 +198,7 @@ function eventNode(
   return {
     id: `${event.traceId}:${step}:${kind}:${event.id}`,
     kind,
-    module: moduleForEvent(event.name),
+    module: moduleForTraceEvent(event),
     title,
     eventType: `${event.name}.${event.phase}`,
     status,
@@ -160,6 +216,11 @@ export function moduleForEvent(eventName: string): TapModuleKind {
     return prefix;
   }
   return "other";
+}
+
+/** 新版 Trace 显式模块优先，旧 Trace 继续按事件名前缀兼容。 */
+export function moduleForTraceEvent(event: TraceEvent): TapModuleKind {
+  return event.module ?? moduleForEvent(event.name);
 }
 
 function unwrapData(data: unknown): unknown {

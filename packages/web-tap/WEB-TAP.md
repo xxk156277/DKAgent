@@ -2,13 +2,14 @@
 
 ## 背景
 
-Web Tap 是 DKAgent 的本地学习与调试界面，用于观察一次用户输入触发的 AgentLoop。它帮助开发者理解 Context 构建、模型调用、Tool 调用和上下文压缩过程，不参与 Agent 决策。
+Web Tap 是 DKAgent 的本地学习与调试界面，用于观察一次用户输入触发的 AgentLoop。它帮助开发者理解 Context 构建、模型调用、Tool 调用、Memory 生命周期、Skill 阶段和上下文压缩过程，不参与 Agent 决策。
 
 ## 当前能力
 
 - 按 Turn、Step、Node 展示 AgentLoop。
 - 通过 HTTP 加载已有内存 Trace，通过 SSE 接收实时事件。
 - 展示模型请求响应、Tool 调用结果和 Context 压缩前后内容。
+- 展示 Memory 召回、提取、写入以及 Skill 阶段和它们的内部模型调用。
 - 展示当前 Turn 的 Agent 运行指标和确定性轨迹评价。
 - 对常用节点和字段做中文显示，同时保留原始 JSON。
 
@@ -28,7 +29,7 @@ npm run dev
 
 ```mermaid
 flowchart LR
-    A["Agent / Context / Tool"] --> B["@dkagent/trace"]
+    A["Agent / Context / Tool / Memory / Skill"] --> B["@dkagent/trace"]
     B --> C["MemoryTraceStore"]
     C --> D["HTTP 历史事件"]
     C --> E["SSE 实时事件"]
@@ -72,6 +73,11 @@ flowchart TD
 - 对技术事件和常用字段做中文显示。
 - 从 Trace 计算运行指标和确定性规则结果。
 - 未适配事件降级展示原始 JSON。
+
+### Memory 与 Skill
+
+- Skill Trace 保留完整阶段内容，便于定位面试分析等内部流程。
+- Memory Trace 只展示 Agent 侧生成的安全摘要，不包含召回原文或待写入内容。
 
 ## 指标与评价边界
 
