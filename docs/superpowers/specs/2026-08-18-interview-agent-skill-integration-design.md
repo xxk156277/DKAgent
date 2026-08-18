@@ -193,11 +193,13 @@ interface InterviewMetadata {
 interface InterviewReport {
     // 保留现有字段
     metadata: InterviewMetadata;
+    jobMatchStatus: "not_provided" | "completed" | "failed";
     jobMatch: JobMatchAnalysis | null;
 }
 ```
 
 缺失元数据渲染为“未提供”，不参与任何评分。
+没有 JD 时不展示岗位匹配章节；JD 分析失败时展示“岗位匹配：不可评价”，不能与“未提供 JD”混为一谈。
 
 ## 8. Skill 执行流程
 
@@ -216,6 +218,8 @@ interface InterviewReport {
 13. 写入成功后返回精简结果。
 
 Skill 顺序执行，不增加并行模型调用。AbortSignal 必须传递给每个内部步骤。
+
+知识检索通过可选的 `InterviewReferenceRetriever` 端口注入。运行时仅在显式配置 `KNOWLEDGE_DATABASE_PATH` 且数据库存在时创建 FTS 检索适配器；未配置、数据库不存在或单次检索失败时返回空参考资料，由既有知识题置信度上限处理。运行时不得为了查询自动创建一个空知识库并声称检索成功。
 
 ## 9. JD 岗位匹配
 
