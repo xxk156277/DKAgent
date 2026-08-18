@@ -1,7 +1,7 @@
 import type { TraceEvent, TraceEventName, TracePhase } from "@dkagent/trace";
 import { describe, expect, it } from "vitest";
 import { createContextDiff } from "../../src/web/model/context-diff.js";
-import { moduleForEvent, projectEvents } from "../../src/web/model/project-events.js";
+import { moduleForEvent, moduleForTraceEvent, projectEvents } from "../../src/web/model/project-events.js";
 
 const request = {
   model: "test-model",
@@ -44,6 +44,27 @@ function event(
     phase: mapped.phase,
     data: mapped.data,
     ...(step === undefined ? {} : { step }),
+  };
+}
+
+function trace(
+  id: string,
+  name: TraceEventName,
+  phase: TracePhase,
+  data: unknown,
+  module: NonNullable<TraceEvent["module"]>,
+  operation: string,
+): TraceEvent {
+  return {
+    id,
+    traceId: "turn-memory-skill",
+    sequence: sequence += 1,
+    timestamp: "2026-08-18T00:00:00.000Z",
+    name,
+    phase,
+    data,
+    module,
+    operation,
   };
 }
 
@@ -98,6 +119,39 @@ describe("projectEvents", () => {
       "agent",
       "other",
     ]);
+  });
+
+  it("projects Memory, Skill and internal model events with their explicit modules", () => {
+    sequence = 0;
+    const events: TraceEvent[] = [
+      trace("memory-recall-start", "memory.recall", "start", { input: { userInputCharacterCount: 4 } }, "memory", "recall"),
+      trace("memory-recall-end", "memory.recall", "end", { output: { characterCount: 12 } }, "memory", "recall"),
+      trace("memory-extract-error", "memory.extract", "error", { error: { message: "提取失败" } }, "memory", "extract"),
+      trace("memory-write-event", "memory.write", "event", { savedCount: 1 }, "memory", "write"),
+      trace("skill-run-start", "skill.run", "start", { input: { turnCount: 2 } }, "skill", "diagnose-transcript"),
+      trace("skill-stage-error", "skill.stage", "error", { error: { message: "分析失败" } }, "skill", "analyze_answer"),
+      trace("skill-model-request", "model.request", "start", { input: { model: "skill-model" } }, "skill", "analyze_answer"),
+      trace("skill-model-response", "model.response", "event", { content: "完成" }, "skill", "analyze_answer"),
+      trace("memory-model-request", "model.request", "start", { input: { model: "memory-model" } }, "memory", "extract"),
+      trace("memory-model-response", "model.response", "event", { content: "完成" }, "memory", "extract"),
+    ];
+
+    const nodes = projectEvents(events)[0]?.turns[0]?.steps[0]?.nodes ?? [];
+
+    expect(nodes.map((node) => node.kind)).not.toContain("unknown");
+    expect(nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "memory_operation", module: "memory", title: "召回记忆" }),
+      expect.objectContaining({ kind: "memory_operation", module: "memory", title: "召回记忆完成" }),
+      expect.objectContaining({ kind: "memory_operation", module: "memory", title: "提取记忆失败", status: "error" }),
+      expect.objectContaining({ kind: "memory_operation", module: "memory", title: "写入记忆结果" }),
+      expect.objectContaining({ kind: "skill_operation", module: "skill", title: "分析面试记录" }),
+      expect.objectContaining({ kind: "skill_operation", module: "skill", title: "分析回答失败", status: "error" }),
+      expect.objectContaining({ kind: "model_request", module: "skill", title: "分析回答 · 模型请求" }),
+      expect.objectContaining({ kind: "model_response", module: "skill", title: "分析回答 · 模型响应" }),
+      expect.objectContaining({ kind: "model_request", module: "memory", title: "提取记忆 · 模型请求" }),
+      expect.objectContaining({ kind: "model_response", module: "memory", title: "提取记忆 · 模型响应" }),
+    ]));
+    expect(moduleForTraceEvent(events[6]!)).toBe("skill");
   });
 
   it("按 sessionId 分组且未关联事件进入 unlinked 观察组", () => {

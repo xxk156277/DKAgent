@@ -8,7 +8,7 @@ function traceEvent(
   name: TraceEvent["name"],
   phase: TraceEvent["phase"],
   data: unknown,
-  options: Partial<Pick<TraceEvent, "spanId" | "parentSpanId" | "step" | "durationMs">> = {},
+  options: Partial<Pick<TraceEvent, "spanId" | "parentSpanId" | "step" | "durationMs" | "module" | "operation">> = {},
 ): TraceEvent {
   return {
     id,
@@ -95,6 +95,30 @@ describe("analyzeAgentTurn", () => {
       inputTokens: 42,
       outputTokens: 10,
     });
+    expect(result.evaluations.find((item) => item.id === "model_pairs")?.status).toBe("passed");
+  });
+
+  it("includes Skill and Memory internal model calls in the standard model metrics", () => {
+    const result = analyze([
+      traceEvent("event-1", "agent.turn", "start", { input: { input: "继续" } }, { spanId: "turn" }),
+      traceEvent("event-2", "model.request", "start", { input: { model: "main" } }, { spanId: "main-1" }),
+      traceEvent("event-3", "model.response", "event", { usage: { inputTokens: 10, outputTokens: 3 } }, { spanId: "main-1" }),
+      traceEvent("event-4", "model.request", "start", { input: { model: "skill" } }, {
+        spanId: "skill-1", module: "skill", operation: "analyze_answer",
+      }),
+      traceEvent("event-5", "model.response", "event", { usage: { inputTokens: 20, outputTokens: 5 } }, {
+        spanId: "skill-1", module: "skill", operation: "analyze_answer",
+      }),
+      traceEvent("event-6", "model.request", "start", { input: { model: "memory" } }, {
+        spanId: "memory-1", module: "memory", operation: "extract",
+      }),
+      traceEvent("event-7", "model.response", "event", { usage: { inputTokens: 30, outputTokens: 7 } }, {
+        spanId: "memory-1", module: "memory", operation: "extract",
+      }),
+      traceEvent("event-8", "agent.turn", "end", { output: { answer: "完成" } }, { spanId: "turn" }),
+    ]);
+
+    expect(result.metrics).toMatchObject({ modelCallCount: 3, inputTokens: 60, outputTokens: 15 });
     expect(result.evaluations.find((item) => item.id === "model_pairs")?.status).toBe("passed");
   });
 

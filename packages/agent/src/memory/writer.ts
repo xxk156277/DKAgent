@@ -37,13 +37,17 @@ export class AutomaticMemoryWriter implements MemoryWriter {
             }
         }
 
-        this.tracer.event("memory.write", {
-            candidateCount: candidates.length,
-            savedCount,
-            ignoredCount,
-            failedCount: failures.length,
-            memories: candidates.map(({ type, key }) => ({ type, key })),
-        });
+        this.tracer.event(
+            "memory.write",
+            {
+                candidateCount: candidates.length,
+                savedCount,
+                ignoredCount,
+                failedCount: failures.length,
+                memories: candidates.map(({ type, key }) => ({ type, key })),
+            },
+            { module: "memory", operation: "persist" },
+        );
 
         if (failures.length > 0) {
             throw new AggregateError(

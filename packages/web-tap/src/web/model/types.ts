@@ -14,6 +14,8 @@ export type TapNodeKind =
   | "context_compaction_completed"
   | "model_request"
   | "model_response"
+  | "memory_operation"
+  | "skill_operation"
   | "tool_call"
   | "tool_result"
   | "turn_end"

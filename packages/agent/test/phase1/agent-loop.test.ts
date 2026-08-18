@@ -3,6 +3,7 @@ import test from "node:test";
 import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { AgentLoop } from "../../src/agent/loop.js";
 import { AGENT_SYSTEM_PROMPT } from "../../src/agent/prompt.js";
+import { MemoryExtractor } from "../../src/memory/extractor.js";
 import type { AgentLoopOptions } from "../../src/agent/types.js";
 import {
     ContextManager,
@@ -166,7 +167,7 @@ function createMemoryTestSession(appendedMessages: AgentMessage[]): NonNullable<
         appendMessage(_sessionId, message) {
             appendedMessages.push(structuredClone(message));
         },
-        saveContextState() {},
+        saveContextState() { },
     };
     return {
         snapshot,
@@ -364,6 +365,8 @@ test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆",
     });
     const contextManager = new RecordingContextBuilder();
     const recallQueries: string[] = [];
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
     const reader: MemoryReader = {
         async recall(query) {
             recallQueries.push(query);
@@ -380,10 +383,16 @@ test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆",
         maxOutputTokens: 100,
         systemPrompt: "test prompt",
         memoryReader: reader,
+        tracer,
     });
 
     assert.equal(await agent.run("请使用工具"), "最终回答");
     assert.deepEqual(recallQueries, ["请使用工具"]);
+    const recallEvents = traceStore.list().filter((event) => event.name === "memory.recall");
+    assert.deepEqual(recallEvents.map((event) => event.phase), ["start", "end"]);
+    assert.ok(recallEvents.every((event) => (
+        event.module === "memory" && event.operation === "recall"
+    )));
     assert.deepEqual(contextManager.systemPrompts, [
         "test prompt\n\n<recalled_memory>用户偏好简洁</recalled_memory>",
         "test prompt\n\n<recalled_memory>用户偏好简洁</recalled_memory>",
@@ -462,6 +471,8 @@ test("召回记忆只注入 Context System Prompt，不进入历史或 Session",
 test("成功最终文本追加后按 Session 捕获记忆", async () => {
     const provider = new FakeProvider([textResponse("最终回答")]);
     const sessionMessages: AgentMessage[] = [];
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
     const captures: Array<{ userInput: string; assistantAnswer: string; sessionId: string }> = [];
     const writer: MemoryWriter = {
         async capture(input) {
@@ -481,6 +492,7 @@ test("成功最终文本追加后按 Session 捕获记忆", async () => {
         maxOutputTokens: 100,
         memoryWriter: writer,
         session: createMemoryTestSession(sessionMessages),
+        tracer,
     });
 
     assert.equal(await agent.run("原始问题"), "最终回答");
@@ -490,6 +502,11 @@ test("成功最终文本追加后按 Session 捕获记忆", async () => {
         sessionId: "session-memory",
     }]);
     assert.deepEqual(sessionMessages.at(-1), { role: "assistant", content: "最终回答" });
+    const writeEvents = traceStore.list().filter((event) => event.name === "memory.write");
+    assert.deepEqual(writeEvents.map((event) => event.phase), ["start", "end"]);
+    assert.ok(writeEvents.every((event) => (
+        event.module === "memory" && event.operation === "write"
+    )));
 
     const noSessionAgent = new AgentLoop({
         queryEngine: new QueryEngine(new FakeProvider([textResponse("无 Session 回答")])),
@@ -624,6 +641,41 @@ test("System Prompt 只定义面试成长 Agent 的稳定核心契约", () => {
     assert.match(AGENT_SYSTEM_PROMPT, /能力失败时如实说明错误/);
     assert.match(AGENT_SYSTEM_PROMPT, /简单的范围外问题可以简短回答/);
     assert.doesNotMatch(AGENT_SYSTEM_PROMPT, /find_files|analyze_interview/);
+})
+
+test("MemoryExtractor 模型错误不影响 AgentLoop 最终回答", async () => {
+    const userInput = "用户原文仍应正常回答";
+    const answer = "正常最终回答";
+    const extractor = new MemoryExtractor({
+        async query() {
+            throw new Error(`${userInput}; ${answer}; 候选正文`);
+        },
+    }, "memory-model");
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(new FakeProvider([textResponse(answer)])),
+        toolRegistry: new ToolRegistry(),
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        memoryWriter: {
+            async capture(input) {
+                await extractor.extract(input);
+            },
+        },
+        session: createMemoryTestSession([]),
+    });
+
+    assert.equal(await agent.run(userInput), answer);
+});
+
+test("System Prompt 约束普通聊天和诊断 Tool 的使用边界", () => {
+    assert.match(AGENT_SYSTEM_PROMPT, /普通问题/);
+    assert.match(AGENT_SYSTEM_PROMPT, /缺少搜索目录.*询问/);
+    assert.match(AGENT_SYSTEM_PROMPT, /find_files/);
+    assert.match(AGENT_SYSTEM_PROMPT, /绝对路径.*确认/);
+    assert.match(AGENT_SYSTEM_PROMPT, /确认前.*不得调用 analyze_interview/);
+    assert.match(AGENT_SYSTEM_PROMPT, /不得.*编造路径/);
 });
 
 test("Agent 先查找并确认绝对路径，下一轮确认后才分析", async () => {
