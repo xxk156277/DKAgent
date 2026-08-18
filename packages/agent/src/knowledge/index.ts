@@ -1,5 +1,6 @@
 /** 知识库公共 API：调用方无需依赖内部文件布局。 */
 export { buildKnowledgeBase } from "./build.js";
+export { openKnowledgeDatabase } from "./database.js";
 export type { BuildKnowledgeBaseOptions } from "./build.js";
 export {
     createEmbeddingProviderFromEnv,

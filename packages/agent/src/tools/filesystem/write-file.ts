@@ -7,6 +7,7 @@ import { resolveToolPath } from "./path.js";
 export interface WriteFileInput {
     path: string;
     content: string;
+    overwrite?: boolean;
 }
 
 export interface WriteFileOutput {
@@ -24,6 +25,7 @@ export function createWriteFileTool(cwd: string): Tool<WriteFileInput, WriteFile
             properties: {
                 path: { type: "string", description: "相对 cwd 或绝对文件路径" },
                 content: { type: "string", description: "要写入的完整文本内容" },
+                overwrite: { type: "boolean", description: "是否允许覆盖既有文件，默认 true" },
             },
             required: ["path", "content"],
             additionalProperties: false,
@@ -38,19 +40,33 @@ export function createWriteFileTool(cwd: string): Tool<WriteFileInput, WriteFile
 
             const path = resolveToolPath(input.path, cwd);
             try {
-                let overwritten = true;
+                const overwrite = input.overwrite ?? true;
+                let existedBeforeWrite = true;
                 try {
                     await access(path);
                 } catch {
-                    overwritten = false;
+                    existedBeforeWrite = false;
                 }
                 await mkdir(dirname(path), { recursive: true });
-                await writeFile(path, input.content, "utf8");
+                await writeFile(path, input.content, {
+                    encoding: "utf8",
+                    flag: overwrite ? "w" : "wx",
+                });
                 return {
                     success: true,
-                    data: { path, bytesWritten: Buffer.byteLength(input.content, "utf8"), overwritten },
+                    data: {
+                        path,
+                        bytesWritten: Buffer.byteLength(input.content, "utf8"),
+                        overwritten: overwrite && existedBeforeWrite,
+                    },
                 };
             } catch (error) {
+                if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+                    return {
+                        success: false,
+                        error: { code: "input_error", message: `目标文件已存在: ${path}` },
+                    };
+                }
                 return toolFailure(error);
             }
         },

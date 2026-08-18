@@ -9,12 +9,21 @@ import type {
 export class FakeTextProvider implements LLMProvider {
     public readonly name = "fake";
     public request: ModelRequest | undefined;
+    public readonly requests: ModelRequest[] = [];
+    private readonly responses: string[];
 
-    public constructor(private readonly content: string) {}
+    public constructor(content: string | string[]) {
+        this.responses = Array.isArray(content) ? [...content] : [content];
+    }
+
+    public get remainingResponses(): number {
+        return this.responses.length;
+    }
 
     public async *stream(request: ModelRequest): AsyncIterable<StreamEvent> {
         this.request = request;
-        yield { type: "text_delta", content: this.content };
+        this.requests.push(request);
+        yield { type: "text_delta", content: this.responses.shift() ?? "" };
         yield {
             type: "message_end",
             usage: { inputTokens: 1, outputTokens: 1 },

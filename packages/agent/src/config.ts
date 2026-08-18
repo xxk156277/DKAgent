@@ -27,6 +27,7 @@ export interface AgentConfig {
     contextCompaction: ContextCompactionOptions;
     /** 历史摘要使用的模型 ID；首版默认复用主模型。 */
     summaryModel: string;
+    knowledgeDatabasePath?: string;
 }
 
 export function loadConfig(
@@ -66,6 +67,7 @@ export function loadConfig(
     }
 
     const model = env.LLM_MODEL_ID?.trim() || "gpt-4.1-mini";
+    const knowledgeDatabasePath = env.KNOWLEDGE_DATABASE_PATH?.trim();
 
     return {
         apiKey,
@@ -78,6 +80,7 @@ export function loadConfig(
         summaryModel:
             env.LLM_SUMMARY_MODEL_ID?.trim() || model,
         ...(baseURL ? { baseURL } : {}),
+        ...(knowledgeDatabasePath ? { knowledgeDatabasePath } : {}),
     };
 }
 

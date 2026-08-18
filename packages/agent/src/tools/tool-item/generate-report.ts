@@ -1,7 +1,9 @@
 import { z } from "zod";
 import type {
     ClarificationCandidate,
+    InterviewMetadata,
     InterviewReport,
+    JobMatchAnalysis,
     ProjectFactSet,
     QuestionAnalysis,
     ReportQuestionItem,
@@ -27,11 +29,25 @@ const summarySchema = z.object({
     priorityImprovements: z.array(referenceItemSchema).max(3),
 }).strict();
 
+const jobMatchItemSchema = z.object({
+    text: z.string().min(1),
+    jdEvidence: z.string().min(1),
+    questionIds: z.array(z.string().min(1)).min(1),
+}).strict();
+
+const jobMatchSchema = z.object({
+    summary: z.string().min(1),
+    matches: z.array(jobMatchItemSchema),
+    gaps: z.array(jobMatchItemSchema),
+}).strict();
+
 export interface GenerateReportInput {
     structuredInterview: StructuredInterview;
     analyses: QuestionAnalysis[];
     projectFactSets: ProjectFactSet[];
     stage: "provisional" | "final";
+    metadata?: Partial<InterviewMetadata>;
+    jdText?: string;
 }
 
 export interface GenerateReportOutput {
@@ -363,6 +379,25 @@ function renderQuestion(question: ReportQuestionItem, index: number): string[] {
     return lines;
 }
 
+function renderJobMatch(report: InterviewReport): string[] {
+    if (report.jobMatchStatus === "not_provided") return [];
+    if (report.jobMatchStatus === "failed" || !report.jobMatch) {
+        return ["## 岗位匹配", "", "岗位匹配：不可评价", ""];
+    }
+    const renderItems = (title: string, items: JobMatchAnalysis["matches"]) => [
+        `### ${title}`,
+        "",
+        ...(items.length ? items.map((item) => (
+            `- ${item.text}；JD 证据：${item.jdEvidence}（${item.questionIds.join("、")}）`
+        )) : ["- 无"]),
+    ];
+    return [
+        "## 岗位匹配", "", report.jobMatch.summary, "",
+        ...renderItems("匹配项", report.jobMatch.matches), "",
+        ...renderItems("差距项", report.jobMatch.gaps), "",
+    ];
+}
+
 export function renderInterviewReport(report: InterviewReport): string {
     const dimensionLines = Object.entries(DIMENSION_LABELS).map(([key, label]) => {
         const value = report.score.dimensions[key as keyof typeof report.score.dimensions];
@@ -379,6 +414,14 @@ export function renderInterviewReport(report: InterviewReport): string {
 
     return [
         "# 面试分析报告",
+        "",
+        `公司：${report.metadata.company ?? "未提供"}`,
+        "",
+        `岗位：${report.metadata.position ?? "未提供"}`,
+        "",
+        `日期：${report.metadata.date ?? "未提供"}`,
+        "",
+        `轮次：${report.metadata.round ?? "未提供"}`,
         "",
         `报告状态：${report.stage === "provisional" ? "暂定" : "最终"}`,
         ...(report.notice ? ["", report.notice] : []),
@@ -403,6 +446,7 @@ export function renderInterviewReport(report: InterviewReport): string {
         "",
         ...pendingLines,
         "",
+        ...renderJobMatch(report),
         "## 具体问题列表",
         "",
         ...report.questions.flatMap((question, index) => [
@@ -425,6 +469,8 @@ export function createGenerateReportTool(
                 analyses: { type: "array", description: "全部逐题分析" },
                 projectFactSets: { type: "array", description: "项目事实集合" },
                 stage: { type: "string", enum: ["provisional", "final"] },
+                metadata: { type: "object", description: "面试元数据" },
+                jdText: { type: "string", description: "可选岗位描述原文" },
             },
             required: ["structuredInterview", "analyses", "projectFactSets", "stage"],
             additionalProperties: false,
@@ -497,17 +543,64 @@ export function createGenerateReportTool(
                 // 汇总是可降级步骤；确定性分数和逐题分析保持可用。
             }
 
+
+            const knownQuestionIds = new Set(
+                input.structuredInterview.questions.map((question) => question.id),
+            );
+            let jobMatchStatus: InterviewReport["jobMatchStatus"] = input.jdText?.trim()
+                ? "failed"
+                : "not_provided";
+            let jobMatch: JobMatchAnalysis | null = null;
+            if (input.jdText?.trim()) {
+                try {
+                    const generated = await queryModelJson({
+                        queryEngine: ctx.queryEngine,
+                        model,
+                        abortSignal: ctx.abortSignal,
+                        schema: jobMatchSchema,
+                        systemPrompt: [
+                            "比较岗位描述与面试证据，严格输出 JSON。",
+                            "每项必须逐字引用 JD 片段，并引用输入中存在的 questionId。",
+                            "岗位匹配不产生分数，也不得修改面试分数。",
+                        ].join("\n"),
+                        userContent: JSON.stringify({
+                            jdText: input.jdText,
+                            questions,
+                        }),
+                    });
+                    for (const item of [...generated.matches, ...generated.gaps]) {
+                        if (!input.jdText.includes(item.jdEvidence)) {
+                            throw new Error("岗位匹配证据无法回到 JD 原文");
+                        }
+                        const unknownId = item.questionIds.find((id) => !knownQuestionIds.has(id));
+                        if (unknownId) throw new Error(`岗位匹配引用未知问题: ${unknownId}`);
+                    }
+                    jobMatchStatus = "completed";
+                    jobMatch = generated;
+                } catch {
+                    // JD 匹配独立降级，不影响面试评分和总结。
+                }
+            }
+
             const report: InterviewReport = {
                 stage: input.stage,
                 notice: input.stage === "provisional"
                     ? "当前为暂定总分，补充待确认事实后可能调整。"
                     : null,
+                metadata: {
+                    company: input.metadata?.company?.trim() || null,
+                    position: input.metadata?.position?.trim() || null,
+                    date: input.metadata?.date?.trim() || null,
+                    round: input.metadata?.round?.trim() || null,
+                },
                 score,
                 summaryStatus,
                 levelSummary,
                 strengths,
                 coreIssues,
                 priorityImprovements,
+                jobMatchStatus,
+                jobMatch,
                 pendingClarifications,
                 questions,
             };

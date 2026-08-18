@@ -18,11 +18,11 @@ const correctionSchema = z.object({
 
 const PROTECTED_FILLERS = ["嗯", "呃", "额", "然后", "就是", "那个"] as const;
 
-interface PreprocessTranscriptInput {
+export interface PreprocessTranscriptInput {
     transcript: ParsedTranscript;
 }
 
-interface PreprocessTranscriptOutput {
+export interface PreprocessTranscriptOutput {
     corrections: TranscriptCorrection[];
     correctedTurns: ParsedTranscript["turns"];
 }

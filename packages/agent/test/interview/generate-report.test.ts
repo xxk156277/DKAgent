@@ -159,7 +159,9 @@ function completed(
 }
 
 function toolContext(response: unknown): { provider: FakeTextProvider; context: ToolContext } {
-    const content = typeof response === "string" ? response : JSON.stringify(response);
+    const content = Array.isArray(response)
+        ? response.map((item) => typeof item === "string" ? item : JSON.stringify(item))
+        : typeof response === "string" ? response : JSON.stringify(response);
     const provider = new FakeTextProvider(content);
     return {
         provider,
@@ -500,6 +502,59 @@ test("置信度边界按固定阈值显示", () => {
     assert.equal(confidenceLabel(0.8), "高");
     assert.equal(confidenceLabel(0.55), "中");
     assert.equal(confidenceLabel(0.54), "低");
+});
+
+test("报告展示面试元数据，缺失字段显示未提供", async () => {
+    const { context } = toolContext(validSummary);
+    const result = await createGenerateReportTool("fake-model").execute(baseInput({
+        metadata: { company: "字节跳动", position: "前端开发", date: null, round: "一面" },
+    }), context);
+
+    assert.equal(result.success, true);
+    assert.deepEqual(result.data?.report.metadata, {
+        company: "字节跳动", position: "前端开发", date: null, round: "一面",
+    });
+    assert.match(result.data?.markdown ?? "", /公司：字节跳动/);
+    assert.match(result.data?.markdown ?? "", /日期：未提供/);
+});
+
+test("JD 匹配引用 JD 原文和已知问题，且不改变面试分数", async () => {
+    const jdText = "要求熟悉低代码平台建设，具备性能优化经验。";
+    const match = {
+        summary: "项目经历与岗位核心要求部分匹配。",
+        matches: [{ text: "具备低代码项目经验", jdEvidence: "熟悉低代码平台建设", questionIds: ["q-1"] }],
+        gaps: [{ text: "性能数据证据不足", jdEvidence: "具备性能优化经验", questionIds: ["q-2"] }],
+    };
+    const withJd = await createGenerateReportTool("fake-model").execute(
+        baseInput({ jdText }), toolContext([validSummary, match]).context,
+    );
+    const withoutJd = await createGenerateReportTool("fake-model").execute(
+        baseInput(), toolContext(validSummary).context,
+    );
+
+    assert.equal(withJd.success, true);
+    assert.equal(withJd.data?.report.jobMatchStatus, "completed");
+    assert.deepEqual(withJd.data?.report.score, withoutJd.data?.report.score);
+    assert.match(withJd.data?.markdown ?? "", /岗位匹配/);
+    assert.match(withJd.data?.markdown ?? "", /熟悉低代码平台建设/);
+});
+
+test("JD 证据失真时仅降级岗位匹配，不影响面试总结", async () => {
+    const invalidMatch = {
+        summary: "匹配",
+        matches: [{ text: "虚构", jdEvidence: "JD 中不存在", questionIds: ["q-unknown"] }],
+        gaps: [],
+    };
+    const { context } = toolContext([validSummary, invalidMatch]);
+    const result = await createGenerateReportTool("fake-model").execute(
+        baseInput({ jdText: "要求熟悉低代码平台建设。" }), context,
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(result.data?.report.summaryStatus, "completed");
+    assert.equal(result.data?.report.jobMatchStatus, "failed");
+    assert.equal(result.data?.report.jobMatch, null);
+    assert.match(result.data?.markdown ?? "", /岗位匹配：不可评价/);
 });
 
 function clarification(

@@ -14,12 +14,14 @@
 ## 已确认的核心决策
 
 - 使用固定SOP＋关键节点语义判断，不采用自由Agent全程规划。
-- Agent控制用户对话，`diagnose-transcript` Skill控制完整分析流程。
-- V1保留8个粗粒度业务Tool，不新增Workflow Engine和多Agent。
-- 报告分为面试分析与完整问题列表两部分。
+- Agent控制用户对话，`analyze_interview` 业务Tool启动 `diagnose-transcript` Skill控制完整分析流程。
+- Agent公共注册表仅暴露基础文件Tool和一个面试业务Tool；内部原子分析能力不对Agent公开。
+- 报告分为面试分析总览与完整问题列表两部分，当前只生成 `provisional` 暂定报告。
 - 总分采用固定五维权重，只评价可观察表现，不预测面试结果。
-- 初步分析后集中确认3～5个关键事实，最终报告成功后才写入表现时间线。
+- JD岗位匹配独立于通用评分，必须引用JD原文和已有问题证据。
 
 ## 实现状态边界
 
-这些文件是经过确认的目标设计，不代表当前DKAgent已经实现完整面试分析。当前主链已具备AgentLoop、Tool Calling、Context、Session和Memory等基础能力；诊断Skill、长稿结构化、分题型分析和最终报告仍属于待实现范围。
+当前已经接入可运行的暂定分析闭环：Agent按目录/关键词查找并确认文字稿，调用唯一的 `analyze_interview`，Skill完成长稿分页读取、结构化、分题型分析和不覆盖的 Markdown 报告写入。可选JD可生成不影响通用分数的岗位匹配。
+
+本目录仍保留目标设计内容，其中“初步分析后集中确认、局部重跑、final报告、Session暂停恢复和表现Memory时间线”尚未实现；音频/语音转写和文件上传也不在当前范围。以 [02-sop-agent-nodes.md](./02-sop-agent-nodes.md) 的当前边界为准。

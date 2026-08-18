@@ -39,7 +39,7 @@ const relationSchema = z.object({
     nonQuestionTurnIds: z.array(z.string().min(1)),
 }).strict();
 
-interface StructureInput {
+export interface StructureInput {
     transcript: ParsedTranscript;
     correctedTurns: TranscriptTurn[];
     queryEngine: QueryEngine;
@@ -47,7 +47,7 @@ interface StructureInput {
     abortSignal: AbortSignal;
 }
 
-interface StructureOutput {
+export interface StructureOutput {
     questions: InterviewQuestion[];
     clusters: QuestionCluster[];
     nonQuestionTurnIds: string[];

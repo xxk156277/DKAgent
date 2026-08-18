@@ -139,15 +139,37 @@ export interface ReportQuestionItem {
     status: "completed" | "failed" | "not_scored";
 }
 
+export interface InterviewMetadata {
+    company: string | null;
+    position: string | null;
+    date: string | null;
+    round: string | null;
+}
+
+export interface JobMatchItem {
+    text: string;
+    jdEvidence: string;
+    questionIds: string[];
+}
+
+export interface JobMatchAnalysis {
+    summary: string;
+    matches: JobMatchItem[];
+    gaps: JobMatchItem[];
+}
+
 export interface InterviewReport {
     stage: "provisional" | "final";
     notice: string | null;
+    metadata: InterviewMetadata;
     score: InterviewScore;
     summaryStatus: "completed" | "failed";
     levelSummary: string;
     strengths: ReportReferenceItem[];
     coreIssues: ReportReferenceItem[];
     priorityImprovements: ReportReferenceItem[];
+    jobMatchStatus: "not_provided" | "completed" | "failed";
+    jobMatch: JobMatchAnalysis | null;
     pendingClarifications: ClarificationCandidate[];
     questions: ReportQuestionItem[];
 }

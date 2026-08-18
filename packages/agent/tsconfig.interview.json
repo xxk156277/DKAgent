@@ -5,10 +5,15 @@
     "src/query-engine/**/*.ts",
     "src/tools/types.ts",
     "src/tools/tool-item/analyze-answer.ts",
+    "src/tools/tool-item/analyze-interview.ts",
     "src/tools/tool-item/analyze-expression.ts",
     "src/tools/tool-item/generate-report.ts",
     "src/tools/tool-item/preprocess-transcript.ts",
     "src/tools/tool-item/extract-project-facts.ts",
+    "src/skills/interview-file-io.ts",
+    "src/skills/interview-reference-retriever.ts",
+    "src/skills/diagnose-transcript.ts",
+    "src/skills/knowledge-reference-retriever.ts",
     "test/interview/**/*.ts"
   ]
 }
