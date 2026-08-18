@@ -609,13 +609,21 @@ test("Memory 失败降级，空文本或循环失败不捕获", async () => {
     assert.deepEqual(captures, []);
 });
 
-test("System Prompt 约束普通聊天和诊断 Tool 的使用边界", () => {
-    assert.match(AGENT_SYSTEM_PROMPT, /普通问题/);
-    assert.match(AGENT_SYSTEM_PROMPT, /缺少搜索目录.*询问/);
-    assert.match(AGENT_SYSTEM_PROMPT, /find_files/);
-    assert.match(AGENT_SYSTEM_PROMPT, /绝对路径.*确认/);
-    assert.match(AGENT_SYSTEM_PROMPT, /确认前.*不得调用 analyze_interview/);
-    assert.match(AGENT_SYSTEM_PROMPT, /不得.*编造路径/);
+test("System Prompt 只定义面试成长 Agent 的稳定核心契约", () => {
+    assert.match(AGENT_SYSTEM_PROMPT, /面试成长 Agent/);
+    assert.match(AGENT_SYSTEM_PROMPT, /准备面试、复盘表现、识别能力差距/);
+    assert.match(AGENT_SYSTEM_PROMPT, /关于用户经历、动态事实、外部或私有数据的事实结论/);
+    assert.match(AGENT_SYSTEM_PROMPT, /用户材料、能力返回结果或当前上下文直接支撑/);
+    assert.match(AGENT_SYSTEM_PROMPT, /可靠的通用面试知识可以直接回答/);
+    assert.match(AGENT_SYSTEM_PROMPT, /可能变化或无法确定的信息必须标记为“不确定”，必要时使用能力验证/);
+    assert.match(AGENT_SYSTEM_PROMPT, /推断/);
+    assert.match(AGENT_SYSTEM_PROMPT, /待确认.*不确定/);
+    assert.match(AGENT_SYSTEM_PROMPT, /运行时提供的能力元数据/);
+    assert.match(AGENT_SYSTEM_PROMPT, /安全只读能力可以直接使用/);
+    assert.match(AGENT_SYSTEM_PROMPT, /写入、删除、外部发送、付费、高风险操作或任务范围扩张/);
+    assert.match(AGENT_SYSTEM_PROMPT, /能力失败时如实说明错误/);
+    assert.match(AGENT_SYSTEM_PROMPT, /简单的范围外问题可以简短回答/);
+    assert.doesNotMatch(AGENT_SYSTEM_PROMPT, /find_files|analyze_interview/);
 });
 
 test("Agent 先查找并确认绝对路径，下一轮确认后才分析", async () => {
