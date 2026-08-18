@@ -170,7 +170,7 @@ interface AnalyzeInterviewInput {
 interface AnalyzeInterviewOutput {
     reportPath: string;
     levelSummary: string;
-    totalScore: number | null;
+    totalScore: number;
     analyzedCount: number;
     questionCount: number;
     pendingClarifications: ClarificationCandidate[];
