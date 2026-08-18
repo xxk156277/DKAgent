@@ -1,9 +1,11 @@
 import { Card, Collapse, Descriptions, Empty } from "antd";
 import type { ReactNode } from "react";
+import { MarkdownContent } from "../../shared/MarkdownContent.js";
 
 interface FieldDescriptionsProps {
   data: unknown;
   omitKeys?: readonly string[];
+  markdownContent?: boolean;
 }
 
 const emptyKeys: readonly string[] = [];
@@ -54,7 +56,11 @@ const roleLabels: Record<string, string> = {
 };
 
 /** 使用 Descriptions 展示标量，复杂值保留为格式化 JSON。 */
-export function FieldDescriptions({ data, omitKeys = emptyKeys }: FieldDescriptionsProps) {
+export function FieldDescriptions({
+  data,
+  omitKeys = emptyKeys,
+  markdownContent = false,
+}: FieldDescriptionsProps) {
   if (!isRecord(data)) return <JsonBlock value={data} />;
   const omitted = new Set(omitKeys);
   const items = Object.entries(data)
@@ -62,7 +68,7 @@ export function FieldDescriptions({ data, omitKeys = emptyKeys }: FieldDescripti
     .map(([key, value]) => ({
       key,
       label: fieldLabels[key] ?? key,
-      children: renderValue(key, value),
+      children: renderValue(key, value, markdownContent),
     }));
   return items.length > 0
     ? <Descriptions bordered column={1} size="small" items={items} />
@@ -91,7 +97,9 @@ export function MessageList({
           label: `第 ${index + 1} 条 · ${roleLabels[role] ?? "未知角色消息"}`,
           children: (
             <Card size="small" variant="borderless">
-              <JsonBlock value={message} />
+              {isMarkdownMessage(message)
+                ? <FieldDescriptions data={message} markdownContent />
+                : <JsonBlock value={message} />}
             </Card>
           ),
         };
@@ -116,12 +124,20 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function renderValue(key: string, value: unknown): ReactNode {
+function renderValue(key: string, value: unknown, markdownContent: boolean): ReactNode {
   if (value === null || value === undefined) return "—";
+  if (markdownContent && key === "content" && typeof value === "string") {
+    return <MarkdownContent content={value} />;
+  }
   if (key === "savedRatio" && typeof value === "number") {
     return `${(value * 100).toFixed(1)}%`;
   }
   if (typeof value === "string" || typeof value === "number") return String(value);
   if (typeof value === "boolean") return value ? "是" : "否";
   return <JsonBlock value={value} />;
+}
+
+function isMarkdownMessage(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value) || typeof value.content !== "string") return false;
+  return value.role === "system" || value.role === "user" || value.role === "assistant";
 }

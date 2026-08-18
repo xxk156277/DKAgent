@@ -2,6 +2,7 @@ import { Alert, Card, Empty, Typography } from "antd";
 import type { ReactNode } from "react";
 import type { ContextDiff, TapNodeKind, TapNodeView } from "../../model/types.js";
 import { RawJson } from "../../shared/RawJson.js";
+import { ModuleTag } from "../../shared/ModuleTag.js";
 import { ContextCompactionDetail } from "../compaction/ContextCompactionDetail.js";
 import { FieldDescriptions, JsonCard, MessageList, isRecord } from "./FieldDescriptions.js";
 
@@ -47,7 +48,10 @@ export function NodeDetail({ node }: NodeDetailProps) {
   return (
     <section className="tap-node-detail" aria-labelledby="node-detail-heading">
       <header className="tap-detail-header">
-        <Typography.Title id="node-detail-heading" level={2}>{title}</Typography.Title>
+        <div className="tap-detail-title">
+          <Typography.Title id="node-detail-heading" level={2}>{title}</Typography.Title>
+          <ModuleTag module={node.module} />
+        </div>
         <Typography.Text type="secondary">{node.eventType}</Typography.Text>
       </header>
       <div className="tap-detail-body">{renderNode(node)}</div>
@@ -89,7 +93,7 @@ function renderModelRequest(node: TapNodeView): ReactNode {
 
 function renderModelResponse(node: TapNodeView): ReactNode {
   if (!isRecord(node.detail)) return <JsonCard title="模型响应数据" value={node.detail} />;
-  return <FieldDescriptions data={node.detail} />;
+  return <FieldDescriptions data={node.detail} markdownContent />;
 }
 
 function renderContextTrim(node: TapNodeView): ReactNode {

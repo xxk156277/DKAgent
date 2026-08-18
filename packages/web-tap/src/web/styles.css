@@ -242,6 +242,22 @@ button {
   margin-block: 0 4px;
 }
 
+.tap-detail-title,
+.tap-node-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tap-node-heading {
+  justify-content: space-between;
+}
+
+.tap-module-tag {
+  flex: 0 0 auto;
+  margin-inline-end: 0;
+}
+
 .tap-turn-region {
   flex: 0 0 240px;
   overflow-y: auto;
@@ -552,6 +568,24 @@ button {
 
 .tap-message-list .ant-card-body {
   padding: 0;
+}
+
+.tap-markdown-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tap-markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.tap-markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.tap-markdown-content pre {
+  max-width: 100%;
+  overflow: auto;
 }
 
 .tap-json-panel {

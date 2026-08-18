@@ -225,7 +225,7 @@ describe("TapApp", () => {
     expect(within(navigation).getAllByText("已完成")).toHaveLength(12);
   });
 
-  it("renders model request fields and role-grouped messages semantically", () => {
+  it("renders model request fields and role-grouped messages semantically", async () => {
     renderFixture();
     fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
 
@@ -243,6 +243,27 @@ describe("TapApp", () => {
     expect(screen.getByRole("button", { name: /Assistant 消息/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /Tool 消息/ })).toBeVisible();
     expect(screen.getByText("原始 JSON")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: /System 消息/ }));
+    const markdownHeading = screen.getByRole("heading", { name: "系统规则", level: 1 });
+    await waitFor(() => expect(markdownHeading).toBeVisible());
+    expect(within(markdownHeading.parentElement!).getByText("你是天气助手")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: /Tool 消息/ }));
+    await waitFor(() => expect(screen.getByText(/# 工具结果/).closest("pre")).toBeVisible());
+  });
+
+  it("shows the projected module in navigation and node detail", () => {
+    renderFixture();
+    fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
+
+    const navigation = screen.getByRole("complementary", { name: "第 2 轮节点" });
+    const modelRequest = within(navigation).getAllByRole("button", { name: /模型请求/ })[0]!;
+    expect(within(modelRequest).getByText("模型")).toBeVisible();
+
+    fireEvent.click(modelRequest);
+    const detail = screen.getByRole("main");
+    expect(within(detail).getByText("模型")).toBeVisible();
   });
 
   it("renders model response stop reason and usage semantically", () => {
@@ -257,6 +278,15 @@ describe("TapApp", () => {
     expect(screen.getByRole("columnheader", { name: "用量" })).toBeVisible();
     expect(screen.getByRole("row", { name: "停止原因 tool_use" })).toBeVisible();
     expect(screen.getByText("原始 JSON")).toBeVisible();
+  });
+
+  it("renders model response content as Markdown", () => {
+    renderFixture();
+    fireEvent.click(screen.getByRole("button", { name: /^第 2 轮/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /模型响应/ })[1]!);
+
+    expect(screen.getByRole("heading", { name: "上海天气", level: 2 })).toBeVisible();
+    expect(screen.getByText("晴").tagName).toBe("STRONG");
   });
 
   it("visually pairs Tool Call and Result with the same toolCallId", () => {
@@ -516,10 +546,10 @@ function fixtureEvents(): TraceEvent[] {
   const request = {
     systemPrompt: "你是天气助手",
     messages: [
-      { role: "system", content: "你是天气助手" },
+      { role: "system", content: "# 系统规则\n\n- 你是天气助手" },
       { role: "user", content: "帮我查天气" },
       { role: "assistant", toolCalls: [{ id: "call-weather", name: "weather", input: { city: "上海" } }] },
-      { role: "tool", toolCallId: "call-weather", content: "晴" },
+      { role: "tool", toolCallId: "call-weather", content: "# 工具结果\n\n晴" },
     ],
     tools: [{ name: "weather" }],
     maxTokens: 256,
@@ -527,7 +557,7 @@ function fixtureEvents(): TraceEvent[] {
   };
   const response = {
     type: "text",
-    content: "上海晴",
+    content: "## 上海天气\n\n**晴**",
     usage: { inputTokens: 12, outputTokens: 4 },
     stopReason: "end_turn",
   };

@@ -4,6 +4,7 @@ import CloseCircleFilled from "@ant-design/icons/CloseCircleFilled";
 import { Collapse, Empty, Typography } from "antd";
 import type { ReactNode } from "react";
 import type { TapNodeView, TapTurnView } from "../../model/types.js";
+import { ModuleTag } from "../../shared/ModuleTag.js";
 
 interface NodeNavProps {
   turn: TapTurnView | undefined;
@@ -86,7 +87,10 @@ function NodeButton({
       data-tool-pair={toolPair}
       onClick={() => onSelect(node.id)}
     >
-      <span className="tap-node-title">{node.title}</span>
+      <span className="tap-node-heading">
+        <span className="tap-node-title">{node.title}</span>
+        <ModuleTag module={node.module} />
+      </span>
       {toolCallId ? <span className="tap-tool-call-id">调用 {toolCallId}</span> : null}
       <span className="tap-node-status">
         {status.icon}

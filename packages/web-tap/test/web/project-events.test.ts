@@ -1,7 +1,7 @@
 import type { TraceEvent, TraceEventName, TracePhase } from "@dkagent/trace";
 import { describe, expect, it } from "vitest";
 import { createContextDiff } from "../../src/web/model/context-diff.js";
-import { projectEvents } from "../../src/web/model/project-events.js";
+import { moduleForEvent, projectEvents } from "../../src/web/model/project-events.js";
 
 const request = {
   model: "test-model",
@@ -78,6 +78,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 let sequence = 0;
 
 describe("projectEvents", () => {
+  it("maps current and future trace prefixes to Tap modules", () => {
+    expect([
+      "session.opened",
+      "context.build",
+      "memory.recall",
+      "skill.loaded",
+      "tool.call",
+      "model.request",
+      "agent.turn",
+      "custom.trace",
+    ].map(moduleForEvent)).toEqual([
+      "session",
+      "context",
+      "memory",
+      "skill",
+      "tool",
+      "model",
+      "agent",
+      "other",
+    ]);
+  });
+
   it("按 sessionId 分组且未关联事件进入 unlinked 观察组", () => {
     sequence = 0;
     const sessionA = event("turn.start", "turn-a", { input: "A" }, 1, "session-a");
@@ -129,6 +151,14 @@ describe("projectEvents", () => {
       "model_response",
       "turn_end",
     ]);
+    expect(step?.nodes.map((node) => node.module)).toEqual([
+      "agent",
+      "context",
+      "context",
+      "model",
+      "model",
+      "agent",
+    ]);
     expect(step?.nodes[3]?.id).toContain("turn-1:1:model_request");
     expect(step?.nodes[4]?.id).toContain("turn-1:1:model_response");
   });
@@ -161,6 +191,8 @@ describe("projectEvents", () => {
     expect(turn?.steps.map((step) => step.step)).toEqual([1, 2]);
     expect(turn?.steps[0]?.nodes.map((node) => node.kind)).toContain("tool_call");
     expect(turn?.steps[0]?.nodes.map((node) => node.kind)).toContain("tool_result");
+    expect(turn?.steps[0]?.nodes.find((node) => node.kind === "tool_call")?.module).toBe("tool");
+    expect(turn?.steps[0]?.nodes.find((node) => node.kind === "tool_result")?.module).toBe("tool");
     expect(turn?.steps[1]?.nodes.map((node) => node.kind)).toEqual([
       "context_before",
       "context_after",

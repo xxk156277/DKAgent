@@ -1,6 +1,13 @@
 import type { TraceEvent } from "@dkagent/trace";
 import { createContextDiff } from "./context-diff.js";
-import type { TapNodeKind, TapNodeView, TapSessionView, TapStepView, TapTurnView } from "./types.js";
+import type {
+  TapModuleKind,
+  TapNodeKind,
+  TapNodeView,
+  TapSessionView,
+  TapStepView,
+  TapTurnView,
+} from "./types.js";
 
 /** 将 Trace 投影为当前详情页需要的 Session → Turn → Step → Node。 */
 export function projectEvents(events: TraceEvent[]): TapSessionView[] {
@@ -114,6 +121,7 @@ function derivedTrimNode(before: TraceEvent, after: TraceEvent, step: number): T
   return {
     id: `${after.traceId}:${step}:context_trimmed:${before.id}:${after.id}`,
     kind: "context_trimmed",
+    module: "context",
     title: "上下文已裁剪",
     eventType: "context.trimmed",
     status: "completed",
@@ -134,6 +142,7 @@ function eventNode(
   return {
     id: `${event.traceId}:${step}:${kind}:${event.id}`,
     kind,
+    module: moduleForEvent(event.name),
     title,
     eventType: `${event.name}.${event.phase}`,
     status,
@@ -141,6 +150,16 @@ function eventNode(
     detail: kind === "unknown" ? { raw: event } : detail,
     rawEvents: [event],
   };
+}
+
+/** 模块归属只服务于 Tap 展示，不进入 Agent 或 Trace 契约。 */
+export function moduleForEvent(eventName: string): TapModuleKind {
+  const prefix = eventName.split(".", 1)[0];
+  if (prefix === "session" || prefix === "context" || prefix === "memory"
+    || prefix === "skill" || prefix === "tool" || prefix === "model" || prefix === "agent") {
+    return prefix;
+  }
+  return "other";
 }
 
 function unwrapData(data: unknown): unknown {

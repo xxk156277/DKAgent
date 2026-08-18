@@ -20,9 +20,20 @@ export type TapNodeKind =
   | "turn_error"
   | "unknown";
 
+export type TapModuleKind =
+  | "session"
+  | "context"
+  | "memory"
+  | "skill"
+  | "tool"
+  | "model"
+  | "agent"
+  | "other";
+
 export interface TapNodeView {
   id: string;
   kind: TapNodeKind;
+  module: TapModuleKind;
   title: string;
   eventType: string;
   status: "running" | "completed" | "error";
