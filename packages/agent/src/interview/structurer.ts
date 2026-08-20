@@ -41,17 +41,23 @@ const relationSchema = z.object({
 }).strict();
 
 export interface StructureInput {
+    /** 已解析的原始面试稿及全部说话轮次。 */
     transcript: ParsedTranscript;
-    correctedTurns: TranscriptTurn[];
+    /** 用于发起结构化模型请求的查询引擎。 */
     queryEngine: QueryEngine;
+    /** 结构化请求使用的模型名称。 */
     model: string;
+    /** 上层任务的取消信号。 */
     abortSignal: AbortSignal;
     tracer?: Tracer | undefined;
 }
 
 export interface StructureOutput {
+    /** 按原文顺序还原的全部具体问题。 */
     questions: InterviewQuestion[];
+    /** 问题簇；同一项目的连续追问共享一个问题簇。 */
     clusters: QuestionCluster[];
+    /** 已确认不是问题的面试官轮次 ID。 */
     nonQuestionTurnIds: string[];
 }
 
@@ -67,9 +73,6 @@ function sameMembers(left: string[], right: string[]): boolean {
 }
 
 export async function structureInterview(input: StructureInput): Promise<StructureOutput> {
-    const correctedById = new Map(
-        input.correctedTurns.map((turn) => [turn.id, turn.content]),
-    );
     const relation = await queryModelJson({
         queryEngine: input.queryEngine,
         model: input.model,
@@ -84,13 +87,12 @@ export async function structureInterview(input: StructureInput): Promise<Structu
             "追问单独成题，但同一项目的连续追问归入同一 cluster。",
             "寒暄、反问和流程问题保留，questionType=procedural 且 scored=false。",
             "answerTurnIds 必须包含当前提问组之后、下一个实际问题之前的全部候选人轮次；面试官的非问题插话不截断回答。",
-            "不得改写原文；promptSegments.text 必须是 originalContent 的原文子串。",
+            "不得改写原文；promptSegments.text 必须是 content 的原文子串。",
         ].join("\n"),
         userContent: JSON.stringify(input.transcript.turns.map((turn) => ({
             id: turn.id,
             speaker: turn.speaker,
-            originalContent: turn.content,
-            correctedContent: correctedById.get(turn.id) ?? turn.content,
+            content: turn.content,
         }))),
     });
 

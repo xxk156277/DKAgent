@@ -34,7 +34,7 @@
                 <mxCell id="registry" value="ToolRegistry + Dispatcher&#xa;Schema、路由、统一ToolResult" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" parent="1" vertex="1">
                     <mxGeometry x="1230" y="143" width="250" height="74" as="geometry"/>
                 </mxCell>
-                <mxCell id="tools" value="8个面试业务Tool&#xa;read_file｜preprocess_transcript｜split_qa_pairs｜extract_project_facts&#xa;analyze_expression｜query_knowledge_base｜analyze_answer｜generate_report" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;align=left;spacingLeft=12;" parent="1" vertex="1">
+                <mxCell id="tools" value="5个公共Tool＋3个内部分析Tool&#xa;公共：read_file｜find_files｜grep_files｜write_file｜analyze_interview&#xa;内部：extract_project_facts｜analyze_answer｜generate_report" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;align=left;spacingLeft=12;" parent="1" vertex="1">
                     <mxGeometry x="1550" y="127.5" width="430" height="105" as="geometry"/>
                 </mxCell>
                 <mxCell id="qe" value="QueryEngine&#xa;结构化LLM请求" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" parent="1" vertex="1">
@@ -55,7 +55,7 @@
                 <mxCell id="memory" value="MemoryStore&#xa;面试表现时间线&#xa;仅最终报告后写入" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" parent="1" vertex="1">
                     <mxGeometry x="1350" y="306.5" width="220" height="95" as="geometry"/>
                 </mxCell>
-                <mxCell id="note" value="不新增：Workflow Engine、多Agent、第二套模型调用层。&#xa;新增范围只包括诊断Skill、8个业务Tool、诊断状态与报告Schema。" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;align=left;spacingLeft=10;" parent="1" vertex="1">
+                <mxCell id="note" value="不新增：Workflow Engine、多Agent、第二套模型调用层。&#xa;当前由诊断Skill编排3个内部分析Tool；表达统计合并进单次逐题分析。" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;align=left;spacingLeft=10;" parent="1" vertex="1">
                     <mxGeometry x="430" y="390" width="560" height="90" as="geometry"/>
                 </mxCell>
                 <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" parent="1" source="user" target="cli" edge="1">

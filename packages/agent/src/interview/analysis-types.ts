@@ -90,23 +90,18 @@ export interface ProjectFactSet {
 }
 
 export interface ExpressionStats {
+    /** 识别到的语气词及各自出现次数。 */
     fillerWords: Array<{ word: string; count: number }>;
+    /** 语气词总出现次数。 */
     fillerCount: number;
+    /** 相邻重复词或短语的出现次数。 */
     adjacentRepetitionCount: number;
+    /** 去除空白后的回答字符数。 */
     characterCount: number;
+    /** 按句末标点切分得到的句子数。 */
     sentenceCount: number;
+    /** 超过程序阈值的长句数量。 */
     longSentenceCount: number;
-}
-
-export interface ExpressionAnalysis {
-    questionId: string;
-    stats: ExpressionStats;
-    judgementStatus: "completed" | "failed";
-    impact: "none" | "slight" | "significant" | "unknown";
-    detail: string;
-    evidenceQuotes: string[];
-    score: number | null;
-    confidence: number;
 }
 
 export interface ClusterScore {

@@ -4,9 +4,9 @@ import type {
     ClarificationCandidate,
     CompletedQuestionAnalysis,
     DimensionScores,
+    ExpressionStats,
     NotScoredQuestionAnalysis,
     ProjectFactSet,
-    ExpressionAnalysis,
 } from "../../interview/analysis-types.js";
 import { queryModelJson } from "../../interview/model-json.js";
 import { QUESTION_RUBRICS } from "../../interview/rubrics.js";
@@ -39,10 +39,16 @@ const responseSchema = z.object({
         text: z.string().min(1),
     }).strict()),
     dimensions: z.object({
-        contentQuality: z.number().min(0).max(100).nullable(),
-        depthAndEvidence: z.number().min(0).max(100).nullable(),
-        analysisAndTradeoffs: z.number().min(0).max(100).nullable(),
-        followUpHandling: z.number().min(0).max(100).nullable(),
+        contentQuality: z.number().min(0).max(100).nullable()
+            .describe("内容质量分；0-100，不适用时为 null"),
+        depthAndEvidence: z.number().min(0).max(100).nullable()
+            .describe("深度与证据分；0-100，不适用时为 null"),
+        analysisAndTradeoffs: z.number().min(0).max(100).nullable()
+            .describe("分析与权衡分；0-100，不适用时为 null"),
+        followUpHandling: z.number().min(0).max(100).nullable()
+            .describe("追问处理分；0-100，非追问时为 null"),
+        expressionQuality: z.number().min(0).max(100)
+            .describe("表达质量分；0-100，结合原回答和程序统计判断"),
     }).strict(),
     confidence: z.number().min(0).max(1),
     confidenceReason: z.string().min(1),
@@ -50,11 +56,17 @@ const responseSchema = z.object({
 }).strict();
 
 export interface AnalyzeAnswerInput {
+    /** 当前待分析的问题，包含原问题、原回答及对应轮次 ID。 */
     question: InterviewQuestion;
+    /** 当前问题所属的问题簇。 */
     cluster: QuestionCluster;
+    /** 当前问题簇的全部问题，用于判断追问关系。 */
     clusterQuestions: InterviewQuestion[];
+    /** 项目簇共享事实；非项目题或提取失败时可为 null/undefined。 */
     projectFacts?: ProjectFactSet | null;
-    expression: ExpressionAnalysis;
+    /** 从当前原回答确定性计算的表达统计，不包含模型评价。 */
+    expressionStats: ExpressionStats;
+    /** 知识题可选参考资料；其他题型不会传给模型。 */
     references?: string[];
 }
 
@@ -92,9 +104,6 @@ function validateInput(input: AnalyzeAnswerInput): number {
         || input.clusterQuestions.some((question) => question.clusterId !== input.cluster.id)
     ) {
         throw new Error("问题簇与 clusterQuestions 不一致");
-    }
-    if (input.expression.questionId !== input.question.id) {
-        throw new Error("表达分析与当前问题不一致");
     }
     if (input.projectFacts && input.projectFacts.clusterId !== input.cluster.id) {
         throw new Error("项目事实与当前问题簇不一致");
@@ -171,10 +180,10 @@ export function createAnalyzeAnswerTool(
                 cluster: { type: "object", description: "当前问题簇" },
                 clusterQuestions: { type: "array", description: "当前问题簇的全部问题" },
                 projectFacts: { type: ["object", "null"], description: "可选的项目事实提取结果" },
-                expression: { type: "object", description: "当前回答的表达分析" },
+                expressionStats: { type: "object", description: "当前原回答的程序表达统计" },
                 references: { type: "array", description: "可选参考资料文本" },
             },
-            required: ["question", "cluster", "clusterQuestions", "expression"],
+            required: ["question", "cluster", "clusterQuestions", "expressionStats"],
             additionalProperties: false,
         },
         async execute(input, ctx) {
@@ -213,7 +222,9 @@ export function createAnalyzeAnswerTool(
                         "只基于输入分析当前面试回答，严格输出 JSON。",
                         rubric.prompt,
                         `允许评分的语义维度: ${[...applicableDimensions].join(", ")}。`,
-                        "不适用的语义维度必须返回 null。不得返回表达质量分或总分。",
+                        "不适用的语义维度必须返回 null。",
+                        "必须结合原回答和 expressionStats 返回 expressionQuality；统计仅作辅助，不得只按回答长度机械扣分。",
+                        "不得返回总分。",
                         "strength 和 issue 只能引用当前问题给出的 promptTurnIds 或 answerTurnIds。",
                         "每个 issue 必须恰好有一个 improvement，且 improvement.issueId 必须引用该 issue。",
                         "clarificationCandidates 只能引用当前问题簇的 questionId。",
@@ -225,6 +236,7 @@ export function createAnalyzeAnswerTool(
                         projectFacts: input.question.questionType === "project"
                             ? input.projectFacts ?? null
                             : undefined,
+                        expressionStats: input.expressionStats,
                         references: references.length ? references : undefined,
                     }),
                 });
@@ -241,10 +253,7 @@ export function createAnalyzeAnswerTool(
                     new Set(input.cluster.questionIds),
                 );
 
-                const dimensionScores: DimensionScores = {
-                    ...response.dimensions,
-                    expressionQuality: input.expression.score,
-                };
+                const dimensionScores: DimensionScores = response.dimensions;
                 let confidence = response.confidence;
                 if (input.question.questionType === "project" && !input.projectFacts) {
                     confidence = Math.min(confidence, 0.54);

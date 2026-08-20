@@ -9,7 +9,6 @@ import type {
     ParsedTranscript,
 } from "../../src/interview/types.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
-import { createPreprocessTranscriptTool } from "../../src/tools/tool-item/preprocess-transcript.js";
 import { FakeTextProvider } from "./fake-provider.js";
 
 function questionType(content: string): InterviewQuestionType {
@@ -114,25 +113,8 @@ test("长项目面试稿不会丢题、改写原文或删除口头表达", async
     const mistakenTurn = transcript.turns.find((turn) => turn.content.includes("reat"));
     assert.ok(mistakenTurn);
 
-    const correctionResponse = JSON.stringify({ corrections: [{
-        turnId: mistakenTurn.id,
-        original: "reat",
-        replacement: "React",
-        confidence: 0.99,
-        reason: "技术名词误识别",
-    }] });
-    const preprocessResult = await createPreprocessTranscriptTool("fake-model").execute(
-        { transcript },
-        {
-            queryEngine: new QueryEngine(new FakeTextProvider(correctionResponse)),
-            abortSignal: new AbortController().signal,
-        },
-    );
-    assert.equal(preprocessResult.success, true);
-
     const structured = await structureInterview({
         transcript,
-        correctedTurns: preprocessResult.data!.correctedTurns,
         queryEngine: new QueryEngine(
             new FakeTextProvider(buildFixtureRelation(transcript)),
         ),
@@ -154,10 +136,7 @@ test("长项目面试稿不会丢题、改写原文或删除口头表达", async
         transcript.turns.map((turn) => turn.content).join("\n"),
         /嗯|呃|然后然后/,
     );
-    assert.deepEqual(
-        preprocessResult.data?.corrections.map((item) => item.original),
-        ["reat"],
-    );
+    assert.match(mistakenTurn.content, /reat/);
     assert.ok(structured.clusters.some((cluster) => cluster.questionIds.length >= 4));
     assert.ok(structured.questions.some((question) => !question.scored));
 

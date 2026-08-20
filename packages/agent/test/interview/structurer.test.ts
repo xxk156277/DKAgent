@@ -90,7 +90,6 @@ async function runWith(relation: Record<string, unknown>) {
     const transcript = parseTranscript(source);
     return structureInterview({
         transcript,
-        correctedTurns: transcript.turns,
         queryEngine: new QueryEngine(
             new FakeTextProvider(JSON.stringify(relation)),
         ),
@@ -147,7 +146,6 @@ async function runInterrupted(answerTurnIds: string[]) {
     const transcript = parseTranscript(interruptedAnswerSource);
     return structureInterview({
         transcript,
-        correctedTurns: transcript.turns,
         queryEngine: new QueryEngine(
             new FakeTextProvider(JSON.stringify(interruptedAnswerRelation(answerTurnIds))),
         ),
@@ -254,7 +252,6 @@ test("实际问题没有候选人回答时明确拒绝", async () => {
     await assert.rejects(
         () => structureInterview({
             transcript,
-            correctedTurns: transcript.turns,
             queryEngine: new QueryEngine(new FakeTextProvider(JSON.stringify(relation))),
             model: "fake-model",
             abortSignal: new AbortController().signal,
@@ -302,7 +299,6 @@ test("连续多个面试官提问共享其后紧邻的候选人回答块", async
 
     const result = await structureInterview({
         transcript,
-        correctedTurns: transcript.turns,
         queryEngine: new QueryEngine(new FakeTextProvider(JSON.stringify(relation))),
         model: "fake-model",
         abortSignal: new AbortController().signal,

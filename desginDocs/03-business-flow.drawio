@@ -26,7 +26,7 @@
         <mxCell id="n3" value="3. Skill创建诊断任务&#xa;校验输入并保存Session阶段" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=14;" vertex="1" parent="1">
           <mxGeometry x="620" y="130" width="250" height="64" as="geometry"/>
         </mxCell>
-        <mxCell id="n4" value="4. Tool读取与预处理&#xa;保留原稿、错词Diff和表达痕迹" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2f6;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
+        <mxCell id="n4" value="4. Tool读取原始文字稿&#xa;保留原文和全部表达痕迹" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2f6;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
           <mxGeometry x="920" y="130" width="260" height="64" as="geometry"/>
         </mxCell>
         <mxCell id="n5" value="5. LLM结构化文字稿&#xa;问题簇、全部问题、题型、项目事实" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=14;" vertex="1" parent="1">

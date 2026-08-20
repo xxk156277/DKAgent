@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
-    ExpressionAnalysis,
+    ExpressionStats,
     ProjectFactSet,
 } from "../../src/interview/analysis-types.js";
 import { QUESTION_RUBRICS } from "../../src/interview/rubrics.js";
@@ -36,22 +36,13 @@ const followUpQuestion = question({
     answerTurnIds: ["turn-a2"],
 });
 
-const expression: ExpressionAnalysis = {
-    questionId: projectQuestion.id,
-    stats: {
-        fillerWords: [],
-        fillerCount: 0,
-        adjacentRepetitionCount: 0,
-        characterCount: 20,
-        sentenceCount: 1,
-        longSentenceCount: 0,
-    },
-    judgementStatus: "completed",
-    impact: "none",
-    detail: "表达清楚",
-    evidenceQuotes: [],
-    score: 72,
-    confidence: 0.9,
+const expressionStats: ExpressionStats = {
+    fillerWords: [],
+    fillerCount: 0,
+    adjacentRepetitionCount: 0,
+    characterCount: 20,
+    sentenceCount: 1,
+    longSentenceCount: 0,
 };
 
 const projectFacts: ProjectFactSet = {
@@ -89,6 +80,7 @@ const validProjectResponse = {
         depthAndEvidence: 60,
         analysisAndTradeoffs: 70,
         followUpHandling: null,
+        expressionQuality: 72,
     },
     confidence: 0.9,
     confidenceReason: "回答和项目事实均有原文证据",
@@ -136,7 +128,7 @@ function projectInput(overrides: Partial<AnalyzeAnswerInput> = {}): AnalyzeAnswe
         cluster,
         clusterQuestions: [projectQuestion, followUpQuestion],
         projectFacts,
-        expression,
+        expressionStats,
         references: [],
         ...overrides,
     };
@@ -167,7 +159,7 @@ test("题型 Rubric 只声明各题型适用的语义维度", () => {
     });
 });
 
-test("项目题不依赖参考答案，并组合表达质量分", async () => {
+test("一次模型请求同时使用表达统计并返回表达质量分", async () => {
     const { provider, context } = toolContext(validProjectResponse);
     const result = await createAnalyzeAnswerTool("fake-model").execute(
         projectInput({ references: ["与候选人回答矛盾的标准答案"] }),
@@ -180,12 +172,16 @@ test("项目题不依赖参考答案，并组合表达质量分", async () => {
     assert.equal(result.data.dimensionScores.expressionQuality, 72);
     assert.equal(result.data.dimensionScores.followUpHandling, null);
     assert.equal(result.data.score, 70);
+    assert.equal(provider.requests.length, 1);
     const requestContent = provider.request?.messages[0];
     assert.equal(requestContent?.role, "user");
     if (requestContent?.role === "user") {
-        assert.doesNotMatch(requestContent.content, /标准答案/);
+        const input = JSON.parse(requestContent.content);
+        assert.deepEqual(input.expressionStats, expressionStats);
+        assert.equal("references" in input, false);
     }
     assert.match(provider.request?.systemPrompt ?? "", /不与标准答案比较/);
+    assert.match(provider.request?.systemPrompt ?? "", /expressionQuality/);
 });
 
 test("项目事实提取失败时置信度上限为 0.54", async () => {
@@ -236,6 +232,7 @@ test("知识题没有参考资料时置信度上限为 0.79 且权衡维度不�
             depthAndEvidence: 75,
             analysisAndTradeoffs: null,
             followUpHandling: null,
+            expressionQuality: 72,
         },
         confidence: 0.95,
     };
@@ -245,7 +242,7 @@ test("知识题没有参考资料时置信度上限为 0.79 且权衡维度不�
         cluster: knowledgeCluster,
         clusterQuestions: [knowledgeQuestion],
         projectFacts: null,
-        expression: { ...expression, questionId: knowledgeQuestion.id },
+        expressionStats,
         references: [],
     }, context);
 
@@ -269,6 +266,7 @@ test("知识题忽略空字符串和纯空白参考资料", async () => {
             depthAndEvidence: 75,
             analysisAndTradeoffs: null,
             followUpHandling: null,
+            expressionQuality: 72,
         },
         confidence: 0.95,
     };
@@ -280,7 +278,7 @@ test("知识题忽略空字符串和纯空白参考资料", async () => {
             cluster: knowledgeCluster,
             clusterQuestions: [knowledgeQuestion],
             projectFacts: null,
-            expression: { ...expression, questionId: knowledgeQuestion.id },
+            expressionStats,
             references,
         }, context);
 
@@ -309,6 +307,7 @@ test("知识题有参考资料时才把资料提供给模型", async () => {
             depthAndEvidence: 75,
             analysisAndTradeoffs: null,
             followUpHandling: null,
+            expressionQuality: 72,
         },
     };
     const { provider, context } = toolContext(response);
@@ -317,7 +316,7 @@ test("知识题有参考资料时才把资料提供给模型", async () => {
         cluster: knowledgeCluster,
         clusterQuestions: [knowledgeQuestion],
         projectFacts: null,
-        expression: { ...expression, questionId: knowledgeQuestion.id },
+        expressionStats,
         references: ["  事件循环先执行同步任务  "],
     }, context);
 
@@ -343,7 +342,7 @@ test("流程题不调用 LLM 并直接返回 not_scored", async () => {
         cluster: proceduralCluster,
         clusterQuestions: [proceduralQuestion],
         projectFacts: null,
-        expression: { ...expression, questionId: proceduralQuestion.id },
+        expressionStats,
         references: [],
     }, context);
 
@@ -414,6 +413,7 @@ test("拒绝题型不适用的维度分", async () => {
             depthAndEvidence: 70,
             analysisAndTradeoffs: 60,
             followUpHandling: null,
+            expressionQuality: 72,
         },
     };
     const { context } = toolContext(response);
@@ -422,7 +422,7 @@ test("拒绝题型不适用的维度分", async () => {
         cluster: knowledgeCluster,
         clusterQuestions: [knowledgeQuestion],
         projectFacts: null,
-        expression: { ...expression, questionId: knowledgeQuestion.id },
+        expressionStats,
         references: [],
     }, context);
 
@@ -444,7 +444,7 @@ test("簇中追问才允许 followUpHandling 分数", async () => {
     const result = await createAnalyzeAnswerTool("fake-model").execute(
         projectInput({
             question: followUpQuestion,
-            expression: { ...expression, questionId: followUpQuestion.id },
+            expressionStats,
         }),
         context,
     );
