@@ -37,6 +37,8 @@ export interface ModelRequest {
     maxTokens?: number;
     /** 采样温度。 */
     temperature?: number;
+    /** 输出格式；省略表示普通文本，json_object 表示要求 Provider 返回合法 JSON。 */
+    responseFormat?: "json_object";
     /** 独立于普通消息的系统提示词。 */
     systemPrompt?: string;
     /** 用于中止 Provider 请求。 */

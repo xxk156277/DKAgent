@@ -3,10 +3,18 @@ import test from "node:test";
 import type { AgentMessage, ToolSchema } from "../../src/query-engine/provider.js";
 import {
     toOpenAIMessages,
+    toOpenAIResponseFormat,
     toOpenAITools,
     translateOpenAIChunks,
     type OpenAIStreamChunk,
 } from "../../src/query-engine/providers/openai-compatible.js";
+
+test("转换 DeepSeek JSON Output 格式且普通文本请求保持省略", () => {
+    assert.deepEqual(toOpenAIResponseFormat("json_object"), {
+        type: "json_object",
+    });
+    assert.equal(toOpenAIResponseFormat(undefined), undefined);
+});
 
 async function* chunksOf(
     chunks: OpenAIStreamChunk[],

@@ -17,6 +17,7 @@ export async function queryModelJson<T>(input: {
         systemPrompt: input.systemPrompt,
         messages: [{ role: "user" as const, content: input.userContent }],
         temperature: 0,
+        responseFormat: "json_object" as const,
         abortSignal: input.abortSignal,
     };
     const traceRequest = {

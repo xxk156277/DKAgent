@@ -93,6 +93,13 @@ export function toOpenAITools(
     }));
 }
 
+/** 把 Provider 中立的输出格式转换为 OpenAI-Compatible response_format。 */
+export function toOpenAIResponseFormat(
+    format: ModelRequest["responseFormat"],
+): { type: "json_object" } | undefined {
+    return format ? { type: format } : undefined;
+}
+
 /**
  * 把 OpenAI Chunk 转换成 Provider 中立事件。
  * Tool Call 在整个流结束后统一 End，保证每个 index 只闭合一次。
@@ -195,7 +202,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     public async *stream(
         request: ModelRequest,
     ): AsyncIterable<StreamEvent> {
-
+        const responseFormat = toOpenAIResponseFormat(request.responseFormat);
         const openAIRequest: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
             model: request.model,
             messages: toOpenAIMessages(request.messages, request.systemPrompt),
@@ -204,6 +211,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
             stream: true,
             stream_options: { include_usage: true },
             parallel_tool_calls: false,
+            ...(responseFormat ? { response_format: responseFormat } : {}),
             ...(request.tools?.length
                 ? { tools: toOpenAITools(request.tools) }
                 : {}),
