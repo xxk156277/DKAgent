@@ -7,6 +7,7 @@ import { loadSessionBundle, type TapSessionDetail } from "../api/session-api.js"
 import { SessionHistory } from "../features/sessions/SessionHistory.js";
 import { SessionListPage } from "../features/sessions/SessionListPage.js";
 import { createTapStore } from "../store/tap-store.js";
+import { useTapViewport } from "../shared/useTapViewport.js";
 import { TapApp } from "./TapApp.js";
 
 export function WebTapRouter() {
@@ -28,6 +29,7 @@ function SessionDetailPage() {
   const [session, setSession] = useState<TapSessionDetail>();
   const [error, setError] = useState<string>();
   const eventCount = useStore(store, (state) => state.events.length);
+  const mobile = useTapViewport() === "mobile";
 
   useEffect(
     () => sessionId ? connectEventFeed(store, { sessionId }) : undefined,
@@ -63,6 +65,7 @@ function SessionDetailPage() {
   if (!session || !sessionId) {
     return <main className="tap-session-state">正在加载 Session…</main>;
   }
+  const isTraceView = eventCount > 0;
   const sessionNavigation = (
     <nav className="tap-session-backbar" aria-label="Session 导航">
       <Link to="/">← 返回 Sessions</Link>
@@ -70,14 +73,15 @@ function SessionDetailPage() {
     </nav>
   );
   return (
-    <div className={`tap-session-detail-shell${eventCount > 0 ? " is-trace-view" : ""}`}>
-      {eventCount > 0
+    <div className={`tap-session-detail-shell${isTraceView ? " is-trace-view" : ""}`}>
+      {isTraceView && mobile ? sessionNavigation : null}
+      {isTraceView
         ? (
           <TapApp
             connectLive={false}
             store={store}
             sessionId={sessionId}
-            sessionNavigation={sessionNavigation}
+            sessionNavigation={mobile ? undefined : sessionNavigation}
           />
         )
         : (

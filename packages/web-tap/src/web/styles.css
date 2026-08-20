@@ -623,8 +623,16 @@ button {
     overflow: hidden;
   }
 
+  .tap-session-detail-shell.is-trace-view > .tap-ant-app {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
   .tap-session-detail-shell.is-trace-view .tap-app-shell,
   .tap-workspace {
+    flex: 1 1 auto;
     min-height: 0;
   }
 

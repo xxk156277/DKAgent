@@ -4,13 +4,13 @@
 
 **Goal:** 让 Session Trace 详情页按“产品栏、Session 返回栏、工作区”排列，并在桌面端恰好占满视口且仅允许模块内部滚动。
 
-**Architecture:** `SessionDetailPage` 仍负责构造 Session 导航，通过可选 ReactNode 插槽交给 `TapApp`；`TapApp` 在产品栏之后渲染该插槽。桌面端使用一条完整的 flex 高度链约束视口，叶子模块继续复用现有 `overflow-y: auto`。
+**Architecture:** `SessionDetailPage` 仍负责构造 Session 导航，并用 `useTapViewport` 保持移动 Trace 的 Backbar 外置、桌面 Trace 的 `sessionNavigation` 插槽。`TapApp` 在产品栏之后渲染桌面插槽，并给 AntD `App` 增加 `tap-ant-app` class。桌面端使用 `SessionDetailPage → tap-ant-app → tap-app-shell` 的完整 flex 高度链约束视口，叶子模块继续复用现有 `overflow-y: auto`。
 
 **Tech Stack:** React 19、TypeScript、Vite、Ant Design 6、Zustand、Vitest、Testing Library、CSS Flexbox
 
 ## Global Constraints
 
-- 只处理宽度不小于 `768px` 的 Web 桌面端，不调整移动端布局。
+- 只新增宽度不小于 `768px` 的 Web 桌面端高度约束；移动端工作区和抽屉布局不变，Trace Backbar 保持外置。
 - 不改变模块宽度、业务数据、Store、Session API 和现有滚动模块职责。
 - 不引入新依赖，不重构 Session 列表页和无 Trace 历史页。
 - 不暂存或提交 `.dkagent/sessions.db`。
@@ -110,9 +110,10 @@ export function TapApp({
 }: TapAppProps) {
 ```
 
-在已有 `TapHeader` 结束标签和 `tap-app-body` 之间插入导航：
+给 `AntdApp` 增加稳定 class，并在已有 `TapHeader` 结束标签和 `tap-app-body` 之间插入桌面导航：
 
 ```tsx
+<AntdApp className="tap-ant-app">
 <TapHeader
   connectionStatus={connectionStatus}
   mobile={mobile}
@@ -126,7 +127,7 @@ export function TapApp({
 
 - [ ] **Step 5: 从 SessionDetailPage 传入 Backbar**
 
-在 `WebTapRouter.tsx` 中只构造一次 Backbar。有 Trace 时通过插槽传入 `TapApp`；无 Trace 分支保持现状：
+在 `WebTapRouter.tsx` 中只构造一次 Backbar。使用 `useTapViewport`：移动 Trace 将 Backbar 作为详情 shell 的直接子项并置于 `TapApp` 前；桌面 Trace 通过插槽传入 `TapApp`；无 Trace 分支保持 Backbar + `SessionHistory`：
 
 ```tsx
 const sessionNavigation = (
@@ -135,15 +136,18 @@ const sessionNavigation = (
     <Typography.Text code>{session.id}</Typography.Text>
   </nav>
 );
+const isTraceView = eventCount > 0;
+const mobile = useTapViewport() === "mobile";
 
 return (
-  <div className={`tap-session-detail-shell${eventCount > 0 ? " is-trace-view" : ""}`}>
-    {eventCount > 0 ? (
+  <div className={`tap-session-detail-shell${isTraceView ? " is-trace-view" : ""}`}>
+    {isTraceView && mobile ? sessionNavigation : null}
+    {isTraceView ? (
       <TapApp
         connectLive={false}
         store={store}
         sessionId={sessionId}
-        sessionNavigation={sessionNavigation}
+        sessionNavigation={mobile ? undefined : sessionNavigation}
       />
     ) : (
       <>
@@ -157,7 +161,7 @@ return (
 
 - [ ] **Step 6: 补齐桌面端 flex 高度链**
 
-在 `styles.css` 的响应式区域新增桌面规则，不修改现有移动端媒体查询：
+在 `styles.css` 的响应式区域新增桌面规则，不修改现有移动端媒体查询；让直接子级 `tap-ant-app` 闭合详情 shell 到 `tap-app-shell` 的高度链：
 
 ```css
 @media (min-width: 768px) {
@@ -168,8 +172,16 @@ return (
     overflow: hidden;
   }
 
+  .tap-session-detail-shell.is-trace-view > .tap-ant-app {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
   .tap-session-detail-shell.is-trace-view .tap-app-shell,
   .tap-workspace {
+    flex: 1 1 auto;
     min-height: 0;
   }
 

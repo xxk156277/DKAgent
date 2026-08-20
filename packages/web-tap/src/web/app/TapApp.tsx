@@ -82,7 +82,7 @@ export function TapApp({
 
   return (
     <ConfigProvider theme={tapTheme}>
-      <AntdApp>
+      <AntdApp className="tap-ant-app">
         <div className="tap-app-shell">
           <TapHeader
             connectionStatus={connectionStatus}
