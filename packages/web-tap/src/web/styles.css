@@ -615,6 +615,24 @@ button {
   .tap-workspace-content { gap: 8px; padding: 8px; }
 }
 
+@media (min-width: 768px) {
+  .tap-session-detail-shell.is-trace-view {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .tap-session-detail-shell.is-trace-view .tap-app-shell,
+  .tap-workspace {
+    min-height: 0;
+  }
+
+  .tap-workspace-content {
+    overflow: hidden;
+  }
+}
+
 @media (max-width: 767px) {
   body { overflow-x: hidden; }
 

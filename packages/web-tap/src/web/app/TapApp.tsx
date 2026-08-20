@@ -1,5 +1,6 @@
 import { App as AntdApp, Button, ConfigProvider, Drawer } from "antd";
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 import { connectEventFeed } from "../api/event-feed.js";
@@ -23,6 +24,7 @@ interface TapAppProps {
   store?: StoreApi<TapState>;
   sessionId?: string;
   connectLive?: boolean;
+  sessionNavigation?: ReactNode;
 }
 
 const tapTheme = {
@@ -33,7 +35,12 @@ const tapTheme = {
 } as const;
 
 /** TAP 工作区入口；Store 可注入，事件连接仍只在顶层建立一次。 */
-export function TapApp({ store = tapStore, sessionId, connectLive = true }: TapAppProps) {
+export function TapApp({
+  store = tapStore,
+  sessionId,
+  connectLive = true,
+  sessionNavigation,
+}: TapAppProps) {
   const turns = useStore(store, selectTurns);
   const nodes = useStore(store, selectNodes);
   const connectionStatus = useStore(store, (state) => state.connectionStatus);
@@ -84,6 +91,7 @@ export function TapApp({ store = tapStore, sessionId, connectLive = true }: TapA
             onOpenTurns={() => setTurnsOpen(true)}
             onOpenInsights={() => setInsightsOpen(true)}
           />
+          {sessionNavigation}
           <div className="tap-app-body">
             {mobile ? null : (
               <TurnList

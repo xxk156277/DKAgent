@@ -63,15 +63,29 @@ function SessionDetailPage() {
   if (!session || !sessionId) {
     return <main className="tap-session-state">正在加载 Session…</main>;
   }
+  const sessionNavigation = (
+    <nav className="tap-session-backbar" aria-label="Session 导航">
+      <Link to="/">← 返回 Sessions</Link>
+      <Typography.Text code>{session.id}</Typography.Text>
+    </nav>
+  );
   return (
-    <div className="tap-session-detail-shell">
-      <nav className="tap-session-backbar" aria-label="Session 导航">
-        <Link to="/">← 返回 Sessions</Link>
-        <Typography.Text code>{session.id}</Typography.Text>
-      </nav>
+    <div className={`tap-session-detail-shell${eventCount > 0 ? " is-trace-view" : ""}`}>
       {eventCount > 0
-        ? <TapApp connectLive={false} store={store} sessionId={sessionId} />
-        : <SessionHistory session={session} />}
+        ? (
+          <TapApp
+            connectLive={false}
+            store={store}
+            sessionId={sessionId}
+            sessionNavigation={sessionNavigation}
+          />
+        )
+        : (
+          <>
+            {sessionNavigation}
+            <SessionHistory session={session} />
+          </>
+        )}
     </div>
   );
 }
