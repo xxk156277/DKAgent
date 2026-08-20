@@ -20,7 +20,7 @@ Session 详情页新增 `tap-session-backbar` 后出现两个问题：Backbar �
 这样既能保证真实 DOM 顺序，也避免 `TapApp` 直接依赖 React Router 或 Session 页面逻辑。
 
 ```text
-tap-session-detail-shell  height: 100dvh; overflow: hidden
+tap-session-detail-shell.is-trace-view  height: 100dvh; overflow: hidden
 └─ tap-app-shell          flex: 1; min-height: 0
    ├─ tap-product-header  flex: 0 0 52px
    ├─ tap-session-backbar flex: 0 0 40px
@@ -37,8 +37,8 @@ tap-session-detail-shell  height: 100dvh; overflow: hidden
 ## 组件改动
 
 - `TapApp`：增加可选 `sessionNavigation: ReactNode`，紧随 `TapHeader` 渲染。
-- `SessionDetailPage`：有 Trace 时把 Backbar 传入 `TapApp`；无 Trace 的历史页面保持当前结构，本次不扩大范围。
-- `styles.css`：仅在桌面媒体查询内补齐固定视口高度、`min-height: 0` 和父级 `overflow: hidden`。
+- `SessionDetailPage`：有 Trace 时增加 `is-trace-view` 状态并把 Backbar 传入 `TapApp`；无 Trace 的历史页面保持当前结构和页面滚动，本次不扩大范围。
+- `styles.css`：仅在桌面媒体查询内为 `is-trace-view` 补齐固定视口高度、`min-height: 0` 和父级 `overflow: hidden`。
 
 ## 验证
 
