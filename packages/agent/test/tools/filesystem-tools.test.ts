@@ -313,7 +313,19 @@ test("createToolRegistry 注册文件工具，并把 cwd 下传给 read_file", a
 
         assert.deepEqual(
             registry.list().map((tool) => tool.name),
-            ["read_file", "find_files", "grep_files", "write_file", "analyze_interview"],
+            [
+                "read_file",
+                "find_files",
+                "grep_files",
+                "write_file",
+                "parse_transcript",
+                "preprocess_transcript",
+                "structure_interview",
+                "extract_project_facts",
+                "analyze_expression",
+                "analyze_answer",
+                "generate_report",
+            ],
         );
 
         const result = await registry.resolve("read_file").execute({ path: "notes.txt" }, context());

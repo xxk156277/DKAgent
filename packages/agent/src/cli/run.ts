@@ -31,6 +31,8 @@ import {
     openKnowledgeDatabase,
 } from "../knowledge/index.js";
 import { createKnowledgeReferenceRetriever } from "../skills/knowledge-reference-retriever.js";
+import { appendAvailableSkills } from "../skills/prompt.js";
+import { createSkillRegistry } from "../skills/registry.js";
 import { createSafePrompt } from "./safe-prompt.js";
 
 /**
@@ -56,6 +58,10 @@ export async function runAgentCli(options: {
         model: config.model,
         ...(referenceRetriever ? { referenceRetriever } : {}),
     });
+    const systemPrompt = appendAvailableSkills(
+        AGENT_SYSTEM_PROMPT,
+        createSkillRegistry(),
+    );
     // 摘要复用统一 QueryEngine；Compressor 不直接依赖具体 Provider。
     const tracer = options.tracer ?? new Tracer();
     const compressor = new Compressor(queryEngine, tracer);
@@ -107,8 +113,8 @@ export async function runAgentCli(options: {
             maxOutputTokens: config.maxOutputTokens,
             contextCompaction: config.contextCompaction,
             summaryModel: config.summaryModel,
-            maxSteps: 5,
-            systemPrompt: AGENT_SYSTEM_PROMPT,
+            maxSteps: 12,
+            systemPrompt,
             onTextDelta: (text) => process.stdout.write(text),
             tracer,
             session: {

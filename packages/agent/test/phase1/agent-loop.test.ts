@@ -266,10 +266,10 @@ test("AgentLoop 每轮传入并保存 ContextManager 返回的摘要状态", asy
     assert.equal(agent.getMessages().length, 4);
 });
 
-test("面试分析产生 Tool Call 后，将结果回传模型", async () => {
+test("Tool Call 执行后将结果回传模型", async () => {
     const provider = new FakeProvider([
         [
-            { type: "tool_call_start", index: 0, id: "call-1", name: "analyze_interview" },
+            { type: "tool_call_start", index: 0, id: "call-1", name: "test_analysis" },
             {
                 type: "tool_call_delta",
                 index: 0,
@@ -282,8 +282,8 @@ test("面试分析产生 Tool Call 后，将结果回传模型", async () => {
     ]);
     let executeCount = 0;
     const fakeAnalyzeTool: Tool<{ transcriptPath: string }, { reportPath: string }> = {
-        name: "analyze_interview",
-        description: "测试面试分析工具",
+        name: "test_analysis",
+        description: "测试工具",
         parameters: { type: "object" },
         async execute(input) {
             executeCount += 1;
@@ -667,55 +667,4 @@ test("MemoryExtractor 模型错误不影响 AgentLoop 最终回答", async () =>
     });
 
     assert.equal(await agent.run(userInput), answer);
-});
-
-test("System Prompt 约束普通聊天和诊断 Tool 的使用边界", () => {
-    assert.match(AGENT_SYSTEM_PROMPT, /普通问题/);
-    assert.match(AGENT_SYSTEM_PROMPT, /缺少搜索目录.*询问/);
-    assert.match(AGENT_SYSTEM_PROMPT, /find_files/);
-    assert.match(AGENT_SYSTEM_PROMPT, /绝对路径.*确认/);
-    assert.match(AGENT_SYSTEM_PROMPT, /确认前.*不得调用 analyze_interview/);
-    assert.match(AGENT_SYSTEM_PROMPT, /不得.*编造路径/);
-});
-
-test("Agent 先查找并确认绝对路径，下一轮确认后才分析", async () => {
-    const transcriptPath = "/tmp/interviews/字节一面.md";
-    const provider = new FakeProvider([
-        [
-            { type: "tool_call_start", index: 0, id: "find-1", name: "find_files" },
-            { type: "tool_call_delta", index: 0, argumentsDelta: '{"directory":"/tmp/interviews","glob":"*字节*.md"}' },
-            { type: "tool_call_end", index: 0 },
-            { type: "message_end", usage, stopReason: "tool_use" },
-        ],
-        textResponse(`找到文件：${transcriptPath}。请确认是否分析？`),
-        [
-            { type: "tool_call_start", index: 0, id: "analyze-1", name: "analyze_interview" },
-            { type: "tool_call_delta", index: 0, argumentsDelta: JSON.stringify({ transcriptPath }) },
-            { type: "tool_call_end", index: 0 },
-            { type: "message_end", usage, stopReason: "tool_use" },
-        ],
-        textResponse("总分 76，报告已生成。"),
-    ]);
-    let analyzeCount = 0;
-    const registry = new ToolRegistry();
-    registry.register({
-        name: "find_files", description: "查找", parameters: { type: "object" },
-        async execute() { return { success: true, data: { matches: [transcriptPath] } }; },
-    });
-    registry.register({
-        name: "analyze_interview", description: "分析", parameters: { type: "object" },
-        async execute(input: { transcriptPath: string }) {
-            analyzeCount += 1;
-            assert.equal(input.transcriptPath, transcriptPath);
-            return { success: true, data: { reportPath: "/tmp/report.md" } };
-        },
-    });
-    const agent = createAgent(provider, registry);
-
-    const confirmation = await agent.run("在 /tmp/interviews 找字节面试稿");
-    assert.match(confirmation, /请确认/);
-    assert.equal(analyzeCount, 0);
-    const answer = await agent.run("确认");
-    assert.equal(answer, "总分 76，报告已生成。");
-    assert.equal(analyzeCount, 1);
 });
