@@ -1,5 +1,6 @@
 import type { QueryEngine } from "../query-engine/query-engine.js";
 import type { Tracer } from "@dkagent/trace";
+import type { ArtifactStore } from "../artifact/types.js";
 
 export interface Tool<TInput = unknown, TOutput = unknown> {
     readonly name: string;
@@ -23,6 +24,7 @@ export interface ToolContext {
     queryEngine: QueryEngine;
     abortSignal: AbortSignal;
     tracer?: Tracer;
+    artifactStore?: ArtifactStore;
 }
 
 export interface ToolSchema {

@@ -10,6 +10,7 @@ import type {
     SessionStore,
 } from "../session/types.js";
 import type { MemoryReader, MemoryWriter } from "../memory/types.js";
+import type { ArtifactStore } from "../artifact/types.js";
 
 /** AgentLoop 当前绑定的 Session。 */
 export interface AgentLoopSessionOptions {
@@ -52,4 +53,6 @@ export interface AgentLoopOptions {
     memoryReader?: MemoryReader;
     /** 成功文本回答后提取并保存稳定记忆。 */
     memoryWriter?: MemoryWriter;
+    /** 当前 AgentLoop 使用的 ArtifactStore；未提供时创建内存 Store。 */
+    artifactStore?: ArtifactStore;
 }

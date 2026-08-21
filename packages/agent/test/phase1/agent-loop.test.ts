@@ -25,6 +25,8 @@ import type { SessionSnapshot, SessionStore } from "../../src/session/types.js";
 import { ToolRegistry } from "../../src/tools/registry.js";
 import type { Tool } from "../../src/tools/types.js";
 import type { MemoryReader, MemoryWriter } from "../../src/memory/types.js";
+import { InMemoryArtifactStore } from "../../src/artifact/index.js";
+import type { ArtifactStore } from "../../src/artifact/types.js";
 
 class FakeProvider implements LLMProvider {
     readonly name = "fake";
@@ -64,6 +66,7 @@ function createAgent(
         new ProviderTokenCounter(provider),
     ),
     tracer?: Tracer,
+    artifactStore?: ArtifactStore,
 ): AgentLoop {
     return new AgentLoop({
         queryEngine: new QueryEngine(provider),
@@ -74,6 +77,7 @@ function createAgent(
         maxOutputTokens: 100,
         systemPrompt: "test prompt",
         ...(tracer === undefined ? {} : { tracer }),
+        ...(artifactStore === undefined ? {} : { artifactStore }),
     });
 }
 
@@ -313,6 +317,35 @@ test("Tool Call 执行后将结果回传模型", async () => {
     ]);
     assert.ok(traceStore.list().some((event) => event.name === "tool.call"));
     assert.ok(traceStore.list().some((event) => event.name === "tool.result"));
+});
+
+test("Tool Call 接收 AgentLoop 注入的 ArtifactStore", async () => {
+    const provider = new FakeProvider([
+        [
+            { type: "tool_call_start", index: 0, id: "call-store", name: "capture_store" },
+            { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+            { type: "tool_call_end", index: 0 },
+            { type: "message_end", usage, stopReason: "tool_use" },
+        ],
+        textResponse("已捕获 Store"),
+    ]);
+    let receivedStore: ArtifactStore | undefined;
+    const registry = new ToolRegistry();
+    registry.register({
+        name: "capture_store",
+        description: "捕获 ArtifactStore",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        async execute(_input, ctx) {
+            receivedStore = ctx.artifactStore;
+            return { success: true, data: { captured: true } };
+        },
+    });
+
+    const artifactStore = new InMemoryArtifactStore();
+    const agent = createAgent(provider, registry, undefined, undefined, artifactStore);
+    await agent.run("运行");
+
+    assert.strictEqual(receivedStore, artifactStore);
 });
 
 test("Agent 失败时记录 agent.turn error 后原样抛出错误", async () => {

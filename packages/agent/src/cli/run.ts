@@ -25,6 +25,7 @@ import {
     type MemoryType,
 } from "../memory/index.js";
 import { createToolRegistry } from "../tools/index.js";
+import { InMemoryArtifactStore, type ArtifactStore } from "../artifact/index.js";
 import {
     KnowledgeRepository,
     KnowledgeSearch,
@@ -41,6 +42,7 @@ import { createSafePrompt } from "./safe-prompt.js";
 export async function runAgentCli(options: {
     tracer?: Tracer;
     sessionStore?: SessionStore;
+    artifactStoreFactory?: () => ArtifactStore;
 } = {}): Promise<void> {
     const config = loadConfig();
     const provider = new OpenAICompatibleProvider(config.apiKey, config.baseURL);
@@ -100,6 +102,16 @@ export async function runAgentCli(options: {
         memoryStore,
         tracer,
     );
+    const artifactStores = new Map<string, ArtifactStore>();
+    const getOrCreateArtifactStore = (sessionId: string): ArtifactStore => {
+        const existingStore = artifactStores.get(sessionId);
+        if (existingStore) return existingStore;
+
+        const artifactStore = options.artifactStoreFactory?.()
+            ?? new InMemoryArtifactStore(tracer);
+        artifactStores.set(sessionId, artifactStore);
+        return artifactStore;
+    };
 
     const createAgent = (
         snapshot: SessionSnapshot
@@ -123,6 +135,7 @@ export async function runAgentCli(options: {
             },
             memoryReader: memoryRetriever,
             memoryWriter,
+            artifactStore: getOrCreateArtifactStore(snapshot.id),
         });
     }
 
@@ -215,6 +228,7 @@ export async function runAgentCli(options: {
                     prompt();
                     continue;
                 }
+                artifactStores.delete(sessionId);
 
                 console.log(`已删除 Session ${sessionId}\n`);
                 prompt();

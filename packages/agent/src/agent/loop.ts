@@ -1,6 +1,7 @@
 import { Tracer, type TraceSpan } from "@dkagent/trace";
 import { dispatchToolCall } from "./dispatcher.js";
 import type { AgentLoopOptions } from "./types.js";
+import { InMemoryArtifactStore, type ArtifactStore } from "../artifact/index.js";
 import type { AgentMessage, ModelResponse } from "../query-engine/provider.js";
 import type {
     ContextBuildInput,
@@ -13,6 +14,7 @@ export class AgentLoop {
     private contextState: ConversationContextState;
     private readonly abortSignal: AbortSignal;
     private readonly tracer: Tracer;
+    private readonly artifactStore: ArtifactStore;
 
     public constructor(private readonly options: AgentLoopOptions) {
         this.messages = options.session
@@ -26,6 +28,8 @@ export class AgentLoop {
             };
         this.abortSignal = options.abortSignal ?? new AbortController().signal;
         this.tracer = options.tracer ?? new Tracer();
+        this.artifactStore = options.artifactStore
+            ?? new InMemoryArtifactStore(this.tracer);
     }
 
     public getMessages(): readonly AgentMessage[] {
@@ -179,6 +183,7 @@ export class AgentLoop {
                             queryEngine: this.options.queryEngine,
                             abortSignal: this.abortSignal,
                             tracer: this.tracer,
+                            artifactStore: this.artifactStore,
                         },
                     );
                     toolSpan.event("tool.result", result, { step });

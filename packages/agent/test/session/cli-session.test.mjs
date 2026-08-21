@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,15 +14,16 @@ const cliModuleUrl = pathToFileURL(
     join(repositoryRoot, "packages/agent/src/cli/run.ts"),
 ).href;
 
-function startCli(workingDirectory) {
+function startCli(workingDirectory, runAgentOptions = "") {
     const script = `
+        import { appendFileSync } from "node:fs";
         import { runAgentCli } from ${JSON.stringify(cliModuleUrl)};
-        runAgentCli().catch((error) => {
+        runAgentCli(${runAgentOptions}).catch((error) => {
             console.error(error);
             process.exitCode = 1;
         });
     `;
-    const child = spawn(tsxPath, ["-e", script], {
+    const child = spawn(tsxPath, ["--input-type=module", "-e", script], {
         cwd: workingDirectory,
         stdio: ["pipe", "pipe", "pipe"],
         env: {
@@ -107,7 +108,7 @@ test("CLI 启动时创建 Session，输入 /new 后切换到新 Session", () => 
             process.exitCode = 1;
         });
     `;
-    const result = spawnSync(tsxPath, ["-e", script], {
+    const result = spawnSync(tsxPath, ["--input-type=module", "-e", script], {
         cwd: workingDirectory,
         input: "/new\n",
         encoding: "utf8",
@@ -128,6 +129,42 @@ test("CLI 启动时创建 Session，输入 /new 后切换到新 Session", () => 
     assert.equal(
         existsSync(join(workingDirectory, ".dkagent/sessions.db")),
         true,
+    );
+});
+
+test("CLI 为 /new 创建独立 ArtifactStore，并在 /switch 时复用 Session 的 Store", async () => {
+    const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-artifact-store-"));
+    const creationLogPath = join(workingDirectory, "artifact-store-creations.log");
+    const cli = startCli(workingDirectory, `{
+            artifactStoreFactory() {
+                appendFileSync(${JSON.stringify(creationLogPath)}, "created\\n");
+                return { put() { return "artifact"; }, get() { return undefined; } };
+            },
+        }`);
+    try {
+        const startup = await cli.waitForOutput(
+            /DKAgent 已创建 Session ([0-9a-f-]{36})/,
+        );
+        const firstSessionId = startup[1];
+        const outputIndex = cli.output().length;
+        cli.child.stdin.write("/new\n");
+        await cli.waitForOutput(/已创建 Session [0-9a-f-]{36}/, outputIndex);
+
+        const switchOutputIndex = cli.output().length;
+        cli.child.stdin.write(`/switch ${firstSessionId}\n`);
+        await cli.waitForOutput(
+            new RegExp(`已切换到 Session ${firstSessionId}`),
+            switchOutputIndex,
+        );
+    } finally {
+        const exitPromise = cli.waitForExit();
+        cli.child.stdin.end();
+        const exitCode = await exitPromise;
+        assert.equal(exitCode, 0, cli.errorOutput());
+    }
+    assert.equal(
+        readFileSync(creationLogPath, "utf8"),
+        "created\ncreated\n",
     );
 });
 
