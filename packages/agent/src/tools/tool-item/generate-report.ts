@@ -3,8 +3,8 @@ import type {
     ClarificationCandidate,
     InterviewMetadata,
     InterviewReport,
-    JobMatchAnalysis,
-    ProjectFactSet,
+    // JobMatchAnalysis,
+    // ProjectFactSet,
     QuestionAnalysis,
     ReportQuestionItem,
     ReportReferenceItem,
@@ -29,7 +29,23 @@ const summarySchema = z.object({
     priorityImprovements: z.array(referenceItemSchema).max(3),
 }).strict();
 
-const jobMatchItemSchema = z.object({
+const SUMMARY_JSON_EXAMPLE = JSON.stringify({
+    levelSummary: "基于逐题证据的整体水平判断",
+    strengths: [{
+        text: "跨题稳定出现的强项",
+        questionIds: ["question-0001"],
+    }],
+    coreIssues: [{
+        text: "跨题或高影响的核心问题",
+        questionIds: ["question-0002"],
+    }],
+    priorityImprovements: [{
+        text: "优先级最高的改进动作",
+        questionIds: ["question-0002"],
+    }],
+}, null, 2);
+
+/* const jobMatchItemSchema = z.object({
     text: z.string().min(1),
     jdEvidence: z.string().min(1),
     questionIds: z.array(z.string().min(1)).min(1),
@@ -39,15 +55,22 @@ const jobMatchSchema = z.object({
     summary: z.string().min(1),
     matches: z.array(jobMatchItemSchema),
     gaps: z.array(jobMatchItemSchema),
-}).strict();
+}).strict(); */
 
 export interface GenerateReportInput {
-    structuredInterview: StructuredInterview;
-    analyses: QuestionAnalysis[];
-    projectFactSets: ProjectFactSet[];
+    structuredInterviewArtifactId: string;
+    analysisArtifactIds: string[];
     stage: "provisional" | "final";
     metadata?: Partial<InterviewMetadata>;
-    jdText?: string;
+}
+
+interface ResolvedGenerateReportInput {
+    structuredInterview: StructuredInterview;
+    analyses: QuestionAnalysis[];
+    // projectFactSets: ProjectFactSet[];
+    stage: "provisional" | "final";
+    metadata?: Partial<InterviewMetadata>;
+    // jdText?: string;
 }
 
 export interface GenerateReportOutput {
@@ -84,13 +107,15 @@ function inputError(message: string): ToolResult<GenerateReportOutput> {
     return { success: false, error: { code: "input_error", message } };
 }
 
-function validateInput(input: GenerateReportInput): void {
+function validateInput(input: ResolvedGenerateReportInput): void {
     const questionIds = input.structuredInterview.questions.map((question) => question.id);
     const knownQuestionIds = new Set(questionIds);
-    const turnById = new Map(
-        input.structuredInterview.transcript.turns.map((turn) => [turn.id, turn]),
+    // const turnById = new Map(
+    //     input.structuredInterview.transcript.turns.map((turn) => [turn.id, turn]),
+    // );
+    const knownTurnIds = new Set(
+        input.structuredInterview.transcript.turns.map((turn) => turn.id),
     );
-    const knownTurnIds = new Set(turnById.keys());
     if (knownQuestionIds.size !== questionIds.length) {
         throw new Error("结构化面试包含重复问题 ID");
     }
@@ -164,7 +189,7 @@ function validateInput(input: GenerateReportInput): void {
         }
     }
 
-    const seenFactKeys = new Set<string>();
+    /* const seenFactKeys = new Set<string>();
     for (const factSet of input.projectFactSets) {
         const cluster = clusterById.get(factSet.clusterId);
         if (!cluster) {
@@ -232,10 +257,10 @@ function validateInput(input: GenerateReportInput): void {
                 throw new Error(`stated value 必须逐字来自 evidenceQuote: ${fact.key}`);
             }
         }
-    }
+    } */
 
     const clarificationCandidates = [
-        ...input.projectFactSets.flatMap((set) => set.clarificationCandidates),
+        // ...input.projectFactSets.flatMap((set) => set.clarificationCandidates),
         ...input.analyses.flatMap((analysis) => (
             analysis.status === "completed" ? analysis.clarificationCandidates : []
         )),
@@ -379,7 +404,7 @@ function renderQuestion(question: ReportQuestionItem, index: number): string[] {
     return lines;
 }
 
-function renderJobMatch(report: InterviewReport): string[] {
+/* function renderJobMatch(report: InterviewReport): string[] {
     if (report.jobMatchStatus === "not_provided") return [];
     if (report.jobMatchStatus === "failed" || !report.jobMatch) {
         return ["## 岗位匹配", "", "岗位匹配：不可评价", ""];
@@ -396,7 +421,7 @@ function renderJobMatch(report: InterviewReport): string[] {
         ...renderItems("匹配项", report.jobMatch.matches), "",
         ...renderItems("差距项", report.jobMatch.gaps), "",
     ];
-}
+} */
 
 export function renderInterviewReport(report: InterviewReport): string {
     const dimensionLines = Object.entries(DIMENSION_LABELS).map(([key, label]) => {
@@ -446,7 +471,7 @@ export function renderInterviewReport(report: InterviewReport): string {
         "",
         ...pendingLines,
         "",
-        ...renderJobMatch(report),
+        // ...renderJobMatch(report),
         "## 具体问题列表",
         "",
         ...report.questions.flatMap((question, index) => [
@@ -465,19 +490,66 @@ export function createGenerateReportTool(
         parameters: {
             type: "object",
             properties: {
-                structuredInterview: { type: "object", description: "结构化面试" },
-                analyses: { type: "array", description: "全部逐题分析" },
-                projectFactSets: { type: "array", description: "项目事实集合" },
+                structuredInterviewArtifactId: {
+                    type: "string",
+                    description: "structure_interview 返回的 structured_interview Artifact ID",
+                },
+                analysisArtifactIds: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "analyze_answer 返回的全部 question_analysis Artifact ID",
+                },
+                // projectFactSets: { type: "array", description: "项目事实集合" },
                 stage: { type: "string", enum: ["provisional", "final"] },
                 metadata: { type: "object", description: "面试元数据" },
-                jdText: { type: "string", description: "可选岗位描述原文" },
+                // jdText: { type: "string", description: "可选岗位描述原文" },
             },
-            required: ["structuredInterview", "analyses", "projectFactSets", "stage"],
+            required: ["structuredInterviewArtifactId", "analysisArtifactIds", "stage"],
             additionalProperties: false,
         },
         async execute(input, ctx) {
+            if (!ctx.artifactStore) {
+                return inputError("ArtifactStore 未初始化");
+            }
+            if (!input.structuredInterviewArtifactId?.trim()) {
+                return inputError("structuredInterviewArtifactId 必填");
+            }
+            if (
+                !Array.isArray(input.analysisArtifactIds)
+                || input.analysisArtifactIds.some((id) => !id?.trim())
+            ) {
+                return inputError("analysisArtifactIds 必须是 Artifact ID 数组");
+            }
+            if (new Set(input.analysisArtifactIds).size !== input.analysisArtifactIds.length) {
+                return inputError("analysisArtifactIds 不得重复");
+            }
+
+            let resolvedInput: ResolvedGenerateReportInput;
             try {
-                validateInput(input);
+                resolvedInput = {
+                    structuredInterview: ctx.artifactStore.get<StructuredInterview>(
+                        input.structuredInterviewArtifactId,
+                        "structured_interview",
+                        "generate_report",
+                    ),
+                    analyses: input.analysisArtifactIds.map((artifactId) => (
+                        ctx.artifactStore!.get<QuestionAnalysis>(
+                            artifactId,
+                            "question_analysis",
+                            "generate_report",
+                        )
+                    )),
+                    stage: input.stage,
+                    ...(input.metadata ? { metadata: input.metadata } : {}),
+                };
+            } catch (error) {
+                return inputError(
+                    error instanceof Error ? error.message : "报告 Artifact 读取失败",
+                );
+            }
+
+            try {
+                validateInput(resolvedInput);
             } catch (error) {
                 return inputError(error instanceof Error ? error.message : "报告输入无效");
             }
@@ -485,28 +557,31 @@ export function createGenerateReportTool(
             let score: InterviewReport["score"];
             try {
                 score = scoreInterview({
-                    questions: input.structuredInterview.questions,
-                    clusters: input.structuredInterview.clusters,
-                    analyses: input.analyses,
+                    questions: resolvedInput.structuredInterview.questions,
+                    clusters: resolvedInput.structuredInterview.clusters,
+                    analyses: resolvedInput.analyses,
                 });
             } catch (error) {
                 return inputError(error instanceof Error ? error.message : "无法计算面试分数");
             }
 
             const pendingClarifications = mergeClarifications([
-                ...input.projectFactSets.flatMap((set) => set.clarificationCandidates),
-                ...input.analyses.flatMap((analysis) => (
+                // ...input.projectFactSets.flatMap((set) => set.clarificationCandidates),
+                ...resolvedInput.analyses.flatMap((analysis) => (
                     analysis.status === "completed" ? analysis.clarificationCandidates : []
                 )),
-            ], input.structuredInterview.questions.map((question) => question.id));
+            ], resolvedInput.structuredInterview.questions.map((question) => question.id));
             if (
-                input.stage === "final"
+                resolvedInput.stage === "final"
                 && pendingClarifications.some((item) => item.impact === "high")
             ) {
                 return inputError("仍有高影响待确认项，不能生成最终报告");
             }
 
-            const questions = createQuestionItems(input.structuredInterview, input.analyses);
+            const questions = createQuestionItems(
+                resolvedInput.structuredInterview,
+                resolvedInput.analyses,
+            );
             let summaryStatus: InterviewReport["summaryStatus"] = "failed";
             let levelSummary = "";
             let strengths: ReportReferenceItem[] = [];
@@ -525,11 +600,16 @@ export function createGenerateReportTool(
                         "每条强项、核心问题和优先改进都必须引用输入中存在的 questionId。",
                         "不得改写原问题和原回答，不得引入输入之外的事实。",
                         "priorityImprovements 最多返回 3 条。",
+                        "JSON 根对象只能包含 levelSummary、strengths、coreIssues、priorityImprovements。",
+                        "strengths、coreIssues 和 priorityImprovements 每项只能包含 text、questionIds。",
+                        "合法 JSON 格式示例：",
+                        SUMMARY_JSON_EXAMPLE,
+                        "只返回一个 JSON 对象；不得使用 Markdown 代码块，不得附加解释文字。",
                     ].join("\n"),
                     userContent: JSON.stringify({ score, questions }),
                 });
                 const knownQuestionIds = new Set(
-                    input.structuredInterview.questions.map((question) => question.id),
+                    resolvedInput.structuredInterview.questions.map((question) => question.id),
                 );
                 validateSummaryEvidence([
                     ...summary.strengths,
@@ -546,7 +626,7 @@ export function createGenerateReportTool(
             }
 
 
-            const knownQuestionIds = new Set(
+            /* const knownQuestionIds = new Set(
                 input.structuredInterview.questions.map((question) => question.id),
             );
             let jobMatchStatus: InterviewReport["jobMatchStatus"] = input.jdText?.trim()
@@ -584,18 +664,21 @@ export function createGenerateReportTool(
                 } catch {
                     // JD 匹配独立降级，不影响面试评分和总结。
                 }
-            }
+            } */
+
+            // const jobMatchStatus: InterviewReport["jobMatchStatus"] = "not_provided";
+            // const jobMatch = null;
 
             const report: InterviewReport = {
-                stage: input.stage,
-                notice: input.stage === "provisional"
+                stage: resolvedInput.stage,
+                notice: resolvedInput.stage === "provisional"
                     ? "当前为暂定总分，补充待确认事实后可能调整。"
                     : null,
                 metadata: {
-                    company: input.metadata?.company?.trim() || null,
-                    position: input.metadata?.position?.trim() || null,
-                    date: input.metadata?.date?.trim() || null,
-                    round: input.metadata?.round?.trim() || null,
+                    company: resolvedInput.metadata?.company?.trim() || null,
+                    position: resolvedInput.metadata?.position?.trim() || null,
+                    date: resolvedInput.metadata?.date?.trim() || null,
+                    round: resolvedInput.metadata?.round?.trim() || null,
                 },
                 score,
                 summaryStatus,
@@ -603,8 +686,8 @@ export function createGenerateReportTool(
                 strengths,
                 coreIssues,
                 priorityImprovements,
-                jobMatchStatus,
-                jobMatch,
+                // jobMatchStatus,
+                // jobMatch,
                 pendingClarifications,
                 questions,
             };

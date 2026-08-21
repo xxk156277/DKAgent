@@ -27,8 +27,25 @@ test("diagnose-transcript 只把元数据注入系统 Prompt", async () => {
 
     const content = await readFile(skills[0]!.location, "utf8");
     assert.match(content, /generate_report/);
+    assert.doesNotMatch(content, /preprocess_transcript/);
+    assert.doesNotMatch(content, /extract_project_facts/);
+    assert.doesNotMatch(content, /analyze_expression/);
     assert.match(content, /默认不得调用 `write_file`/);
     assert.match(content, /overwrite: false/);
+    for (const reference of [
+        "storeAsArtifact: true",
+        "sourceArtifactId",
+        "transcriptArtifactId",
+        "structuredInterviewArtifactId",
+        "questionId",
+        "analysisArtifactIds",
+    ]) {
+        assert.match(content, new RegExp(reference));
+    }
+    assert.doesNotMatch(content, /输入完整文字稿内容/);
+    assert.doesNotMatch(content, /只输入 `transcript`/);
+    assert.doesNotMatch(content, /传入 `structuredInterview`、`analyses`/);
+    assert.doesNotMatch(content, /继续分页/);
 });
 
 test("ToolRegistry 暴露原子分析能力且不再暴露 analyze_interview", () => {
