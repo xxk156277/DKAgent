@@ -49,14 +49,13 @@ test("ToolRegistry 暴露原子分析能力且不再暴露 analyze_interview", (
 
 test("parse_transcript 和 structure_interview 通过 Tool 契约串联", async () => {
     const relation = {
-        clusters: [{ id: "cluster-1", title: "项目", questionIds: ["q-1"] }],
-        questions: [{
-            id: "q-1",
-            clusterId: "cluster-1",
-            promptSegments: [{ turnId: "turn-0001", text: "请介绍项目" }],
-            answerTurnIds: ["turn-0002"],
-            questionType: "project",
-            scored: true,
+        clusters: [{
+            title: "项目",
+            questions: [{
+                promptSegments: [{ turnId: "turn-0001", text: "请介绍项目" }],
+                answerTurnIds: ["turn-0002"],
+                questionType: "project",
+            }],
         }],
         nonQuestionTurnIds: [],
     };
