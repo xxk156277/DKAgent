@@ -8,7 +8,8 @@ export type TraceModule =
   | "skill"
   | "tool"
   | "model"
-  | "session";
+  | "session"
+  | "artifact";
 
 /** Trace 使用英文技术名；中文显示由 Tap 负责。 */
 export type TraceEventName =
@@ -30,7 +31,9 @@ export type TraceEventName =
   | "memory.extract"
   | "memory.write"
   | "skill.run"
-  | "skill.stage";
+  | "skill.stage"
+  | "artifact.created"
+  | "artifact.resolved";
 
 export interface TraceEvent<TData = unknown> {
   sessionId?: string;
