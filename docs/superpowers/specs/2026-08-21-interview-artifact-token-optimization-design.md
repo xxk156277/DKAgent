@@ -87,7 +87,7 @@ interface ArtifactRecord<T> {
 ```ts
 interface ArtifactStore {
     put<T>(kind: ArtifactKind, value: T, metadata: ArtifactMetadata): string;
-    get<T>(id: string, expectedKind: ArtifactKind): T;
+    get<T>(id: string, expectedKind: ArtifactKind, consumer: string): T;
 }
 ```
 
@@ -124,6 +124,8 @@ Tool Result 只返回 Artifact ID、问题簇数量和问题 ID，不返回完�
 
 完整 `QuestionAnalysis` 写入 `question_analysis`。Tool Result 只返回 Artifact ID、状态、题目 ID 和程序分数。
 
+模型、Schema 或证据校验失败时，Tool 将错误转换为 `FailedQuestionAnalysis` 并写入同类 Artifact，返回 `success: true`、`status: "failed"` 和 Artifact ID，使报告阶段能够保留失败题并继续完成。只有 Artifact 不存在、类型错误或 questionId 无效等输入问题返回 `success: false`。
+
 ### generate_report
 
 输入结构化面试 Artifact ID 和逐题分析 Artifact ID 列表。Tool 读取完整对象、执行一致性校验、程序算分和报告摘要。
@@ -138,6 +140,7 @@ Tool Result 只返回 Artifact ID、问题簇数量和问题 ID，不返回完�
 - 引用不存在或已失效：返回 `input_error`，明确说明 Artifact 不存在或已过期。
 - Artifact 类型不匹配：返回 `input_error`，不尝试类型转换。
 - 不因 Artifact 读取失败回退为让 Agent 重传完整 JSON。
+- 单题模型分析失败：保存 `FailedQuestionAnalysis` Artifact，不中断后续题目和报告生成。
 - AbortSignal 和现有 LLM 失败边界保持不变。
 
 ## Trace
