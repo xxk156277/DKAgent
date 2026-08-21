@@ -168,7 +168,7 @@ test("题型 Rubric 只声明各题型适用的语义维度", () => {
             applicableDimensions: ["contentQuality", "depthAndEvidence", "analysisAndTradeoffs"],
         },
         knowledge: {
-            prompt: "只基于当前问题和原回答，评价技术事实、关键知识点和原理深度；没有外部资料时不得假装完成资料核验。",
+            prompt: "评价技术事实、关键知识点和原理深度；只有提供参考资料时才据其核验。",
             applicableDimensions: ["contentQuality", "depthAndEvidence"],
         },
         open: {
@@ -478,7 +478,7 @@ test("strength 和 issue 都必须至少引用一个当前问题轮次", async (
     }
 });
 
-test("程序把题型不适用的维度分归一为 null", async () => {
+test("题型不适用的维度分使当前题保存为 failed", async () => {
     const knowledgeQuestion = question({ id: "q-knowledge", questionType: "knowledge" });
     const knowledgeCluster = { ...cluster, questionIds: [knowledgeQuestion.id] };
     const response = {
@@ -505,11 +505,11 @@ test("程序把题型不适用的维度分归一为 null", async () => {
     );
 
     assert.equal(result.success, true);
-    assert.equal(result.data?.status, "completed");
+    assert.equal(result.data?.status, "failed");
     const analysis = storedAnalysis(artifacts, result.data?.artifactId);
-    if (analysis.status === "completed") {
-        assert.equal(analysis.dimensionScores.analysisAndTradeoffs, null);
-        assert.equal(analysis.dimensionScores.followUpHandling, null);
+    assert.equal(analysis.status, "failed");
+    if (analysis.status === "failed") {
+        assert.match(analysis.error, /题型不适用维度必须为 null/);
     }
 });
 
@@ -644,4 +644,24 @@ test("analyze_answer 将 Artifact 和 questionId 问题作为输入错误", asyn
     const unknownQuestion = await tool.execute({ ...input, questionId: "q-unknown" }, context);
     assert.equal(unknownQuestion.success, false);
     assert.equal(unknownQuestion.error?.code, "input_error");
+});
+
+test("模型请求中止时返回 timeout 且不保存 failed Artifact", async () => {
+    for (const abortError of [
+        Object.assign(new Error("aborted"), { name: "AbortError" }),
+        Object.assign(new Error("aborted"), { code: "ABORT_ERR" }),
+    ]) {
+        const { context, artifacts } = toolContext(validProjectResponse);
+        context.queryEngine.query = async () => {
+            throw abortError;
+        };
+        const result = await createAnalyzeAnswerTool("fake-model").execute(
+            projectInput(artifacts),
+            context,
+        );
+
+        assert.equal(result.success, false);
+        assert.equal(result.error?.code, "timeout");
+        assert.equal(result.data, undefined);
+    }
 });

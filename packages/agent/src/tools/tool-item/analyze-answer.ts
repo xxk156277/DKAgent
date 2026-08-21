@@ -71,6 +71,13 @@ export interface AnalyzeAnswerOutput {
 }
 type SemanticDimension = Exclude<keyof DimensionScores, "expressionQuality">;
 
+const SEMANTIC_DIMENSIONS: SemanticDimension[] = [
+    "contentQuality",
+    "depthAndEvidence",
+    "analysisAndTradeoffs",
+    "followUpHandling",
+];
+
 function jsonOutputExample(
     applicableDimensions: Set<SemanticDimension>,
 ): string {
@@ -176,25 +183,20 @@ function validateImprovements(input: {
     }
 }
 
-function normalizeDimensions(
-    dimensions: DimensionScores,
+function validateDimensions(
+    dimensions: Record<SemanticDimension, number | null>,
     applicableDimensions: Set<SemanticDimension>,
-): DimensionScores {
-    return {
-        contentQuality: applicableDimensions.has("contentQuality")
-            ? dimensions.contentQuality
-            : null,
-        depthAndEvidence: applicableDimensions.has("depthAndEvidence")
-            ? dimensions.depthAndEvidence
-            : null,
-        analysisAndTradeoffs: applicableDimensions.has("analysisAndTradeoffs")
-            ? dimensions.analysisAndTradeoffs
-            : null,
-        followUpHandling: applicableDimensions.has("followUpHandling")
-            ? dimensions.followUpHandling
-            : null,
-        expressionQuality: dimensions.expressionQuality,
-    };
+): void {
+    for (const dimension of SEMANTIC_DIMENSIONS) {
+        if (!applicableDimensions.has(dimension) && dimensions[dimension] !== null) {
+            throw new Error(`题型不适用维度必须为 null: ${dimension}`);
+        }
+    }
+}
+
+function isAbortError(error: unknown): boolean {
+    const value = error as { name?: unknown; code?: unknown } | null;
+    return value?.name === "AbortError" || value?.code === "ABORT_ERR";
 }
 
 function validateClarifications(
@@ -364,15 +366,13 @@ export function createAnalyzeAnswerTool(
                 ]);
                 validateEvidence([...response.strengths, ...response.issues], allowedTurnIds);
                 validateImprovements(response);
+                validateDimensions(response.dimensions, applicableDimensions);
                 validateClarifications(
                     response.clarificationCandidates,
                     new Set(cluster.questionIds),
                 );
 
-                const dimensionScores = normalizeDimensions(
-                    response.dimensions,
-                    applicableDimensions,
-                );
+                const dimensionScores: DimensionScores = response.dimensions;
                 const analysis: CompletedQuestionAnalysis = {
                     status: "completed",
                     questionId: question.id,
@@ -392,6 +392,12 @@ export function createAnalyzeAnswerTool(
                     data: storeAnalysis(analysis),
                 };
             } catch (error) {
+                if (isAbortError(error) || ctx.abortSignal.aborted) {
+                    return {
+                        success: false,
+                        error: { code: "timeout", message: "操作已中止" },
+                    };
+                }
                 const failed: FailedQuestionAnalysis = {
                     status: "failed",
                     questionId: question.id,
