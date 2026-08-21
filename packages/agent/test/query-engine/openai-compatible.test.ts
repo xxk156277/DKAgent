@@ -19,35 +19,23 @@ test("转换 DeepSeek JSON Output 格式且普通文本请求保持省略", () =
 });
 
 test("将禁用思考映射为 DeepSeek thinking 请求字段", async () => {
-    const provider = new OpenAICompatibleProvider("test-key");
-    let capturedRequest: Record<string, unknown> | undefined;
-    const client = provider as unknown as {
-        client: {
-            chat: {
-                completions: {
-                    create(request: Record<string, unknown>): Promise<AsyncIterable<OpenAIStreamChunk>>;
-                };
-            };
-        };
-    };
-    client.client.chat.completions.create = async (request) => {
-        capturedRequest = request;
-        return chunksOf([{
-            choices: [],
-            usage: { prompt_tokens: 1, completion_tokens: 1 },
-        }]);
-    };
-
-    const request = {
+    const capturedRequest = await captureOpenAIRequest({
         model: "deepseek-v4-pro",
         messages: [{ role: "user", content: "只输出 JSON" }],
         thinking: "disabled",
-    } as ModelRequest & { thinking: "disabled" };
-    for await (const _event of provider.stream(request)) {
-        // 消费完整流，确保请求已发给兼容 API。
-    }
+    });
 
-    assert.deepEqual(capturedRequest?.thinking, { type: "disabled" });
+    assert.deepEqual(capturedRequest.thinking, { type: "disabled" });
+});
+
+test("普通 OpenAI 模型不发送 DeepSeek thinking 字段", async () => {
+    const capturedRequest = await captureOpenAIRequest({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: "只输出 JSON" }],
+        thinking: "disabled",
+    });
+
+    assert.equal("thinking" in capturedRequest, false);
 });
 
 async function* chunksOf(
@@ -56,6 +44,33 @@ async function* chunksOf(
     for (const chunk of chunks) {
         yield chunk;
     }
+}
+
+async function captureOpenAIRequest(request: ModelRequest): Promise<Record<string, unknown>> {
+    const provider = new OpenAICompatibleProvider("test-key");
+    let capturedRequest: Record<string, unknown> | undefined;
+    const client = provider as unknown as {
+        client: {
+            chat: {
+                completions: {
+                    create(input: Record<string, unknown>): Promise<AsyncIterable<OpenAIStreamChunk>>;
+                };
+            };
+        };
+    };
+    client.client.chat.completions.create = async (input) => {
+        capturedRequest = input;
+        return chunksOf([{
+            choices: [],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }]);
+    };
+
+    for await (const _event of provider.stream(request)) {
+        // 消费完整流，确保请求已发给兼容 API。
+    }
+    assert.ok(capturedRequest);
+    return capturedRequest;
 }
 
 test("转换通用消息且不修改输入", () => {

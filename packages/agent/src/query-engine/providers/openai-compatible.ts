@@ -204,6 +204,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     ): AsyncIterable<StreamEvent> {
         const responseFormat = toOpenAIResponseFormat(request.responseFormat);
         const thinking = request.thinking === "disabled"
+            && supportsDeepSeekThinkingToggle(request.model)
             ? { type: "disabled" as const }
             : undefined;
         const openAIRequest: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
@@ -239,6 +240,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
         const serialized = JSON.stringify({ messages, tools });
         return Math.ceil(Buffer.byteLength(serialized, "utf8") / 4);
     }
+}
+
+/** 仅对已验证支持 DeepSeek thinking 开关的模型发送厂商扩展字段。 */
+function supportsDeepSeekThinkingToggle(model: string): boolean {
+    return model.trim().toLowerCase() === "deepseek-v4-pro";
 }
 
 function mapStopReason(reason: string): StopReason {
