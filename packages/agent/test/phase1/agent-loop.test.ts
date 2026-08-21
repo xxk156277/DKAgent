@@ -348,6 +348,33 @@ test("Tool Call 接收 AgentLoop 注入的 ArtifactStore", async () => {
     assert.strictEqual(receivedStore, artifactStore);
 });
 
+test("Tool Call 在未注入 Store 时接收默认 InMemoryArtifactStore", async () => {
+    const provider = new FakeProvider([
+        [
+            { type: "tool_call_start", index: 0, id: "call-default-store", name: "capture_store" },
+            { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+            { type: "tool_call_end", index: 0 },
+            { type: "message_end", usage, stopReason: "tool_use" },
+        ],
+        textResponse("已捕获默认 Store"),
+    ]);
+    let receivedStore: ArtifactStore | undefined;
+    const registry = new ToolRegistry();
+    registry.register({
+        name: "capture_store",
+        description: "捕获默认 ArtifactStore",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        async execute(_input, ctx) {
+            receivedStore = ctx.artifactStore;
+            return { success: true, data: { captured: true } };
+        },
+    });
+
+    await createAgent(provider, registry).run("运行");
+
+    assert.ok(receivedStore instanceof InMemoryArtifactStore);
+});
+
 test("Agent 失败时记录 agent.turn error 后原样抛出错误", async () => {
     const expectedError = new Error("context failed");
     const failedContextBuilder: ContextBuilder = {

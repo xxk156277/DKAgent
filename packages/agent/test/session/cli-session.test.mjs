@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import Database from "better-sqlite3";
 import test from "node:test";
 
@@ -13,11 +14,19 @@ const tsxPath = join(repositoryRoot, "node_modules/.bin/tsx");
 const cliModuleUrl = pathToFileURL(
     join(repositoryRoot, "packages/agent/src/cli/run.ts"),
 ).href;
+const toolRegistryModuleUrl = pathToFileURL(
+    join(repositoryRoot, "packages/agent/src/tools/registry.ts"),
+).href;
 
-function startCli(workingDirectory, runAgentOptions = "") {
+function startCli(workingDirectory, {
+    runAgentOptions = "",
+    scriptPreamble = "",
+    environment = {},
+} = {}) {
     const script = `
         import { appendFileSync } from "node:fs";
-        import { runAgentCli } from ${JSON.stringify(cliModuleUrl)};
+        ${scriptPreamble}
+        const { runAgentCli } = await import(${JSON.stringify(cliModuleUrl)});
         runAgentCli(${runAgentOptions}).catch((error) => {
             console.error(error);
             process.exitCode = 1;
@@ -30,10 +39,13 @@ function startCli(workingDirectory, runAgentOptions = "") {
             ...process.env,
             LLM_API_KEY: "test-key",
             LLM_BASE_URL: "http://127.0.0.1:1",
+            ...environment,
         },
     });
     let stdout = "";
     let stderr = "";
+    let didExit = false;
+    let finalExitCode;
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
@@ -41,6 +53,10 @@ function startCli(workingDirectory, runAgentOptions = "") {
     });
     child.stderr.on("data", (chunk) => {
         stderr += chunk;
+    });
+    child.once("exit", (code) => {
+        didExit = true;
+        finalExitCode = code;
     });
 
     const waitForStreamOutput = (
@@ -85,9 +101,12 @@ function startCli(workingDirectory, runAgentOptions = "") {
         fromIndex,
     );
 
-    const waitForExit = () => new Promise((resolve) => {
-        child.once("exit", (code) => resolve(code));
-    });
+    const waitForExit = () => {
+        if (didExit) return Promise.resolve(finalExitCode);
+        return new Promise((resolve) => {
+            child.once("exit", (code) => resolve(code));
+        });
+    };
 
     return {
         child,
@@ -132,23 +151,61 @@ test("CLI 启动时创建 Session，输入 /new 后切换到新 Session", () => 
     );
 });
 
-test("CLI 为 /new 创建独立 ArtifactStore，并在 /switch 时复用 Session 的 Store", async () => {
+test("CLI 为 /new 创建独立 ArtifactStore，并在 /switch 时由 Tool 观察到原 Store", async () => {
     const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-artifact-store-"));
-    const creationLogPath = join(workingDirectory, "artifact-store-creations.log");
-    const cli = startCli(workingDirectory, `{
-            artifactStoreFactory() {
-                appendFileSync(${JSON.stringify(creationLogPath)}, "created\\n");
-                return { put() { return "artifact"; }, get() { return undefined; } };
-            },
-        }`);
+    const observedStoreLogPath = join(workingDirectory, "observed-artifact-stores.log");
+    const server = createArtifactCaptureServer();
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const cli = startCli(workingDirectory, {
+        runAgentOptions: `(() => {
+            let storeNumber = 0;
+            return {
+                artifactStoreFactory() {
+                    const id = \`store-\${++storeNumber}\`;
+                    return { id, put() { return id; }, get() { return undefined; } };
+                },
+            };
+        })()`,
+        scriptPreamble: `
+            import { ToolRegistry } from ${JSON.stringify(toolRegistryModuleUrl)};
+            const originalRegister = ToolRegistry.prototype.register;
+            ToolRegistry.prototype.register = function(tool) {
+                originalRegister.call(this, tool);
+                if (tool.name === "read_file") {
+                    originalRegister.call(this, {
+                        name: "capture_store",
+                        description: "capture",
+                        parameters: { type: "object", properties: {}, additionalProperties: false },
+                        async execute(_input, ctx) {
+                            appendFileSync(${JSON.stringify(observedStoreLogPath)}, \`\${ctx.artifactStore.id}\\n\`);
+                            return { success: true, data: { captured: true } };
+                        },
+                    });
+                }
+                return this;
+            };
+        `,
+        environment: {
+            LLM_BASE_URL: `http://127.0.0.1:${address.port}/v1`,
+        },
+    });
     try {
         const startup = await cli.waitForOutput(
             /DKAgent 已创建 Session ([0-9a-f-]{36})/,
         );
         const firstSessionId = startup[1];
+        await runArtifactCaptureTurn(cli, "first");
+
         const outputIndex = cli.output().length;
         cli.child.stdin.write("/new\n");
-        await cli.waitForOutput(/已创建 Session [0-9a-f-]{36}/, outputIndex);
+        const created = await cli.waitForOutput(
+            /已创建 Session ([0-9a-f-]{36})/,
+            outputIndex,
+        );
+        assert.notEqual(created[1], firstSessionId);
+        await runArtifactCaptureTurn(cli, "second");
 
         const switchOutputIndex = cli.output().length;
         cli.child.stdin.write(`/switch ${firstSessionId}\n`);
@@ -156,17 +213,80 @@ test("CLI 为 /new 创建独立 ArtifactStore，并在 /switch 时复用 Session
             new RegExp(`已切换到 Session ${firstSessionId}`),
             switchOutputIndex,
         );
+        await runArtifactCaptureTurn(cli, "first-again");
     } finally {
         const exitPromise = cli.waitForExit();
         cli.child.stdin.end();
         const exitCode = await exitPromise;
         assert.equal(exitCode, 0, cli.errorOutput());
+        await new Promise((resolve, reject) => server.close((error) => {
+            if (error) reject(error);
+            else resolve();
+        }));
     }
-    assert.equal(
-        readFileSync(creationLogPath, "utf8"),
-        "created\ncreated\n",
-    );
+    assert.deepEqual(readFileSync(observedStoreLogPath, "utf8").trim().split("\n"), [
+        "store-1",
+        "store-2",
+        "store-1",
+    ]);
 });
+
+function createArtifactCaptureServer() {
+    return createServer(async (request, response) => {
+        const body = await readRequestBody(request);
+        const parsed = JSON.parse(body);
+        const hasCaptureTool = parsed.tools?.some((tool) => (
+            tool.function?.name === "capture_store"
+        ));
+        const latestMessage = parsed.messages?.at(-1);
+        const event = hasCaptureTool && latestMessage?.role !== "tool"
+            ? {
+                choices: [{
+                    delta: {
+                        tool_calls: [{
+                            index: 0,
+                            id: "capture-call",
+                            function: { name: "capture_store", arguments: "{}" },
+                        }],
+                    },
+                    finish_reason: "tool_calls",
+                }],
+                usage: { prompt_tokens: 1, completion_tokens: 1 },
+            }
+            : {
+                choices: [{
+                    delta: {
+                        content: hasCaptureTool
+                            ? "captured"
+                            : JSON.stringify({ memories: [] }),
+                    },
+                    finish_reason: "stop",
+                }],
+                usage: { prompt_tokens: 1, completion_tokens: 1 },
+            };
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write(`data: ${JSON.stringify(event)}\n\n`);
+        response.end("data: [DONE]\n\n");
+    });
+}
+
+function readRequestBody(request) {
+    return new Promise((resolve, reject) => {
+        let body = "";
+        request.setEncoding("utf8");
+        request.on("data", (chunk) => {
+            body += chunk;
+        });
+        request.on("end", () => resolve(body));
+        request.on("error", reject);
+    });
+}
+
+async function runArtifactCaptureTurn(cli, input) {
+    const outputIndex = cli.output().length;
+    cli.child.stdin.write(`${input}\n`);
+    await cli.waitForOutput(/captured/, outputIndex);
+}
 
 test("CLI 可以列出、切换和删除非当前 Session", async () => {
     const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-session-"));
