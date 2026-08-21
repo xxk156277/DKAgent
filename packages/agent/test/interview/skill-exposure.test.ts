@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { InMemoryArtifactStore } from "../../src/artifact/index.js";
-import type { ParsedTranscript } from "../../src/interview/types.js";
+import type { ParsedTranscript, StructuredInterview } from "../../src/interview/types.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { appendAvailableSkills } from "../../src/skills/prompt.js";
 import { createSkillRegistry } from "../../src/skills/registry.js";
@@ -81,12 +81,37 @@ test("parse_transcript 和 structure_interview 通过 Tool 契约串联", async 
     );
     assert.equal(transcript.turns.length, 2);
     const structured = await registry.resolve("structure_interview").execute({
-        transcript,
-        correctedTurns: transcript.turns,
+        transcriptArtifactId: parsed.data!.artifactId,
     }, context);
 
     assert.equal(structured.success, true);
-    assert.equal((structured.data as { questions: unknown[] }).questions.length, 1);
+    assert.deepEqual(structured.data?.questionIds, ["question-0001"]);
+    assert.equal("questions" in (structured.data ?? {}), false);
+    const interview = artifacts.get<StructuredInterview>(
+        structured.data!.artifactId,
+        "structured_interview",
+        "test",
+    );
+    assert.equal(interview.questions.length, 1);
+});
+
+test("structure_interview 将 Artifact 读取失败作为输入错误", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const context: ToolContext = {
+        queryEngine: {} as QueryEngine,
+        abortSignal: new AbortController().signal,
+        artifactStore: artifacts,
+    };
+    const tool = createToolRegistry({ model: "fake-model" }).resolve("structure_interview");
+
+    const missing = await tool.execute({ transcriptArtifactId: "missing" }, context);
+    assert.equal(missing.success, false);
+    assert.equal(missing.error?.code, "input_error");
+
+    const wrongKindId = artifacts.put("file_text", source, { producer: "test" });
+    const wrongKind = await tool.execute({ transcriptArtifactId: wrongKindId }, context);
+    assert.equal(wrongKind.success, false);
+    assert.equal(wrongKind.error?.code, "input_error");
 });
 
 test("parse_transcript 将不存在的 Artifact ID 作为输入错误", async () => {

@@ -4,16 +4,18 @@ import type {
     ClarificationCandidate,
     CompletedQuestionAnalysis,
     DimensionScores,
-    ExpressionStats,
+    FailedQuestionAnalysis,
     NotScoredQuestionAnalysis,
-    ProjectFactSet,
+    QuestionAnalysis,
 } from "../../interview/analysis-types.js";
+import { collectExpressionStats } from "../../interview/expression-statistics.js";
 import { queryModelJson } from "../../interview/model-json.js";
 import { QUESTION_RUBRICS } from "../../interview/rubrics.js";
 import { calculateQuestionScore } from "../../interview/scoring.js";
 import type {
     InterviewQuestion,
     QuestionCluster,
+    StructuredInterview,
 } from "../../interview/types.js";
 import type { Tool } from "../types.js";
 
@@ -56,32 +58,57 @@ const responseSchema = z.object({
 }).strict();
 
 export interface AnalyzeAnswerInput {
-    /** 当前待分析的问题，包含原问题、原回答及对应轮次 ID。 */
-    question: InterviewQuestion;
-    /** 当前问题所属的问题簇。 */
-    cluster: QuestionCluster;
-    /** 当前问题簇的全部问题，用于判断追问关系。 */
-    clusterQuestions: InterviewQuestion[];
-    /** 项目簇共享事实；非项目题或提取失败时可为 null/undefined。 */
-    projectFacts?: ProjectFactSet | null;
-    /** 从当前原回答确定性计算的表达统计，不包含模型评价。 */
-    expressionStats: ExpressionStats;
-    /** 知识题可选参考资料；其他题型不会传给模型。 */
-    references?: string[];
+    structuredInterviewArtifactId: string;
+    questionId: string;
 }
 
-type AnalyzeAnswerOutput = CompletedQuestionAnalysis | NotScoredQuestionAnalysis;
+export interface AnalyzeAnswerOutput {
+    artifactId: string;
+    questionId: string;
+    clusterId: string;
+    status: QuestionAnalysis["status"];
+    score?: number;
+}
 type SemanticDimension = Exclude<keyof DimensionScores, "expressionQuality">;
 
-const SEMANTIC_DIMENSIONS: SemanticDimension[] = [
-    "contentQuality",
-    "depthAndEvidence",
-    "analysisAndTradeoffs",
-    "followUpHandling",
-];
+function jsonOutputExample(
+    applicableDimensions: Set<SemanticDimension>,
+): string {
+    const dimensionScore = (dimension: SemanticDimension): number | null => (
+        applicableDimensions.has(dimension) ? 65 : null
+    );
+    return JSON.stringify({
+        strengths: [{
+            id: "strength-1",
+            text: "回答中的具体优点",
+            impact: "该优点对回答质量的影响",
+            evidenceTurnIds: ["turn-0002"],
+        }],
+        issues: [{
+            id: "issue-1",
+            text: "回答中的具体问题",
+            impact: "该问题对回答质量的影响",
+            evidenceTurnIds: ["turn-0002"],
+        }],
+        improvements: [{
+            issueId: "issue-1",
+            text: "针对该问题的改进方法",
+        }],
+        dimensions: {
+            contentQuality: dimensionScore("contentQuality"),
+            depthAndEvidence: dimensionScore("depthAndEvidence"),
+            analysisAndTradeoffs: dimensionScore("analysisAndTradeoffs"),
+            followUpHandling: dimensionScore("followUpHandling"),
+            expressionQuality: 70,
+        },
+        confidence: 0.8,
+        confidenceReason: "置信度理由",
+        clarificationCandidates: [],
+    }, null, 2);
+}
 
-// 未经用户确认的推断事实最多支持“中”置信度。
-export const INFERRED_PROJECT_FACT_CONFIDENCE_CAP = 0.79;
+// // 未经用户确认的推断事实最多支持“中”置信度。
+// export const INFERRED_PROJECT_FACT_CONFIDENCE_CAP = 0.79;
 
 function sameMembers(left: string[], right: string[]): boolean {
     const sortedLeft = [...left].sort();
@@ -90,7 +117,11 @@ function sameMembers(left: string[], right: string[]): boolean {
         && sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 
-function validateInput(input: AnalyzeAnswerInput): number {
+function validateInput(input: {
+    question: InterviewQuestion;
+    cluster: QuestionCluster;
+    clusterQuestions: InterviewQuestion[];
+}): number {
     if (input.question.clusterId !== input.cluster.id) {
         throw new Error("当前问题不属于输入问题簇");
     }
@@ -105,9 +136,9 @@ function validateInput(input: AnalyzeAnswerInput): number {
     ) {
         throw new Error("问题簇与 clusterQuestions 不一致");
     }
-    if (input.projectFacts && input.projectFacts.clusterId !== input.cluster.id) {
-        throw new Error("项目事实与当前问题簇不一致");
-    }
+    // if (input.projectFacts && input.projectFacts.clusterId !== input.cluster.id) {
+    //     throw new Error("项目事实与当前问题簇不一致");
+    // }
     return questionIndex;
 }
 
@@ -145,15 +176,25 @@ function validateImprovements(input: {
     }
 }
 
-function validateDimensions(
-    dimensions: Record<SemanticDimension, number | null>,
+function normalizeDimensions(
+    dimensions: DimensionScores,
     applicableDimensions: Set<SemanticDimension>,
-): void {
-    for (const dimension of SEMANTIC_DIMENSIONS) {
-        if (!applicableDimensions.has(dimension) && dimensions[dimension] !== null) {
-            throw new Error(`题型不适用维度必须为 null: ${dimension}`);
-        }
-    }
+): DimensionScores {
+    return {
+        contentQuality: applicableDimensions.has("contentQuality")
+            ? dimensions.contentQuality
+            : null,
+        depthAndEvidence: applicableDimensions.has("depthAndEvidence")
+            ? dimensions.depthAndEvidence
+            : null,
+        analysisAndTradeoffs: applicableDimensions.has("analysisAndTradeoffs")
+            ? dimensions.analysisAndTradeoffs
+            : null,
+        followUpHandling: applicableDimensions.has("followUpHandling")
+            ? dimensions.followUpHandling
+            : null,
+        expressionQuality: dimensions.expressionQuality,
+    };
 }
 
 function validateClarifications(
@@ -176,41 +217,113 @@ export function createAnalyzeAnswerTool(
         parameters: {
             type: "object",
             properties: {
-                question: { type: "object", description: "当前面试问题" },
-                cluster: { type: "object", description: "当前问题簇" },
-                clusterQuestions: { type: "array", description: "当前问题簇的全部问题" },
-                projectFacts: { type: ["object", "null"], description: "可选的项目事实提取结果" },
-                expressionStats: { type: "object", description: "当前原回答的程序表达统计" },
-                references: { type: "array", description: "可选参考资料文本" },
+                structuredInterviewArtifactId: {
+                    type: "string",
+                    description: "structure_interview 返回的 structured_interview Artifact ID",
+                },
+                questionId: { type: "string", description: "待分析的问题 ID" },
             },
-            required: ["question", "cluster", "clusterQuestions", "expressionStats"],
+            required: ["structuredInterviewArtifactId", "questionId"],
             additionalProperties: false,
         },
         async execute(input, ctx) {
-            if (input.question.questionType === "procedural") {
+            if (!input.structuredInterviewArtifactId?.trim() || !input.questionId?.trim()) {
                 return {
-                    success: true,
-                    data: {
-                        status: "not_scored",
-                        questionId: input.question.id,
-                        clusterId: input.question.clusterId,
+                    success: false,
+                    error: {
+                        code: "input_error",
+                        message: "structuredInterviewArtifactId 和 questionId 必填",
+                    },
+                };
+            }
+            if (!ctx.artifactStore) {
+                return {
+                    success: false,
+                    error: { code: "input_error", message: "ArtifactStore 未初始化" },
+                };
+            }
+
+            let question: InterviewQuestion;
+            let cluster: QuestionCluster;
+            let clusterQuestions: InterviewQuestion[];
+            try {
+                const interview = ctx.artifactStore.get<StructuredInterview>(
+                    input.structuredInterviewArtifactId,
+                    "structured_interview",
+                    "analyze_answer",
+                );
+                const resolvedQuestion = interview.questions.find(
+                    (item) => item.id === input.questionId,
+                );
+                if (!resolvedQuestion) throw new Error(`问题不存在: ${input.questionId}`);
+                const resolvedCluster = interview.clusters.find(
+                    (item) => item.id === resolvedQuestion.clusterId,
+                );
+                if (!resolvedCluster) {
+                    throw new Error(`问题簇不存在: ${resolvedQuestion.clusterId}`);
+                }
+                const resolvedClusterQuestions = resolvedCluster.questionIds.map((questionId) => {
+                    const item = interview.questions.find((candidate) => candidate.id === questionId);
+                    if (!item) throw new Error(`问题簇引用了不存在的问题: ${questionId}`);
+                    return item;
+                });
+                validateInput({
+                    question: resolvedQuestion,
+                    cluster: resolvedCluster,
+                    clusterQuestions: resolvedClusterQuestions,
+                });
+                question = resolvedQuestion;
+                cluster = resolvedCluster;
+                clusterQuestions = resolvedClusterQuestions;
+            } catch (error) {
+                return {
+                    success: false,
+                    error: {
+                        code: "input_error",
+                        message: error instanceof Error ? error.message : "面试结构 Artifact 读取失败",
                     },
                 };
             }
 
+            const storeAnalysis = (analysis: QuestionAnalysis): AnalyzeAnswerOutput => {
+                const artifactId = ctx.artifactStore!.put(
+                    "question_analysis",
+                    analysis,
+                    {
+                        producer: "analyze_answer",
+                        characterCount: JSON.stringify(analysis).length,
+                        itemCount: 1,
+                    },
+                );
+                return {
+                    artifactId,
+                    questionId: analysis.questionId,
+                    clusterId: analysis.clusterId,
+                    status: analysis.status,
+                    ...(analysis.status === "completed" && analysis.score !== null
+                        ? { score: analysis.score }
+                        : {}),
+                };
+            };
+
+            if (question.questionType === "procedural") {
+                const analysis: NotScoredQuestionAnalysis = {
+                    status: "not_scored",
+                    questionId: question.id,
+                    clusterId: question.clusterId,
+                };
+                return { success: true, data: storeAnalysis(analysis) };
+            }
+
             try {
-                const questionIndex = validateInput(input);
-                const rubric = QUESTION_RUBRICS[input.question.questionType];
+                const questionIndex = cluster.questionIds.indexOf(question.id);
+                const rubric = QUESTION_RUBRICS[question.questionType];
                 const applicableDimensions = new Set<SemanticDimension>(
                     rubric.applicableDimensions,
                 );
                 if (questionIndex > 0) applicableDimensions.add("followUpHandling");
 
-                const references = input.question.questionType === "knowledge"
-                    ? (input.references ?? [])
-                        .map((reference) => reference.trim())
-                        .filter((reference) => reference.length > 0)
-                    : [];
+                const expressionStats = collectExpressionStats(question.originalAnswer);
                 const response = await queryModelJson({
                     queryEngine: ctx.queryEngine,
                     model,
@@ -228,76 +341,66 @@ export function createAnalyzeAnswerTool(
                         "strength 和 issue 只能引用当前问题给出的 promptTurnIds 或 answerTurnIds。",
                         "每个 issue 必须恰好有一个 improvement，且 improvement.issueId 必须引用该 issue。",
                         "clarificationCandidates 只能引用当前问题簇的 questionId。",
+                        "JSON 根对象只能包含 strengths、issues、improvements、dimensions、confidence、confidenceReason、clarificationCandidates。",
+                        "strengths 和 issues 每项只能包含 id、text、impact、evidenceTurnIds。",
+                        "improvements 每项只能包含 issueId、text。",
+                        "dimensions 必须包含 contentQuality、depthAndEvidence、analysisAndTradeoffs、followUpHandling、expressionQuality。",
+                        "clarificationCandidates 每项只能包含 factKey、question、affectedQuestionIds、impact，其中 impact 只能是 high、medium、low。",
+                        "合法 JSON 格式示例：",
+                        jsonOutputExample(applicableDimensions),
+                        "只返回一个 JSON 对象；不得使用 Markdown 代码块，不得附加解释文字。",
                     ].join("\n"),
                     userContent: JSON.stringify({
-                        question: input.question,
-                        cluster: input.cluster,
-                        clusterQuestions: input.clusterQuestions,
-                        projectFacts: input.question.questionType === "project"
-                            ? input.projectFacts ?? null
-                            : undefined,
-                        expressionStats: input.expressionStats,
-                        references: references.length ? references : undefined,
+                        question,
+                        cluster,
+                        clusterQuestions,
+                        expressionStats,
                     }),
                 });
 
                 const allowedTurnIds = new Set([
-                    ...input.question.promptTurnIds,
-                    ...input.question.answerTurnIds,
+                    ...question.promptTurnIds,
+                    ...question.answerTurnIds,
                 ]);
                 validateEvidence([...response.strengths, ...response.issues], allowedTurnIds);
                 validateImprovements(response);
-                validateDimensions(response.dimensions, applicableDimensions);
                 validateClarifications(
                     response.clarificationCandidates,
-                    new Set(input.cluster.questionIds),
+                    new Set(cluster.questionIds),
                 );
 
-                const dimensionScores: DimensionScores = response.dimensions;
-                let confidence = response.confidence;
-                if (input.question.questionType === "project" && !input.projectFacts) {
-                    confidence = Math.min(confidence, 0.54);
-                }
-                if (
-                    input.question.questionType === "project"
-                    && input.projectFacts?.facts.some((fact) => (
-                        fact.status === "inferred"
-                        && fact.affectedQuestionIds.includes(input.question.id)
-                    ))
-                ) {
-                    confidence = Math.min(
-                        confidence,
-                        INFERRED_PROJECT_FACT_CONFIDENCE_CAP,
-                    );
-                }
-                if (input.question.questionType === "knowledge" && references.length === 0) {
-                    confidence = Math.min(confidence, 0.79);
-                }
-
+                const dimensionScores = normalizeDimensions(
+                    response.dimensions,
+                    applicableDimensions,
+                );
+                const analysis: CompletedQuestionAnalysis = {
+                    status: "completed",
+                    questionId: question.id,
+                    clusterId: question.clusterId,
+                    questionType: question.questionType,
+                    strengths: response.strengths,
+                    issues: response.issues,
+                    improvements: response.improvements,
+                    dimensionScores,
+                    score: calculateQuestionScore(dimensionScores),
+                    confidence: response.confidence,
+                    confidenceReason: response.confidenceReason,
+                    clarificationCandidates: response.clarificationCandidates,
+                };
                 return {
                     success: true,
-                    data: {
-                        status: "completed",
-                        questionId: input.question.id,
-                        clusterId: input.question.clusterId,
-                        questionType: input.question.questionType,
-                        strengths: response.strengths,
-                        issues: response.issues,
-                        improvements: response.improvements,
-                        dimensionScores,
-                        score: calculateQuestionScore(dimensionScores),
-                        confidence,
-                        confidenceReason: response.confidenceReason,
-                        clarificationCandidates: response.clarificationCandidates,
-                    },
+                    data: storeAnalysis(analysis),
                 };
             } catch (error) {
+                const failed: FailedQuestionAnalysis = {
+                    status: "failed",
+                    questionId: question.id,
+                    clusterId: question.clusterId,
+                    error: error instanceof Error ? error.message : "回答分析失败",
+                };
                 return {
-                    success: false,
-                    error: {
-                        code: "service_error",
-                        message: error instanceof Error ? error.message : "逐题分析失败",
-                    },
+                    success: true,
+                    data: storeAnalysis(failed),
                 };
             }
         },

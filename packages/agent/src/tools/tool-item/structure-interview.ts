@@ -1,39 +1,90 @@
 import { structureInterview, type StructureOutput } from "../../interview/structurer.js";
-import type { ParsedTranscript, TranscriptTurn } from "../../interview/types.js";
+import type { ParsedTranscript, StructuredInterview } from "../../interview/types.js";
 import type { Tool } from "../types.js";
 
 export interface StructureInterviewInput {
-    transcript: ParsedTranscript;
-    correctedTurns: TranscriptTurn[];
+    transcriptArtifactId: string;
+}
+
+export interface StructureInterviewOutput {
+    artifactId: string;
+    clusterCount: number;
+    questionIds: string[];
 }
 
 export function createStructureInterviewTool(
     model: string,
-): Tool<StructureInterviewInput, StructureOutput> {
+): Tool<StructureInterviewInput, StructureInterviewOutput> {
     return {
         name: "structure_interview",
-        description: "将纠错后的面试轮次组织为问题簇、具体问题和非问题轮次。",
+        description: "将面试轮次组织为问题簇、具体问题和非问题轮次。",
         parameters: {
             type: "object",
             properties: {
-                transcript: { type: "object", description: "parse_transcript 返回的原始面试稿" },
-                correctedTurns: { type: "array", description: "preprocess_transcript 返回的纠错后轮次" },
+                transcriptArtifactId: {
+                    type: "string",
+                    description: "parse_transcript 返回的 parsed_transcript Artifact ID",
+                },
             },
-            required: ["transcript", "correctedTurns"],
+            required: ["transcriptArtifactId"],
             additionalProperties: false,
         },
         async execute(input, context) {
+            if (!input.transcriptArtifactId?.trim()) {
+                return {
+                    success: false,
+                    error: { code: "input_error", message: "transcriptArtifactId 必填" },
+                };
+            }
+            if (!context.artifactStore) {
+                return {
+                    success: false,
+                    error: { code: "input_error", message: "ArtifactStore 未初始化" },
+                };
+            }
+
+            let transcript: ParsedTranscript;
             try {
+                transcript = context.artifactStore.get<ParsedTranscript>(
+                    input.transcriptArtifactId,
+                    "parsed_transcript",
+                    "structure_interview",
+                );
+            } catch (error) {
+                return {
+                    success: false,
+                    error: {
+                        code: "input_error",
+                        message: error instanceof Error ? error.message : "面试文字稿 Artifact 读取失败",
+                    },
+                };
+            }
+
+            try {
+                const output: StructureOutput = await structureInterview({
+                    transcript,
+                    queryEngine: context.queryEngine,
+                    model,
+                    abortSignal: context.abortSignal,
+                    tracer: context.tracer,
+                });
+                const interview: StructuredInterview = { transcript, ...output };
+                const artifactId = context.artifactStore.put(
+                    "structured_interview",
+                    interview,
+                    {
+                        producer: "structure_interview",
+                        characterCount: JSON.stringify(interview).length,
+                        itemCount: interview.questions.length,
+                    },
+                );
                 return {
                     success: true,
-                    data: await structureInterview({
-                        transcript: input.transcript,
-                        correctedTurns: input.correctedTurns,
-                        queryEngine: context.queryEngine,
-                        model,
-                        abortSignal: context.abortSignal,
-                        tracer: context.tracer,
-                    }),
+                    data: {
+                        artifactId,
+                        clusterCount: interview.clusters.length,
+                        questionIds: interview.questions.map((question) => question.id),
+                    },
                 };
             } catch (error) {
                 return {

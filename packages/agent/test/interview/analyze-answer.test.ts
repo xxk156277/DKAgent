@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type {
-    ExpressionStats,
-    ProjectFactSet,
-} from "../../src/interview/analysis-types.js";
+import { InMemoryArtifactStore } from "../../src/artifact/index.js";
+import type { QuestionAnalysis } from "../../src/interview/analysis-types.js";
+import { collectExpressionStats } from "../../src/interview/expression-statistics.js";
 import { QUESTION_RUBRICS } from "../../src/interview/rubrics.js";
 import type {
     InterviewQuestion,
     QuestionCluster,
+    StructuredInterview,
 } from "../../src/interview/types.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import {
@@ -36,30 +36,23 @@ const followUpQuestion = question({
     answerTurnIds: ["turn-a2"],
 });
 
-const expressionStats: ExpressionStats = {
-    fillerWords: [],
-    fillerCount: 0,
-    adjacentRepetitionCount: 0,
-    characterCount: 20,
-    sentenceCount: 1,
-    longSentenceCount: 0,
-};
+const expressionStats = collectExpressionStats(projectQuestion.originalAnswer);
 
-const projectFacts: ProjectFactSet = {
-    clusterId: cluster.id,
-    facts: [{
-        key: "cluster-project.role",
-        category: "responsibility",
-        value: "负责 DSL 渲染链路",
-        status: "stated",
-        evidenceTurnIds: ["turn-a1"],
-        evidenceQuote: "这是候选人的回答",
-        affectedQuestionIds: [projectQuestion.id],
-        clarificationQuestion: null,
-        impact: "high",
-    }],
-    clarificationCandidates: [],
-};
+// const projectFacts: ProjectFactSet = {
+//     clusterId: cluster.id,
+//     facts: [{
+//         key: "cluster-project.role",
+//         category: "responsibility",
+//         value: "负责 DSL 渲染链路",
+//         status: "stated",
+//         evidenceTurnIds: ["turn-a1"],
+//         evidenceQuote: "这是候选人的回答",
+//         affectedQuestionIds: [projectQuestion.id],
+//         clarificationQuestion: null,
+//         impact: "high",
+//     }],
+//     clarificationCandidates: [],
+// };
 
 const validProjectResponse = {
     strengths: [{
@@ -110,28 +103,62 @@ function question(input: {
     };
 }
 
-function toolContext(response: unknown): { provider: FakeTextProvider; context: ToolContext } {
+function toolContext(response: unknown): {
+    provider: FakeTextProvider;
+    context: ToolContext;
+    artifacts: InMemoryArtifactStore;
+} {
     const content = typeof response === "string" ? response : JSON.stringify(response);
     const provider = new FakeTextProvider(content);
+    const artifacts = new InMemoryArtifactStore();
     return {
         provider,
+        artifacts,
         context: {
             queryEngine: new QueryEngine(provider),
             abortSignal: new AbortController().signal,
+            artifactStore: artifacts,
         },
     };
 }
 
-function projectInput(overrides: Partial<AnalyzeAnswerInput> = {}): AnalyzeAnswerInput {
-    return {
-        question: projectQuestion,
-        cluster,
-        clusterQuestions: [projectQuestion, followUpQuestion],
-        projectFacts,
-        expressionStats,
-        references: [],
-        ...overrides,
+function projectInput(
+    artifacts: InMemoryArtifactStore,
+    overrides: {
+        question?: InterviewQuestion;
+        cluster?: QuestionCluster;
+        clusterQuestions?: InterviewQuestion[];
+    } = {},
+): AnalyzeAnswerInput {
+    const selectedQuestion = overrides.question ?? projectQuestion;
+    const selectedCluster = overrides.cluster ?? cluster;
+    const clusterQuestions = overrides.clusterQuestions
+        ?? (selectedCluster.id === cluster.id
+            ? [projectQuestion, followUpQuestion]
+            : [selectedQuestion]);
+    const interview: StructuredInterview = {
+        transcript: { source: "", turns: [] },
+        questions: clusterQuestions,
+        clusters: [selectedCluster],
+        nonQuestionTurnIds: [],
     };
+    const structuredInterviewArtifactId = artifacts.put(
+        "structured_interview",
+        interview,
+        { producer: "test" },
+    );
+    return {
+        structuredInterviewArtifactId,
+        questionId: selectedQuestion.id,
+    };
+}
+
+function storedAnalysis(
+    artifacts: InMemoryArtifactStore,
+    artifactId: string | undefined,
+): QuestionAnalysis {
+    assert.ok(artifactId);
+    return artifacts.get<QuestionAnalysis>(artifactId, "question_analysis", "test");
 }
 
 test("题型 Rubric 只声明各题型适用的语义维度", () => {
@@ -141,7 +168,7 @@ test("题型 Rubric 只声明各题型适用的语义维度", () => {
             applicableDimensions: ["contentQuality", "depthAndEvidence", "analysisAndTradeoffs"],
         },
         knowledge: {
-            prompt: "评价技术事实、关键知识点和原理深度；只有提供参考资料时才据其核验。",
+            prompt: "只基于当前问题和原回答，评价技术事实、关键知识点和原理深度；没有外部资料时不得假装完成资料核验。",
             applicableDimensions: ["contentQuality", "depthAndEvidence"],
         },
         open: {
@@ -160,18 +187,25 @@ test("题型 Rubric 只声明各题型适用的语义维度", () => {
 });
 
 test("一次模型请求同时使用表达统计并返回表达质量分", async () => {
-    const { provider, context } = toolContext(validProjectResponse);
+    const { provider, context, artifacts } = toolContext(validProjectResponse);
     const result = await createAnalyzeAnswerTool("fake-model").execute(
-        projectInput({ references: ["与候选人回答矛盾的标准答案"] }),
+        projectInput(artifacts),
         context,
     );
 
     assert.equal(result.success, true);
-    assert.equal(result.data?.status, "completed");
-    if (result.data?.status !== "completed") return;
-    assert.equal(result.data.dimensionScores.expressionQuality, 72);
-    assert.equal(result.data.dimensionScores.followUpHandling, null);
-    assert.equal(result.data.score, 70);
+    const output = result.data as { artifactId?: string; status?: string; score?: number };
+    assert.equal(output.status, "completed");
+    assert.equal("originalAnswer" in output, false);
+    assert.equal("strengths" in output, false);
+    assert.equal("issues" in output, false);
+    assert.equal("improvements" in output, false);
+    const stored = storedAnalysis(artifacts, output.artifactId);
+    assert.equal(stored.status, "completed");
+    if (stored.status !== "completed") return;
+    assert.equal(stored.dimensionScores.expressionQuality, 72);
+    assert.equal(stored.dimensionScores.followUpHandling, null);
+    assert.equal(output.score, 70);
     assert.equal(provider.requests.length, 1);
     const requestContent = provider.request?.messages[0];
     assert.equal(requestContent?.role, "user");
@@ -182,9 +216,13 @@ test("一次模型请求同时使用表达统计并返回表达质量分", async
     }
     assert.match(provider.request?.systemPrompt ?? "", /不与标准答案比较/);
     assert.match(provider.request?.systemPrompt ?? "", /expressionQuality/);
+    assert.match(provider.request?.systemPrompt ?? "", /合法 JSON 格式示例/);
+    assert.match(provider.request?.systemPrompt ?? "", /"evidenceTurnIds"/);
+    assert.match(provider.request?.systemPrompt ?? "", /"dimensions"/);
+    assert.match(provider.request?.systemPrompt ?? "", /"confidenceReason"/);
 });
 
-test("项目事实提取失败时置信度上限为 0.54", async () => {
+/* test("项目事实提取失败时置信度上限为 0.54", async () => {
     const { context } = toolContext({ ...validProjectResponse, confidence: 0.9 });
     const result = await createAnalyzeAnswerTool("fake-model").execute(
         projectInput({ projectFacts: null }),
@@ -327,26 +365,63 @@ test("知识题有参考资料时才把资料提供给模型", async () => {
             "事件循环先执行同步任务",
         ]);
     }
+}); */
+
+test("知识题仍按题型限制不适用维度", async () => {
+    const knowledgeQuestion = question({ id: "q-knowledge", questionType: "knowledge" });
+    const knowledgeCluster = { ...cluster, questionIds: [knowledgeQuestion.id] };
+    const response = {
+        ...validProjectResponse,
+        strengths: [],
+        issues: [],
+        improvements: [],
+        dimensions: {
+            contentQuality: 85,
+            depthAndEvidence: 75,
+            analysisAndTradeoffs: null,
+            followUpHandling: null,
+            expressionQuality: 72,
+        },
+    };
+    const { provider, context, artifacts } = toolContext(response);
+    const result = await createAnalyzeAnswerTool("fake-model").execute(
+        projectInput(artifacts, {
+            question: knowledgeQuestion,
+            cluster: knowledgeCluster,
+            clusterQuestions: [knowledgeQuestion],
+        }),
+        context,
+    );
+
+    assert.match(
+        provider.request?.systemPrompt ?? "",
+        /"analysisAndTradeoffs": null/,
+    );
+    assert.match(provider.request?.systemPrompt ?? "", /"followUpHandling": null/);
+    assert.equal(result.data?.status, "completed");
+    const analysis = storedAnalysis(artifacts, result.data?.artifactId);
+    assert.equal(analysis.status, "completed");
+    if (analysis.status === "completed") {
+        assert.equal(analysis.dimensionScores.analysisAndTradeoffs, null);
+    }
 });
 
 test("流程题不调用 LLM 并直接返回 not_scored", async () => {
     const proceduralQuestion = question({ id: "q-procedural", questionType: "procedural" });
     const proceduralCluster = { ...cluster, questionIds: [proceduralQuestion.id] };
-    const provider = new FakeTextProvider("不应读取");
-    const context: ToolContext = {
-        queryEngine: new QueryEngine(provider),
-        abortSignal: new AbortController().signal,
-    };
-    const result = await createAnalyzeAnswerTool("fake-model").execute({
-        question: proceduralQuestion,
-        cluster: proceduralCluster,
-        clusterQuestions: [proceduralQuestion],
-        projectFacts: null,
-        expressionStats,
-        references: [],
-    }, context);
+    const { provider, context, artifacts } = toolContext("不应读取");
+    const result = await createAnalyzeAnswerTool("fake-model").execute(
+        projectInput(artifacts, {
+            question: proceduralQuestion,
+            cluster: proceduralCluster,
+            clusterQuestions: [proceduralQuestion],
+        }),
+        context,
+    );
 
-    assert.deepEqual(result.data, {
+    assert.equal(result.data?.status, "not_scored");
+    const analysis = storedAnalysis(artifacts, result.data?.artifactId);
+    assert.deepEqual(analysis, {
         status: "not_scored",
         questionId: proceduralQuestion.id,
         clusterId: proceduralQuestion.clusterId,
@@ -362,13 +437,15 @@ test("拒绝不存在的证据轮次", async () => {
             evidenceTurnIds: ["turn-unknown"],
         }],
     };
-    const { context } = toolContext(response);
+    const { context, artifacts } = toolContext(response);
     const result = await createAnalyzeAnswerTool("fake-model").execute(
-        projectInput(),
+        projectInput(artifacts),
         context,
     );
 
-    assert.equal(result.success, false);
+    assert.equal(result.success, true);
+    assert.equal(result.data?.status, "failed");
+    assert.equal(storedAnalysis(artifacts, result.data?.artifactId).status, "failed");
 });
 
 test("strength 和 issue 都必须至少引用一个当前问题轮次", async () => {
@@ -390,17 +467,18 @@ test("strength 和 issue 都必须至少引用一个当前问题轮次", async (
     ];
 
     for (const response of invalidResponses) {
-        const { context } = toolContext(response);
+        const { context, artifacts } = toolContext(response);
         const result = await createAnalyzeAnswerTool("fake-model").execute(
-            projectInput(),
+            projectInput(artifacts),
             context,
         );
 
-        assert.equal(result.success, false);
+        assert.equal(result.success, true);
+        assert.equal(result.data?.status, "failed");
     }
 });
 
-test("拒绝题型不适用的维度分", async () => {
+test("程序把题型不适用的维度分归一为 null", async () => {
     const knowledgeQuestion = question({ id: "q-knowledge", questionType: "knowledge" });
     const knowledgeCluster = { ...cluster, questionIds: [knowledgeQuestion.id] };
     const response = {
@@ -416,17 +494,23 @@ test("拒绝题型不适用的维度分", async () => {
             expressionQuality: 72,
         },
     };
-    const { context } = toolContext(response);
-    const result = await createAnalyzeAnswerTool("fake-model").execute({
-        question: knowledgeQuestion,
-        cluster: knowledgeCluster,
-        clusterQuestions: [knowledgeQuestion],
-        projectFacts: null,
-        expressionStats,
-        references: [],
-    }, context);
+    const { context, artifacts } = toolContext(response);
+    const result = await createAnalyzeAnswerTool("fake-model").execute(
+        projectInput(artifacts, {
+            question: knowledgeQuestion,
+            cluster: knowledgeCluster,
+            clusterQuestions: [knowledgeQuestion],
+        }),
+        context,
+    );
 
-    assert.equal(result.success, false);
+    assert.equal(result.success, true);
+    assert.equal(result.data?.status, "completed");
+    const analysis = storedAnalysis(artifacts, result.data?.artifactId);
+    if (analysis.status === "completed") {
+        assert.equal(analysis.dimensionScores.analysisAndTradeoffs, null);
+        assert.equal(analysis.dimensionScores.followUpHandling, null);
+    }
 });
 
 test("簇中追问才允许 followUpHandling 分数", async () => {
@@ -440,33 +524,36 @@ test("簇中追问才允许 followUpHandling 分数", async () => {
             followUpHandling: 84,
         },
     };
-    const { context } = toolContext(response);
+    const { context, artifacts } = toolContext(response);
     const result = await createAnalyzeAnswerTool("fake-model").execute(
-        projectInput({
+        projectInput(artifacts, {
             question: followUpQuestion,
-            expressionStats,
         }),
         context,
     );
 
     assert.equal(result.success, true);
     assert.equal(result.data?.status, "completed");
-    if (result.data?.status === "completed") {
-        assert.equal(result.data.dimensionScores.followUpHandling, 84);
+    const analysis = storedAnalysis(artifacts, result.data?.artifactId);
+    if (analysis.status === "completed") {
+        assert.equal(analysis.dimensionScores.followUpHandling, 84);
     }
 });
 
 test("追问位置只由 cluster.questionIds 决定，不依赖 clusterQuestions 数组顺序", async () => {
-    const { context } = toolContext(validProjectResponse);
+    const { context, artifacts } = toolContext(validProjectResponse);
     const result = await createAnalyzeAnswerTool("fake-model").execute(
-        projectInput({ clusterQuestions: [followUpQuestion, projectQuestion] }),
+        projectInput(artifacts, {
+            clusterQuestions: [followUpQuestion, projectQuestion],
+        }),
         context,
     );
 
     assert.equal(result.success, true);
     assert.equal(result.data?.status, "completed");
-    if (result.data?.status === "completed") {
-        assert.equal(result.data.dimensionScores.followUpHandling, null);
+    const analysis = storedAnalysis(artifacts, result.data?.artifactId);
+    if (analysis.status === "completed") {
+        assert.equal(analysis.dimensionScores.followUpHandling, null);
     }
 });
 
@@ -487,12 +574,13 @@ test("每个 issue 必须恰好对应一个 improvement", async () => {
     ];
 
     for (const response of responses) {
-        const { context } = toolContext(response);
+        const { context, artifacts } = toolContext(response);
         const result = await createAnalyzeAnswerTool("fake-model").execute(
-            projectInput(),
+            projectInput(artifacts),
             context,
         );
-        assert.equal(result.success, false);
+        assert.equal(result.success, true);
+        assert.equal(result.data?.status, "failed");
     }
 });
 
@@ -506,11 +594,54 @@ test("clarification 只能引用当前簇 questionId", async () => {
             impact: "high",
         }],
     };
-    const { context } = toolContext(response);
+    const { context, artifacts } = toolContext(response);
     const result = await createAnalyzeAnswerTool("fake-model").execute(
-        projectInput(),
+        projectInput(artifacts),
         context,
     );
 
-    assert.equal(result.success, false);
+    assert.equal(result.success, true);
+    assert.equal(result.data?.status, "failed");
+});
+
+test("模型 JSON 或 Schema 失败时保存 failed Artifact 并继续流程", async () => {
+    for (const response of ["不是 JSON", {}]) {
+        const { context, artifacts } = toolContext(response);
+        const result = await createAnalyzeAnswerTool("fake-model").execute(
+            projectInput(artifacts),
+            context,
+        );
+
+        assert.equal(result.success, true);
+        assert.equal(result.data?.status, "failed");
+        assert.equal(result.data?.score, undefined);
+        const analysis = storedAnalysis(artifacts, result.data?.artifactId);
+        assert.equal(analysis.status, "failed");
+        if (analysis.status === "failed") assert.ok(analysis.error.length > 0);
+    }
+});
+
+test("analyze_answer 将 Artifact 和 questionId 问题作为输入错误", async () => {
+    const { context, artifacts } = toolContext(validProjectResponse);
+    const tool = createAnalyzeAnswerTool("fake-model");
+
+    const missingArtifact = await tool.execute({
+        structuredInterviewArtifactId: "missing",
+        questionId: projectQuestion.id,
+    }, context);
+    assert.equal(missingArtifact.success, false);
+    assert.equal(missingArtifact.error?.code, "input_error");
+
+    const wrongKindId = artifacts.put("file_text", "文字稿", { producer: "test" });
+    const wrongKind = await tool.execute({
+        structuredInterviewArtifactId: wrongKindId,
+        questionId: projectQuestion.id,
+    }, context);
+    assert.equal(wrongKind.success, false);
+    assert.equal(wrongKind.error?.code, "input_error");
+
+    const input = projectInput(artifacts);
+    const unknownQuestion = await tool.execute({ ...input, questionId: "q-unknown" }, context);
+    assert.equal(unknownQuestion.success, false);
+    assert.equal(unknownQuestion.error?.code, "input_error");
 });
