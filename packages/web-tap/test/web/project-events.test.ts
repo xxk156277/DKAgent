@@ -173,6 +173,14 @@ describe("projectEvents", () => {
         "artifact",
         "parse_transcript",
       ),
+      trace(
+        "artifact-missed",
+        "artifact.resolved",
+        "event",
+        { artifactId: "missing", artifactType: "file_text", hit: false },
+        "artifact",
+        "parse_transcript",
+      ),
     ];
 
     const nodes = projectEvents(events)[0]?.turns[0]?.steps[0]?.nodes ?? [];
@@ -180,8 +188,10 @@ describe("projectEvents", () => {
     expect(nodes.map((node) => node.kind)).toEqual([
       "artifact_operation",
       "artifact_operation",
+      "artifact_operation",
     ]);
-    expect(nodes.map((node) => node.title)).toEqual(["创建产物", "读取产物"]);
+    expect(nodes.map((node) => node.title)).toEqual(["创建产物", "读取产物", "读取产物失败"]);
+    expect(nodes.map((node) => node.status)).toEqual(["completed", "completed", "error"]);
     expect(nodes.every((node) => node.module === "artifact")).toBe(true);
   });
 

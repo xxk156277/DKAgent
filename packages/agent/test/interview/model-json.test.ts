@@ -20,4 +20,22 @@ test("结构化模型请求开启 DeepSeek json_object", async () => {
 
     assert.deepEqual(result, { value: "ok" });
     assert.equal(provider.request?.responseFormat, "json_object");
+    assert.equal(
+        (provider.request as (typeof provider.request & { thinking?: string }))?.thinking,
+        "disabled",
+    );
+});
+
+test("结构化模型达到输出上限时返回清晰截断错误", async () => {
+    const provider = new FakeTextProvider('{"value":"partial"}', "max_tokens");
+
+    await assert.rejects(() => queryModelJson({
+        queryEngine: new QueryEngine(provider),
+        model: "deepseek-v4-pro",
+        systemPrompt: "只输出 JSON。",
+        userContent: "输入",
+        schema: z.object({ value: z.string() }).strict(),
+        abortSignal: new AbortController().signal,
+        traceOperation: "test_json_output",
+    }), /结构化模型输出达到 Token 上限，JSON 可能被截断/);
 });

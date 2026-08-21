@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentMessage, ToolSchema } from "../../src/query-engine/provider.js";
+import type { ModelRequest } from "../../src/query-engine/provider.js";
 import {
+    OpenAICompatibleProvider,
     toOpenAIMessages,
     toOpenAIResponseFormat,
     toOpenAITools,
@@ -14,6 +16,38 @@ test("转换 DeepSeek JSON Output 格式且普通文本请求保持省略", () =
         type: "json_object",
     });
     assert.equal(toOpenAIResponseFormat(undefined), undefined);
+});
+
+test("将禁用思考映射为 DeepSeek thinking 请求字段", async () => {
+    const provider = new OpenAICompatibleProvider("test-key");
+    let capturedRequest: Record<string, unknown> | undefined;
+    const client = provider as unknown as {
+        client: {
+            chat: {
+                completions: {
+                    create(request: Record<string, unknown>): Promise<AsyncIterable<OpenAIStreamChunk>>;
+                };
+            };
+        };
+    };
+    client.client.chat.completions.create = async (request) => {
+        capturedRequest = request;
+        return chunksOf([{
+            choices: [],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }]);
+    };
+
+    const request = {
+        model: "deepseek-v4-pro",
+        messages: [{ role: "user", content: "只输出 JSON" }],
+        thinking: "disabled",
+    } as ModelRequest & { thinking: "disabled" };
+    for await (const _event of provider.stream(request)) {
+        // 消费完整流，确保请求已发给兼容 API。
+    }
+
+    assert.deepEqual(capturedRequest?.thinking, { type: "disabled" });
 });
 
 async function* chunksOf(

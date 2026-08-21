@@ -360,6 +360,9 @@ test("系统 Prompt 说明 JSON 格式且模型同时看到原文和纠错文本
     assert.match(systemPrompt, /"questions"/);
     assert.match(systemPrompt, /"nonQuestionTurnIds"/);
     assert.match(systemPrompt, /只返回一个 JSON 对象/);
+    assert.match(systemPrompt, /promptSegments 只能引用 interviewer 轮次/);
+    assert.match(systemPrompt, /候选人反问不得生成问题/);
+    assert.match(systemPrompt, /nonQuestionTurnIds 只能包含 interviewer 轮次/);
     const turns = JSON.parse(provider.request?.messages[0]?.content ?? "[]") as Array<unknown>;
     assert.deepEqual(turns[0], {
         id: "turn-0001",

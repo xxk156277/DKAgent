@@ -100,7 +100,10 @@ function nodeDefinition(event: TraceEvent): {
     return { kind: "artifact_operation", title: "创建产物", status: "completed" };
   }
   if (event.name === "artifact.resolved") {
-    return { kind: "artifact_operation", title: "读取产物", status: "completed" };
+    const data = unwrapData(event.data);
+    return isRecord(data) && data.hit === false
+      ? { kind: "artifact_operation", title: "读取产物失败", status: "error" }
+      : { kind: "artifact_operation", title: "读取产物", status: "completed" };
   }
   if (event.phase === "error") {
     return {

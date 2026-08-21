@@ -18,6 +18,7 @@ export async function queryModelJson<T>(input: {
         messages: [{ role: "user" as const, content: input.userContent }],
         temperature: 0,
         responseFormat: "json_object" as const,
+        thinking: "disabled" as const,
         abortSignal: input.abortSignal,
     };
     const traceRequest = {
@@ -25,11 +26,15 @@ export async function queryModelJson<T>(input: {
         systemPrompt: request.systemPrompt,
         messages: request.messages,
         temperature: request.temperature,
+        thinking: request.thinking,
     };
     const execute = async (span?: TraceSpan): Promise<T> => {
         const response = await input.queryEngine.query(request);
         span?.event("model.response", response);
         span?.setOutput(response);
+        if (response.stopReason === "max_tokens") {
+            throw new Error("结构化模型输出达到 Token 上限，JSON 可能被截断");
+        }
         if (response.type !== "text") {
             throw new Error("结构化任务未返回文本");
         }

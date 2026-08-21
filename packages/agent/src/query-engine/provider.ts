@@ -39,6 +39,8 @@ export interface ModelRequest {
     temperature?: number;
     /** 输出格式；省略表示普通文本，json_object 表示要求 Provider 返回合法 JSON。 */
     responseFormat?: "json_object";
+    /** 是否显式禁用模型思考；结构化输出可避免推理占满输出预算。 */
+    thinking?: "disabled";
     /** 独立于普通消息的系统提示词。 */
     systemPrompt?: string;
     /** 用于中止 Provider 请求。 */

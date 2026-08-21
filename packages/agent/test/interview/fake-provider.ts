@@ -2,6 +2,7 @@ import type {
     AgentMessage,
     LLMProvider,
     ModelRequest,
+    StopReason,
     StreamEvent,
     ToolSchema,
 } from "../../src/query-engine/provider.js";
@@ -12,7 +13,10 @@ export class FakeTextProvider implements LLMProvider {
     public readonly requests: ModelRequest[] = [];
     private readonly responses: string[];
 
-    public constructor(content: string | string[]) {
+    public constructor(
+        content: string | string[],
+        private readonly stopReason: StopReason = "end_turn",
+    ) {
         this.responses = Array.isArray(content) ? [...content] : [content];
     }
 
@@ -27,7 +31,7 @@ export class FakeTextProvider implements LLMProvider {
         yield {
             type: "message_end",
             usage: { inputTokens: 1, outputTokens: 1 },
-            stopReason: "end_turn",
+            stopReason: this.stopReason,
         };
     }
 

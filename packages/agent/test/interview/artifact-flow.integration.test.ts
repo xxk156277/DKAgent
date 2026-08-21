@@ -84,7 +84,7 @@ function requireData<T>(result: ToolResult<T>): T {
     return result.data;
 }
 
-test("完整 Artifact 引用链隐藏中间大对象并在单题模型失败后生成报告", async () => {
+test("Tool Registry Artifact 引用链隐藏中间大对象并在单题模型失败后生成报告", async () => {
     const directory = await mkdtemp(join(tmpdir(), "dkagent-artifact-flow-"));
     try {
         await writeFile(join(directory, "interview.md"), source, "utf8");
@@ -170,6 +170,22 @@ test("完整 Artifact 引用链隐藏中间大对象并在单题模型失败后�
         ));
         assert.ok(artifactEvents.length > 0);
         assert.ok(artifactEvents.every((event) => event.module === "artifact"));
+        const allowedTraceFields = new Set([
+            "artifactId",
+            "artifactType",
+            "producer",
+            "consumer",
+            "characterCount",
+            "itemCount",
+            "exposedCharacterCount",
+            "omittedCharacterCount",
+            "hit",
+        ]);
+        assert.ok(artifactEvents.every((event) => (
+            typeof event.data === "object"
+            && event.data !== null
+            && Object.keys(event.data).every((key) => allowedTraceFields.has(key))
+        )));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes(sourceSentence)));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("originalAnswer")));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("strengths")));
