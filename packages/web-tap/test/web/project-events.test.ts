@@ -154,6 +154,37 @@ describe("projectEvents", () => {
     expect(moduleForTraceEvent(events[6]!)).toBe("skill");
   });
 
+  it("projects Artifact create and resolve events with Chinese labels", () => {
+    sequence = 0;
+    const events: TraceEvent[] = [
+      trace(
+        "artifact-created",
+        "artifact.created",
+        "event",
+        { artifactId: "artifact-1", artifactType: "file_text" },
+        "artifact",
+        "read_file",
+      ),
+      trace(
+        "artifact-resolved",
+        "artifact.resolved",
+        "event",
+        { artifactId: "artifact-1", artifactType: "file_text", hit: true },
+        "artifact",
+        "parse_transcript",
+      ),
+    ];
+
+    const nodes = projectEvents(events)[0]?.turns[0]?.steps[0]?.nodes ?? [];
+
+    expect(nodes.map((node) => node.kind)).toEqual([
+      "artifact_operation",
+      "artifact_operation",
+    ]);
+    expect(nodes.map((node) => node.title)).toEqual(["创建产物", "读取产物"]);
+    expect(nodes.every((node) => node.module === "artifact")).toBe(true);
+  });
+
   it("按 sessionId 分组且未关联事件进入 unlinked 观察组", () => {
     sequence = 0;
     const sessionA = event("turn.start", "turn-a", { input: "A" }, 1, "session-a");

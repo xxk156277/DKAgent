@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TapApp } from "../../src/web/app/TapApp.js";
 import { AgentEvaluationPanel } from "../../src/web/features/agent-metrics/AgentEvaluationPanel.js";
 import type { AgentEvaluationItem } from "../../src/web/model/types.js";
+import { ModuleTag } from "../../src/web/shared/ModuleTag.js";
 import { getTapViewport } from "../../src/web/shared/useTapViewport.js";
 import { createTapStore } from "../../src/web/store/tap-store.js";
 
@@ -36,6 +37,12 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TapApp", () => {
+  it("renders the Artifact module label in Chinese", () => {
+    render(<ModuleTag module="artifact" />);
+
+    expect(screen.getByText("产物")).toBeVisible();
+  });
+
   it("maps viewport widths to the approved responsive modes", () => {
     expect(getTapViewport(390)).toBe("mobile");
     expect(getTapViewport(767)).toBe("mobile");

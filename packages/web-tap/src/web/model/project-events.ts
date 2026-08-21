@@ -96,6 +96,12 @@ function nodeDefinition(event: TraceEvent): {
   if (event.name === "skill.run" || event.name === "skill.stage") {
     return operationDefinition("skill_operation", event, operationLabel(event.operation) ?? "技能操作");
   }
+  if (event.name === "artifact.created") {
+    return { kind: "artifact_operation", title: "创建产物", status: "completed" };
+  }
+  if (event.name === "artifact.resolved") {
+    return { kind: "artifact_operation", title: "读取产物", status: "completed" };
+  }
   if (event.phase === "error") {
     return {
       kind: event.name === "agent.turn" ? "turn_error" : "unknown",
@@ -212,7 +218,8 @@ function eventNode(
 export function moduleForEvent(eventName: string): TapModuleKind {
   const prefix = eventName.split(".", 1)[0];
   if (prefix === "session" || prefix === "context" || prefix === "memory"
-    || prefix === "skill" || prefix === "tool" || prefix === "model" || prefix === "agent") {
+    || prefix === "skill" || prefix === "artifact" || prefix === "tool"
+    || prefix === "model" || prefix === "agent") {
     return prefix;
   }
   return "other";

@@ -6,6 +6,7 @@ const modulePresentation: Record<TapModuleKind, { color: string; label: string }
   context: { color: "blue", label: "上下文" },
   memory: { color: "purple", label: "记忆" },
   skill: { color: "cyan", label: "技能" },
+  artifact: { color: "green", label: "产物" },
   tool: { color: "gold", label: "工具" },
   model: { color: "magenta", label: "模型" },
   agent: { color: "default", label: "Agent" },

@@ -28,6 +28,7 @@ const nodeRenderers: Record<TapNodeKind, NodeRenderer> = {
   model_response: renderModelResponse,
   memory_operation: renderFields,
   skill_operation: renderFields,
+  artifact_operation: renderFields,
   tool_call: renderFields,
   tool_result: renderFields,
   turn_end: renderFields,
