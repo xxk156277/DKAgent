@@ -325,7 +325,7 @@ button {
 }
 
 .tap-node-region {
-  flex: 0 0 300px;
+  flex: 0 0 400px;
   overflow-y: auto;
   border-inline-end: 1px solid var(--tap-border);
 }
