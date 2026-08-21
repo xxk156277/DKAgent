@@ -26,7 +26,10 @@ export class InMemoryArtifactStore implements ArtifactStore {
             {
                 artifactId: id,
                 artifactType: kind,
-                ...metadata,
+                producer: metadata.producer,
+                characterCount: metadata.characterCount,
+                itemCount: metadata.itemCount,
+                exposedCharacterCount: metadata.exposedCharacterCount,
                 omittedCharacterCount: Math.max(
                     0,
                     (metadata.characterCount ?? 0) - (metadata.exposedCharacterCount ?? 0),

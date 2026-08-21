@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MemoryTraceStore, Tracer } from "@dkagent/trace";
-import { InMemoryArtifactStore } from "../../src/artifact/index.js";
+import {
+    InMemoryArtifactStore,
+    type ArtifactMetadata,
+} from "../../src/artifact/index.js";
 
 test("Artifact Store 按类型读写且 Trace 不包含正文", () => {
     const traceStore = new MemoryTraceStore();
@@ -35,4 +38,17 @@ test("Artifact Store 拒绝未知 ID 和错误类型", () => {
         () => artifacts.get("missing", "file_text", "parse_transcript"),
         /Artifact 不存在或已过期/,
     );
+});
+
+test("Artifact Store 不将额外元数据写入 Trace", () => {
+    const traceStore = new MemoryTraceStore();
+    const artifacts = new InMemoryArtifactStore(new Tracer(traceStore));
+    const traceSecret = "运行时额外字段不得进入 Trace";
+
+    artifacts.put("file_text", "text", {
+        producer: "read_file",
+        traceSecret,
+    } as ArtifactMetadata);
+
+    assert.doesNotMatch(JSON.stringify(traceStore.list()), /运行时额外字段不得进入 Trace/);
 });
