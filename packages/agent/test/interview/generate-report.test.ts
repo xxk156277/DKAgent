@@ -209,6 +209,7 @@ test("暂定报告展示暂定总分、覆盖率和完整问题顺序", async ()
 
     assert.equal(result.success, true);
     assert.equal(result.data?.report.stage, "provisional");
+    assert.equal(result.data?.report.score.totalScore, 71);
     assert.match(result.data?.report.notice ?? "", /暂定总分.*可能调整/);
     assert.equal(result.data?.report.questions.length, structuredInterview.questions.length);
     assert.deepEqual(result.data?.report.questions.map((item) => item.questionId), ["q-1", "q-2", "q-3", "q-4"]);
@@ -421,6 +422,71 @@ test("流程题和失败题保留但不显示分数", async () => {
     assert.equal(failed?.score, null);
     assert.match(result.data?.markdown ?? "", /分数：不参与评分/);
     assert.match(result.data?.markdown ?? "", /分数：分析失败/);
+});
+
+test("唯一计分题分析失败时仍生成无总分报告", async () => {
+    const failedInterview: StructuredInterview = {
+        ...structuredInterview,
+        transcript: {
+            ...structuredInterview.transcript,
+            turns: structuredInterview.transcript.turns.filter((turn) => turn.id.startsWith("q-3-")),
+        },
+        questions: [questions[2]!],
+        clusters: [{ ...clusters[1]!, questionIds: ["q-3"] }],
+    };
+    const failedAnalysis: QuestionAnalysis = {
+        status: "failed",
+        questionId: "q-3",
+        clusterId: "cluster-knowledge",
+        error: "模型失败",
+    };
+    const { provider, context } = toolContext(validSummary);
+
+    const result = await createGenerateReportTool("fake-model").execute(baseInput(context, {
+        structuredInterview: failedInterview,
+        analyses: [failedAnalysis],
+    }), context);
+
+    assert.equal(result.success, true);
+    assert.equal(result.data?.report.score.totalScore, null);
+    assert.deepEqual(result.data?.report.score.coverage, { analyzed: 0, expected: 1 });
+    assert.equal(result.data?.report.questions[0]?.status, "failed");
+    assert.match(result.data?.markdown ?? "", /总分：不可评价/);
+    assert.match(result.data?.markdown ?? "", /无可评分数据/);
+    assert.match(result.data?.markdown ?? "", /模型失败/);
+    assert.equal(provider.request, undefined);
+});
+
+test("只有流程题时仍生成无总分报告", async () => {
+    const proceduralInterview: StructuredInterview = {
+        ...structuredInterview,
+        transcript: {
+            ...structuredInterview.transcript,
+            turns: structuredInterview.transcript.turns.filter((turn) => turn.id.startsWith("q-4-")),
+        },
+        questions: [questions[3]!],
+        clusters: [{ ...clusters[2]!, questionIds: ["q-4"] }],
+    };
+    const notScoredAnalysis: QuestionAnalysis = {
+        status: "not_scored",
+        questionId: "q-4",
+        clusterId: "cluster-procedural",
+    };
+    const { provider, context } = toolContext(validSummary);
+
+    const result = await createGenerateReportTool("fake-model").execute(baseInput(context, {
+        structuredInterview: proceduralInterview,
+        analyses: [notScoredAnalysis],
+    }), context);
+
+    assert.equal(result.success, true);
+    assert.equal(result.data?.report.score.totalScore, null);
+    assert.deepEqual(result.data?.report.score.coverage, { analyzed: 0, expected: 0 });
+    assert.equal(result.data?.report.questions[0]?.status, "not_scored");
+    assert.match(result.data?.markdown ?? "", /总分：不可评价/);
+    assert.match(result.data?.markdown ?? "", /无可评分数据/);
+    assert.match(result.data?.markdown ?? "", /分数：不参与评分/);
+    assert.equal(provider.request, undefined);
 });
 
 test("拒绝未知和重复的逐题分析 ID", async () => {

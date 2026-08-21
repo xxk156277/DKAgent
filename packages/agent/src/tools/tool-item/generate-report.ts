@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
     ClarificationCandidate,
+    CompletedQuestionAnalysis,
     InterviewMetadata,
     InterviewReport,
     // JobMatchAnalysis,
@@ -451,7 +452,7 @@ export function renderInterviewReport(report: InterviewReport): string {
         `报告状态：${report.stage === "provisional" ? "暂定" : "最终"}`,
         ...(report.notice ? ["", report.notice] : []),
         "",
-        `总分：${report.score.totalScore}/100`,
+        `总分：${report.score.totalScore === null ? "不可评价" : `${report.score.totalScore}/100`}`,
         "",
         `已分析：${report.score.coverage.analyzed}/${report.score.coverage.expected}`,
         "",
@@ -554,15 +555,42 @@ export function createGenerateReportTool(
                 return inputError(error instanceof Error ? error.message : "报告输入无效");
             }
 
+            const scoredQuestionIds = new Set(
+                resolvedInput.structuredInterview.questions
+                    .filter((question) => question.scored)
+                    .map((question) => question.id),
+            );
+            const completedScoredAnalyses = resolvedInput.analyses.filter(
+                (analysis): analysis is CompletedQuestionAnalysis => analysis.status === "completed"
+                    && scoredQuestionIds.has(analysis.questionId),
+            );
             let score: InterviewReport["score"];
-            try {
-                score = scoreInterview({
-                    questions: resolvedInput.structuredInterview.questions,
-                    clusters: resolvedInput.structuredInterview.clusters,
-                    analyses: resolvedInput.analyses,
-                });
-            } catch (error) {
-                return inputError(error instanceof Error ? error.message : "无法计算面试分数");
+            if (!completedScoredAnalyses.length) {
+                score = {
+                    totalScore: null,
+                    dimensions: {
+                        contentQuality: null,
+                        depthAndEvidence: null,
+                        analysisAndTradeoffs: null,
+                        followUpHandling: null,
+                        expressionQuality: null,
+                    },
+                    clusterScores: [],
+                    coverage: {
+                        analyzed: completedScoredAnalyses.length,
+                        expected: scoredQuestionIds.size,
+                    },
+                };
+            } else {
+                try {
+                    score = scoreInterview({
+                        questions: resolvedInput.structuredInterview.questions,
+                        clusters: resolvedInput.structuredInterview.clusters,
+                        analyses: resolvedInput.analyses,
+                    });
+                } catch (error) {
+                    return inputError(error instanceof Error ? error.message : "无法计算面试分数");
+                }
             }
 
             const pendingClarifications = mergeClarifications([
@@ -582,47 +610,53 @@ export function createGenerateReportTool(
                 resolvedInput.structuredInterview,
                 resolvedInput.analyses,
             );
-            let summaryStatus: InterviewReport["summaryStatus"] = "failed";
-            let levelSummary = "";
+            let summaryStatus: InterviewReport["summaryStatus"] = score.totalScore === null
+                ? "completed"
+                : "failed";
+            let levelSummary = score.totalScore === null
+                ? "无可评分数据，无法生成整体水平判断。"
+                : "";
             let strengths: ReportReferenceItem[] = [];
             let coreIssues: ReportReferenceItem[] = [];
             let priorityImprovements: ReportReferenceItem[] = [];
-            try {
-                const summary = await queryModelJson({
-                    queryEngine: ctx.queryEngine,
-                    model,
-                    abortSignal: ctx.abortSignal,
-                    tracer: ctx.tracer,
-                    traceOperation: "generate_report_summary",
-                    schema: summarySchema,
-                    systemPrompt: [
-                        "基于给定的确定性分数和逐题分析生成报告第一层总结，严格输出 JSON。",
-                        "每条强项、核心问题和优先改进都必须引用输入中存在的 questionId。",
-                        "不得改写原问题和原回答，不得引入输入之外的事实。",
-                        "priorityImprovements 最多返回 3 条。",
-                        "JSON 根对象只能包含 levelSummary、strengths、coreIssues、priorityImprovements。",
-                        "strengths、coreIssues 和 priorityImprovements 每项只能包含 text、questionIds。",
-                        "合法 JSON 格式示例：",
-                        SUMMARY_JSON_EXAMPLE,
-                        "只返回一个 JSON 对象；不得使用 Markdown 代码块，不得附加解释文字。",
-                    ].join("\n"),
-                    userContent: JSON.stringify({ score, questions }),
-                });
-                const knownQuestionIds = new Set(
-                    resolvedInput.structuredInterview.questions.map((question) => question.id),
-                );
-                validateSummaryEvidence([
-                    ...summary.strengths,
-                    ...summary.coreIssues,
-                    ...summary.priorityImprovements,
-                ], knownQuestionIds);
-                summaryStatus = "completed";
-                levelSummary = summary.levelSummary;
-                strengths = summary.strengths;
-                coreIssues = summary.coreIssues;
-                priorityImprovements = summary.priorityImprovements;
-            } catch {
-                // 汇总是可降级步骤；确定性分数和逐题分析保持可用。
+            if (score.totalScore !== null) {
+                try {
+                    const summary = await queryModelJson({
+                        queryEngine: ctx.queryEngine,
+                        model,
+                        abortSignal: ctx.abortSignal,
+                        tracer: ctx.tracer,
+                        traceOperation: "generate_report_summary",
+                        schema: summarySchema,
+                        systemPrompt: [
+                            "基于给定的确定性分数和逐题分析生成报告第一层总结，严格输出 JSON。",
+                            "每条强项、核心问题和优先改进都必须引用输入中存在的 questionId。",
+                            "不得改写原问题和原回答，不得引入输入之外的事实。",
+                            "priorityImprovements 最多返回 3 条。",
+                            "JSON 根对象只能包含 levelSummary、strengths、coreIssues、priorityImprovements。",
+                            "strengths、coreIssues 和 priorityImprovements 每项只能包含 text、questionIds。",
+                            "合法 JSON 格式示例：",
+                            SUMMARY_JSON_EXAMPLE,
+                            "只返回一个 JSON 对象；不得使用 Markdown 代码块，不得附加解释文字。",
+                        ].join("\n"),
+                        userContent: JSON.stringify({ score, questions }),
+                    });
+                    const knownQuestionIds = new Set(
+                        resolvedInput.structuredInterview.questions.map((question) => question.id),
+                    );
+                    validateSummaryEvidence([
+                        ...summary.strengths,
+                        ...summary.coreIssues,
+                        ...summary.priorityImprovements,
+                    ], knownQuestionIds);
+                    summaryStatus = "completed";
+                    levelSummary = summary.levelSummary;
+                    strengths = summary.strengths;
+                    coreIssues = summary.coreIssues;
+                    priorityImprovements = summary.priorityImprovements;
+                } catch {
+                    // 汇总是可降级步骤；确定性分数和逐题分析保持可用。
+                }
             }
 
 
@@ -671,9 +705,11 @@ export function createGenerateReportTool(
 
             const report: InterviewReport = {
                 stage: resolvedInput.stage,
-                notice: resolvedInput.stage === "provisional"
-                    ? "当前为暂定总分，补充待确认事实后可能调整。"
-                    : null,
+                notice: score.totalScore === null
+                    ? "无可评分数据：所有计分题均分析失败，或本次面试仅包含不计分题；总分不可评价。"
+                    : resolvedInput.stage === "provisional"
+                        ? "当前为暂定总分，补充待确认事实后可能调整。"
+                        : null,
                 metadata: {
                     company: resolvedInput.metadata?.company?.trim() || null,
                     position: resolvedInput.metadata?.position?.trim() || null,

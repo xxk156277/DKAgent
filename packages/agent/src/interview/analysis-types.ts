@@ -110,7 +110,7 @@ export interface ClusterScore {
 }
 
 export interface InterviewScore {
-    totalScore: number;
+    totalScore: number | null;
     dimensions: DimensionScores;
     clusterScores: ClusterScore[];
     coverage: { analyzed: number; expected: number };
