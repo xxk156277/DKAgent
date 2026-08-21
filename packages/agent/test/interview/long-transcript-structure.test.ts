@@ -36,7 +36,10 @@ function promptTexts(content: string): string[] {
 }
 
 function buildFixtureRelation(transcript: ParsedTranscript): string {
-    const questions: Array<Record<string, unknown>> = [];
+    const questions: Array<Record<string, unknown> & { clusterKey: string }> = [];
+    let activeClusterBase = "";
+    let activeClusterKey = "";
+    let clusterRun = 0;
     const nonQuestionTurnIds = transcript.turns
         .filter((turn) => (
             turn.speaker === "interviewer"
@@ -76,29 +79,30 @@ function buildFixtureRelation(transcript: ParsedTranscript): string {
             if (next.speaker === "candidate") answerTurnIds.push(next.id);
         }
         const type = questionType(turn.content);
+        const clusterBase = clusterId(turn.content, questions.length);
+        if (clusterBase !== activeClusterBase) {
+            activeClusterBase = clusterBase;
+            clusterRun += 1;
+            activeClusterKey = `${clusterBase}-run-${clusterRun}`;
+        }
         for (const text of promptTexts(turn.content)) {
-            const questionIndex = questions.length;
             questions.push({
-                id: `q-${questionIndex + 1}`,
-                clusterId: clusterId(turn.content, questionIndex),
+                clusterKey: activeClusterKey,
                 promptSegments: [{ turnId: turn.id, text }],
                 answerTurnIds,
                 questionType: type,
-                scored: type !== "procedural",
             });
         }
     }
 
-    const ids = [...new Set(questions.map((question) => String(question.clusterId)))];
+    const ids = [...new Set(questions.map((question) => question.clusterKey))];
     return JSON.stringify({
-        questions,
         nonQuestionTurnIds,
         clusters: ids.map((id) => ({
-            id,
             title: id,
-            questionIds: questions
-                .filter((question) => question.clusterId === id)
-                .map((question) => question.id),
+            questions: questions
+                .filter((question) => question.clusterKey === id)
+                .map(({ clusterKey: _clusterKey, ...question }) => question),
         })),
     });
 }
