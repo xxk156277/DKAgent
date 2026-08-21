@@ -161,23 +161,28 @@ test("回答只能引用候选人轮次", async () => {
     await assert.rejects(() => runWith(relation), /回答引用了非候选人轮次/);
 });
 
-test("回答只能绑定提问组后紧邻的候选人回答块", async () => {
+test("回答不能引用回答窗口之外的候选人轮次", async () => {
     const relation = validRelation();
     relation.clusters[0]!.questions[0]!.answerTurnIds = ["turn-0004"];
-    await assert.rejects(() => runWith(relation), /回答轮次必须完整覆盖回答窗口/);
+    await assert.rejects(() => runWith(relation), /回答引用超出回答窗口/);
 });
 
-test("非空回答窗口不能返回空回答轮次", async () => {
+test("非空回答窗口允许返回空回答轮次", async () => {
     const relation = validRelation();
     relation.clusters[0]!.questions[0]!.answerTurnIds = [];
-    await assert.rejects(() => runWith(relation), /回答轮次必须完整覆盖回答窗口/);
+    const { result } = await runWith(relation);
+    assert.deepEqual(result.questions[0]?.answerTurnIds, []);
 });
 
-test("回答轮次不能遗漏窗口内的候选人继续回答", async () => {
-    await assert.rejects(
-        () => runInterrupted(["turn-0002"]),
-        /回答轮次必须完整覆盖回答窗口/,
-    );
+test("回答窗口允许只绑定部分候选人轮次", async () => {
+    const result = await runInterrupted(["turn-0002"]);
+    assert.deepEqual(result.questions[0]?.answerTurnIds, ["turn-0002"]);
+});
+
+test("回答轮次不能重复", async () => {
+    const relation = validRelation();
+    relation.clusters[0]!.questions[0]!.answerTurnIds = ["turn-0002", "turn-0002"];
+    await assert.rejects(() => runWith(relation), /回答轮次重复/);
 });
 
 test("非问题插话不会截断候选人的完整回答窗口", async () => {
