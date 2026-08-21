@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { InMemoryArtifactStore } from "../../src/artifact/index.js";
+import type { ParsedTranscript } from "../../src/interview/types.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { appendAvailableSkills } from "../../src/skills/prompt.js";
 import { createSkillRegistry } from "../../src/skills/registry.js";
@@ -59,17 +61,27 @@ test("parse_transcript 和 structure_interview 通过 Tool 契约串联", async 
         }],
         nonQuestionTurnIds: [],
     };
+    const artifacts = new InMemoryArtifactStore();
     const context: ToolContext = {
         queryEngine: new QueryEngine(new FakeTextProvider(JSON.stringify(relation))),
         abortSignal: new AbortController().signal,
+        artifactStore: artifacts,
     };
     const registry = createToolRegistry({ model: "fake-model" });
 
-    const parsed = await registry.resolve("parse_transcript").execute({ content: source }, context);
+    const sourceArtifactId = artifacts.put("file_text", source, { producer: "test" });
+    const parsed = await registry.resolve("parse_transcript").execute({ sourceArtifactId }, context);
     assert.equal(parsed.success, true);
-    const transcript = parsed.data as { turns: unknown[] };
+    assert.equal("transcript" in (parsed.data ?? {}), false);
+    assert.equal(parsed.data?.turnCount, 2);
+    const transcript = artifacts.get<ParsedTranscript>(
+        parsed.data!.artifactId,
+        "parsed_transcript",
+        "test",
+    );
+    assert.equal(transcript.turns.length, 2);
     const structured = await registry.resolve("structure_interview").execute({
-        transcript: parsed.data,
+        transcript,
         correctedTurns: transcript.turns,
     }, context);
 

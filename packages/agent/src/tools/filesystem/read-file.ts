@@ -7,14 +7,17 @@ export interface ReadFileInput {
     path: string;
     offset?: number;
     limit?: number;
+    storeAsArtifact?: boolean;
 }
 
 export interface ReadFileOutput {
     path: string;
-    content: string;
-    startLine: number;
-    endLine: number;
+    content?: string;
+    startLine?: number;
+    endLine?: number;
     totalLines: number;
+    artifactId?: string;
+    characterCount?: number;
 }
 
 const DEFAULT_LIMIT = 500;
@@ -29,11 +32,27 @@ export function createReadFileTool(cwd: string): Tool<ReadFileInput, ReadFileOut
                 path: { type: "string", description: "相对 cwd 或绝对文件路径" },
                 offset: { type: "integer", minimum: 1, description: "起始行，从 1 开始" },
                 limit: { type: "integer", minimum: 1, description: "最大返回行数，默认 500" },
+                storeAsArtifact: {
+                    type: "boolean",
+                    description: "读取完整文件并仅返回 Artifact 引用，不能与 offset 或 limit 同用",
+                },
             },
             required: ["path"],
             additionalProperties: false,
         },
-        async execute(input): Promise<ToolResult<ReadFileOutput>> {
+        async execute(input, context): Promise<ToolResult<ReadFileOutput>> {
+            if (input.storeAsArtifact && (input.offset !== undefined || input.limit !== undefined)) {
+                return {
+                    success: false,
+                    error: { code: "input_error", message: "Artifact 模式不能指定 offset 或 limit" },
+                };
+            }
+            if (input.storeAsArtifact && !context.artifactStore) {
+                return {
+                    success: false,
+                    error: { code: "input_error", message: "ArtifactStore 未初始化" },
+                };
+            }
             const offset = input.offset ?? 1;
             const limit = input.limit ?? DEFAULT_LIMIT;
             if (!input.path || !Number.isInteger(offset) || offset < 1 || !Number.isInteger(limit) || limit < 1) {
@@ -47,6 +66,21 @@ export function createReadFileTool(cwd: string): Tool<ReadFileInput, ReadFileOut
             try {
                 const text = await readFile(path, "utf8");
                 const lines = text.split(/\r\n|\n|\r/);
+                if (input.storeAsArtifact) {
+                    const artifactId = context.artifactStore!.put("file_text", text, {
+                        producer: "read_file",
+                        characterCount: text.length,
+                    });
+                    return {
+                        success: true,
+                        data: {
+                            path,
+                            artifactId,
+                            characterCount: text.length,
+                            totalLines: lines.length,
+                        },
+                    };
+                }
                 const selected = lines.slice(offset - 1, offset - 1 + limit);
                 return {
                     success: true,

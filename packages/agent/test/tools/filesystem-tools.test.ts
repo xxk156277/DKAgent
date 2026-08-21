@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { InMemoryArtifactStore } from "../../src/artifact/index.js";
 import type { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { createReadFileTool } from "../../src/tools/filesystem/read-file.js";
 import { createWriteFileTool } from "../../src/tools/filesystem/write-file.js";
@@ -82,8 +83,56 @@ test("read_file 未指定 limit 时最多返回 500 行", async () => {
 
         const result = await createReadFileTool(cwd).execute({ path: "long.txt" }, context());
 
-        assert.equal(result.data?.content.split("\n").length, 500);
+        const content = result.data?.content;
+        assert.ok(content);
+        assert.equal(content.split("\n").length, 500);
         assert.equal(result.data?.totalLines, 501);
+    });
+});
+
+test("read_file 可将完整文件保存为 Artifact", async () => {
+    await withTempDir(async (cwd) => {
+        const source = "one\ntwo\nthree";
+        const artifacts = new InMemoryArtifactStore();
+        await writeFile(join(cwd, "interview.md"), source, "utf8");
+
+        const result = await createReadFileTool(cwd).execute(
+            { path: "interview.md", storeAsArtifact: true },
+            { ...context(), artifactStore: artifacts },
+        );
+
+        assert.equal(result.success, true);
+        assert.equal("content" in (result.data ?? {}), false);
+        assert.equal(result.data?.characterCount, source.length);
+        assert.equal(result.data?.totalLines, 3);
+        const artifactId = result.data?.artifactId;
+        assert.ok(artifactId);
+        assert.equal(artifacts.get(artifactId, "file_text", "test"), source);
+    });
+});
+
+test("read_file 的 Artifact 模式拒绝分页参数", async () => {
+    await withTempDir(async (cwd) => {
+        await writeFile(join(cwd, "interview.md"), "source", "utf8");
+        const result = await createReadFileTool(cwd).execute(
+            { path: "interview.md", storeAsArtifact: true, offset: 1 },
+            { ...context(), artifactStore: new InMemoryArtifactStore() },
+        );
+
+        assert.equal(result.success, false);
+        assert.equal(result.error?.code, "input_error");
+    });
+});
+
+test("read_file 的 Artifact 模式要求 ArtifactStore", async () => {
+    await withTempDir(async (cwd) => {
+        const result = await createReadFileTool(cwd).execute(
+            { path: "missing.md", storeAsArtifact: true },
+            context(),
+        );
+
+        assert.equal(result.success, false);
+        assert.equal(result.error?.code, "input_error");
     });
 });
 
