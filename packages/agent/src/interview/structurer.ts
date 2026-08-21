@@ -74,13 +74,6 @@ function findDuplicates(values: string[]): string[] {
     return values.filter((value, index) => values.indexOf(value) !== index);
 }
 
-function sameMembers(left: string[], right: string[]): boolean {
-    const sortedLeft = [...left].sort();
-    const sortedRight = [...right].sort();
-    return sortedLeft.length === sortedRight.length
-        && sortedLeft.every((value, index) => value === sortedRight[index]);
-}
-
 function comparePosition(left: Position, right: Position): number {
     return left[0] - right[0] || left[1] - right[1];
 }
@@ -236,12 +229,17 @@ export async function structureInterview(input: StructureInput): Promise<Structu
             }
             if (turn.speaker === "candidate") expectedAnswerTurnIds.push(turn.id);
         }
-        if (
-            findDuplicates(draft.question.answerTurnIds).length
-            || !sameMembers(draft.question.answerTurnIds, expectedAnswerTurnIds)
-        ) {
+        const duplicateAnswerTurnIds = findDuplicates(draft.question.answerTurnIds);
+        if (duplicateAnswerTurnIds.length) {
+            throw new Error(`回答轮次重复: ${duplicateAnswerTurnIds.join(",")}`);
+        }
+        const expectedAnswerTurnIdSet = new Set(expectedAnswerTurnIds);
+        const outOfWindowAnswerTurnIds = draft.question.answerTurnIds.filter(
+            (turnId) => !expectedAnswerTurnIdSet.has(turnId),
+        );
+        if (outOfWindowAnswerTurnIds.length) {
             throw new Error(
-                `回答轮次必须完整覆盖回答窗口: ${draft.modelOrder + 1}`,
+                `回答引用超出回答窗口: ${outOfWindowAnswerTurnIds.join(",")}`,
             );
         }
     }
