@@ -89,6 +89,56 @@ test("parse_transcript 和 structure_interview 通过 Tool 契约串联", async 
     assert.equal((structured.data as { questions: unknown[] }).questions.length, 1);
 });
 
+test("parse_transcript 将不存在的 Artifact ID 作为输入错误", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const context: ToolContext = {
+        queryEngine: {} as QueryEngine,
+        abortSignal: new AbortController().signal,
+        artifactStore: artifacts,
+    };
+
+    const result = await createToolRegistry({ model: "fake-model" })
+        .resolve("parse_transcript")
+        .execute({ sourceArtifactId: "missing" }, context);
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "input_error");
+});
+
+test("parse_transcript 将错误的 Artifact 类型作为输入错误", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const context: ToolContext = {
+        queryEngine: {} as QueryEngine,
+        abortSignal: new AbortController().signal,
+        artifactStore: artifacts,
+    };
+    const sourceArtifactId = artifacts.put("parsed_transcript", { turns: [] }, { producer: "test" });
+
+    const result = await createToolRegistry({ model: "fake-model" })
+        .resolve("parse_transcript")
+        .execute({ sourceArtifactId }, context);
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "input_error");
+});
+
+test("parse_transcript 将无法解析的 Artifact 文字稿作为输入错误", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const context: ToolContext = {
+        queryEngine: {} as QueryEngine,
+        abortSignal: new AbortController().signal,
+        artifactStore: artifacts,
+    };
+    const sourceArtifactId = artifacts.put("file_text", "没有说话人标题", { producer: "test" });
+
+    const result = await createToolRegistry({ model: "fake-model" })
+        .resolve("parse_transcript")
+        .execute({ sourceArtifactId }, context);
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "input_error");
+});
+
 test("参考资料能力仅在 Retriever 存在时暴露", async () => {
     const withoutRetriever = createToolRegistry({ model: "fake-model" });
     assert.equal(withoutRetriever.has("search_interview_reference"), false);

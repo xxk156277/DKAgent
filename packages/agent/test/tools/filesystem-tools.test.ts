@@ -114,13 +114,21 @@ test("read_file 可将完整文件保存为 Artifact", async () => {
 test("read_file 的 Artifact 模式拒绝分页参数", async () => {
     await withTempDir(async (cwd) => {
         await writeFile(join(cwd, "interview.md"), "source", "utf8");
-        const result = await createReadFileTool(cwd).execute(
+        const tool = createReadFileTool(cwd);
+        const toolContext = { ...context(), artifactStore: new InMemoryArtifactStore() };
+        const offsetResult = await tool.execute(
             { path: "interview.md", storeAsArtifact: true, offset: 1 },
-            { ...context(), artifactStore: new InMemoryArtifactStore() },
+            toolContext,
+        );
+        const limitResult = await tool.execute(
+            { path: "interview.md", storeAsArtifact: true, limit: 1 },
+            toolContext,
         );
 
-        assert.equal(result.success, false);
-        assert.equal(result.error?.code, "input_error");
+        assert.equal(offsetResult.success, false);
+        assert.equal(offsetResult.error?.code, "input_error");
+        assert.equal(limitResult.success, false);
+        assert.equal(limitResult.error?.code, "input_error");
     });
 });
 
