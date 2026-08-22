@@ -200,6 +200,18 @@ function isAbortError(error: unknown): boolean {
     return value?.name === "AbortError" || value?.code === "ABORT_ERR";
 }
 
+const SAFE_ANALYSIS_FAILURE_MESSAGES = new Set([
+    "结构化模型请求失败",
+    "结构化模型输出无效",
+    "结构化模型输出达到 Token 上限，JSON 可能被截断",
+    "结构化任务未返回文本",
+]);
+
+function safeAnalysisFailureMessage(error: unknown): string {
+    const message = error instanceof Error ? error.message : "";
+    return SAFE_ANALYSIS_FAILURE_MESSAGES.has(message) ? message : "回答分析失败";
+}
+
 function validateClarifications(
     candidates: ClarificationCandidate[],
     clusterQuestionIds: Set<string>,
@@ -285,6 +297,13 @@ export function createAnalyzeAnswerTool(
                         code: "input_error",
                         message: error instanceof Error ? error.message : "面试结构 Artifact 读取失败",
                     },
+                };
+            }
+
+            if (ctx.abortSignal.aborted) {
+                return {
+                    success: false,
+                    error: { code: "timeout", message: "操作已中止" },
                 };
             }
 
@@ -407,7 +426,7 @@ export function createAnalyzeAnswerTool(
                     status: "failed",
                     questionId: question.id,
                     clusterId: question.clusterId,
-                    error: error instanceof Error ? error.message : "回答分析失败",
+                    error: safeAnalysisFailureMessage(error),
                 };
                 return {
                     success: true,

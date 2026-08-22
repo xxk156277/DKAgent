@@ -585,6 +585,13 @@ export function createGenerateReportTool(
                 return inputError(error instanceof Error ? error.message : "报告输入无效");
             }
 
+            if (ctx.abortSignal.aborted) {
+                return {
+                    success: false,
+                    error: { code: "timeout", message: "操作已中止" },
+                };
+            }
+
             const scoredQuestionIds = new Set(
                 resolvedInput.structuredInterview.questions
                     .filter((question) => question.scored)

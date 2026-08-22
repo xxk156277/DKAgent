@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { InMemoryArtifactStore } from "../../src/artifact/index.js";
 import type { QuestionAnalysis } from "../../src/interview/analysis-types.js";
 import type { QuestionAnalysisArtifact } from "../../src/interview/artifact-payloads.js";
@@ -451,6 +452,41 @@ test("流程题不调用 LLM 并直接返回 not_scored", async () => {
     assert.equal(provider.request, undefined);
 });
 
+test("预中止的流程题返回 timeout，不调用模型也不创建分析 Artifact", async () => {
+    const proceduralQuestion = question({ id: "q-procedural", questionType: "procedural" });
+    const proceduralCluster = { ...cluster, questionIds: [proceduralQuestion.id] };
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
+    const artifacts = new InMemoryArtifactStore(tracer);
+    const provider = new FakeTextProvider("不应读取");
+    const controller = new AbortController();
+    const input = projectInput(artifacts, {
+        question: proceduralQuestion,
+        cluster: proceduralCluster,
+        clusterQuestions: [proceduralQuestion],
+    });
+    const artifactCountBefore = traceStore.list().filter(
+        (event) => event.name === "artifact.created",
+    ).length;
+    controller.abort();
+
+    const result = await createAnalyzeAnswerTool("fake-model").execute(input, {
+        queryEngine: new QueryEngine(provider),
+        abortSignal: controller.signal,
+        artifactStore: artifacts,
+        tracer,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "timeout");
+    assert.equal(result.data, undefined);
+    assert.equal(provider.request, undefined);
+    assert.equal(
+        traceStore.list().filter((event) => event.name === "artifact.created").length,
+        artifactCountBefore,
+    );
+});
+
 test("拒绝不存在的证据轮次", async () => {
     const response = {
         ...validProjectResponse,
@@ -500,7 +536,7 @@ test("strength 和 issue 都必须至少引用一个当前问题轮次", async (
     }
 });
 
-test("题型不适用的维度分使当前题保存为 failed", async () => {
+test("题型不适用的维度分使当前题保存为脱敏的 failed", async () => {
     const knowledgeQuestion = question({ id: "q-knowledge", questionType: "knowledge" });
     const knowledgeCluster = { ...cluster, questionIds: [knowledgeQuestion.id] };
     const response = {
@@ -531,7 +567,7 @@ test("题型不适用的维度分使当前题保存为 failed", async () => {
     const analysis = storedAnalysis(artifacts, result.data?.artifactId);
     assert.equal(analysis.status, "failed");
     if (analysis.status === "failed") {
-        assert.match(analysis.error, /题型不适用维度必须为 null/);
+        assert.equal(analysis.error, "回答分析失败");
     }
 });
 

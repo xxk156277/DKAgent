@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { InMemoryArtifactStore } from "../../src/artifact/index.js";
 import type {
     ClarificationCandidate,
@@ -578,6 +579,49 @@ test("只有流程题时仍生成无总分报告", async () => {
     assert.match(result.data?.markdown ?? "", /无可评分数据/);
     assert.match(result.data?.markdown ?? "", /分数：不参与评分/);
     assert.equal(provider.request, undefined);
+});
+
+test("预中止的无可评分报告返回 timeout，不调用模型也不产生报告", async () => {
+    const proceduralInterview: StructuredInterview = {
+        ...structuredInterview,
+        transcript: {
+            ...structuredInterview.transcript,
+            turns: structuredInterview.transcript.turns.filter((turn) => (
+                turn.id.startsWith("q-4-")
+            )),
+        },
+        questions: [questions[3]!],
+        clusters: [{ ...clusters[2]!, questionIds: ["q-4"] }],
+    };
+    const notScoredAnalysis: QuestionAnalysis = {
+        status: "not_scored",
+        questionId: "q-4",
+        clusterId: "cluster-procedural",
+    };
+    const { provider, context } = toolContext(validSummary);
+    const traceStore = new MemoryTraceStore();
+    context.artifactStore = new InMemoryArtifactStore(new Tracer(traceStore));
+    const input = baseInput(context, {
+        structuredInterview: proceduralInterview,
+        analyses: [notScoredAnalysis],
+    });
+    const artifactCountBefore = traceStore.list().filter(
+        (event) => event.name === "artifact.created",
+    ).length;
+    const controller = new AbortController();
+    controller.abort();
+    context.abortSignal = controller.signal;
+
+    const result = await createGenerateReportTool("fake-model").execute(input, context);
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "timeout");
+    assert.equal(result.data, undefined);
+    assert.equal(provider.request, undefined);
+    assert.equal(
+        traceStore.list().filter((event) => event.name === "artifact.created").length,
+        artifactCountBefore,
+    );
 });
 
 test("拒绝未知和重复的逐题分析 ID", async () => {

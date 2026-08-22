@@ -1,6 +1,5 @@
 import { structureInterview, type StructureOutput } from "../../interview/structurer.js";
 import type { ParsedTranscript, StructuredInterview } from "../../interview/types.js";
-import { toolFailure } from "../filesystem/error.js";
 import type { Tool } from "../types.js";
 
 export interface StructureInterviewInput {
@@ -11,6 +10,18 @@ export interface StructureInterviewOutput {
     artifactId: string;
     clusterCount: number;
     questionIds: string[];
+}
+
+function isAbortError(error: unknown): boolean {
+    const value = error as { name?: unknown; code?: unknown } | null;
+    return value?.name === "AbortError" || value?.code === "ABORT_ERR";
+}
+
+function safeStructureFailureMessage(error: unknown): string {
+    const message = error instanceof Error ? error.message : "";
+    return message === "结构化模型输出达到 Token 上限，JSON 可能被截断"
+        ? message
+        : "面试问题结构化失败";
 }
 
 export function createStructureInterviewTool(
@@ -61,6 +72,13 @@ export function createStructureInterviewTool(
                 };
             }
 
+            if (context.abortSignal.aborted) {
+                return {
+                    success: false,
+                    error: { code: "timeout", message: "操作已中止" },
+                };
+            }
+
             try {
                 const output: StructureOutput = await structureInterview({
                     transcript,
@@ -88,7 +106,19 @@ export function createStructureInterviewTool(
                     },
                 };
             } catch (error) {
-                return toolFailure(error);
+                if (isAbortError(error) || context.abortSignal.aborted) {
+                    return {
+                        success: false,
+                        error: { code: "timeout", message: "操作已中止" },
+                    };
+                }
+                return {
+                    success: false,
+                    error: {
+                        code: "service_error",
+                        message: safeStructureFailureMessage(error),
+                    },
+                };
             }
         },
     };

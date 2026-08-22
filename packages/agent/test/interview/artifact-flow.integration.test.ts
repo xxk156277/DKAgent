@@ -7,7 +7,7 @@ import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { AgentLoop } from "../../src/agent/loop.js";
 import { InMemoryArtifactStore } from "../../src/artifact/index.js";
 import type { QuestionAnalysisArtifact } from "../../src/interview/artifact-payloads.js";
-import type { StructuredInterview } from "../../src/interview/types.js";
+import type { ParsedTranscript, StructuredInterview } from "../../src/interview/types.js";
 import type {
     LLMProvider,
     StreamEvent,
@@ -53,7 +53,13 @@ class SingleToolCallProvider implements LLMProvider {
     }
 }
 
-type StructuredFailureMode = "provider" | "json" | "zod";
+type StructuredFailureMode =
+    | "provider"
+    | "json"
+    | "zod"
+    | "evidence"
+    | "improvement"
+    | "clarification";
 
 function toolCallEvents(
     id: string,
@@ -76,6 +82,42 @@ function toolCallEvents(
     ];
 }
 
+function analysisFailureContent(mode: StructuredFailureMode, secret: string): string {
+    if (mode === "json") return `${secret} not-json`;
+    if (mode === "zod") {
+        return JSON.stringify({ ...successfulAnalysisResponse, [secret]: true });
+    }
+    if (mode === "evidence") {
+        return JSON.stringify({
+            ...successfulAnalysisResponse,
+            issues: [{
+                ...successfulAnalysisResponse.issues[0],
+                id: secret,
+                evidenceTurnIds: [`${secret}-turnId`],
+            }],
+            improvements: [{ issueId: secret, text: "补充实现证据" }],
+        });
+    }
+    if (mode === "improvement") {
+        return JSON.stringify({
+            ...successfulAnalysisResponse,
+            improvements: [{ issueId: secret, text: "恶意改进项" }],
+        });
+    }
+    if (mode === "clarification") {
+        return JSON.stringify({
+            ...successfulAnalysisResponse,
+            clarificationCandidates: [{
+                factKey: secret,
+                question: "请补充证据",
+                affectedQuestionIds: [`${secret}-questionId`],
+                impact: "high",
+            }],
+        });
+    }
+    return JSON.stringify(successfulAnalysisResponse);
+}
+
 class StructuredFailureProvider implements LLMProvider {
     public readonly name = "structured-failure";
     public readonly requests: StreamParams[] = [];
@@ -91,9 +133,7 @@ class StructuredFailureProvider implements LLMProvider {
         this.requests.push(params);
         if (params.responseFormat === "json_object") {
             if (this.mode === "provider") throw new Error(this.secret);
-            const content = this.mode === "json"
-                ? `${this.secret} not-json`
-                : JSON.stringify({ ...successfulAnalysisResponse, [this.secret]: true });
+            const content = analysisFailureContent(this.mode, this.secret);
             yield { type: "text_delta", content };
             yield {
                 type: "message_end",
@@ -129,6 +169,68 @@ class StructuredFailureProvider implements LLMProvider {
         return 0;
     }
 
+}
+
+class StructureTurnIdFailureProvider implements LLMProvider {
+    public readonly name = "structure-turn-id-failure";
+    public readonly requests: StreamParams[] = [];
+    private ordinaryRequestCount = 0;
+
+    public constructor(
+        private readonly transcriptArtifactId: string,
+        private readonly secret: string,
+    ) { }
+
+    public async *stream(params: StreamParams): AsyncIterable<StreamEvent> {
+        this.requests.push(params);
+        if (params.responseFormat === "json_object") {
+            yield {
+                type: "text_delta",
+                content: JSON.stringify({
+                    clusters: [{
+                        title: "恶意问题簇",
+                        questions: [{
+                            promptSegments: [{
+                                turnId: this.secret,
+                                text: "请介绍你的低代码项目。",
+                            }],
+                            answerTurnIds: ["turn-0002"],
+                            questionType: "project",
+                        }],
+                    }],
+                    nonQuestionTurnIds: [],
+                }),
+            };
+            yield {
+                type: "message_end",
+                usage: { inputTokens: 1, outputTokens: 1 },
+                stopReason: "end_turn",
+            };
+            return;
+        }
+
+        this.ordinaryRequestCount += 1;
+        if (this.ordinaryRequestCount === 1) {
+            yield* toolCallEvents("call-structure", "structure_interview", {
+                transcriptArtifactId: this.transcriptArtifactId,
+            });
+            return;
+        }
+        if (this.ordinaryRequestCount === 2) {
+            yield { type: "text_delta", content: "结构化失败已安全处理" };
+            yield {
+                type: "message_end",
+                usage: { inputTokens: 1, outputTokens: 1 },
+                stopReason: "end_turn",
+            };
+            return;
+        }
+        throw new Error("结构化失败后不应再请求模型");
+    }
+
+    public async countTokens(): Promise<number> {
+        return 0;
+    }
 }
 
 class SaveReportProvider implements LLMProvider {
@@ -535,11 +637,14 @@ test("AgentLoop 在失败题报告生成后直接返回 Tool 的完整 Markdown"
     assert.doesNotMatch(answer, /因篇幅省略/);
 });
 
-test("Provider、JSON 和 Zod 原始错误不进入 Tool、Trace、Failed Artifact 或报告", async () => {
+test("Provider、JSON、Zod 和业务校验错误不进入 Tool、Trace、Failed Artifact 或报告", async () => {
     for (const [mode, expectedSafeError] of [
         ["provider", "结构化模型请求失败"],
         ["json", "结构化模型输出无效"],
         ["zod", "结构化模型输出无效"],
+        ["evidence", "回答分析失败"],
+        ["improvement", "回答分析失败"],
+        ["clarification", "回答分析失败"],
     ] as const) {
         const secret = `STRUCTURED_${mode.toUpperCase()}_SECRET_20260822`;
         const traceStore = new MemoryTraceStore();
@@ -593,6 +698,55 @@ test("Provider、JSON 和 Zod 原始错误不进入 Tool、Trace、Failed Artifa
         ]) {
             assert.doesNotMatch(downstream, new RegExp(secret));
         }
+    }
+});
+
+test("structure_interview 业务校验不泄露模型可控 turnId", async () => {
+    const secret = "STRUCTURE_TURN_ID_SECRET_20260822";
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
+    const artifacts = new InMemoryArtifactStore(tracer);
+    const interview = singleQuestionInterview();
+    const transcriptArtifactId = artifacts.put(
+        "parsed_transcript",
+        interview.transcript satisfies ParsedTranscript,
+        { producer: "test" },
+    );
+    const artifactCountBefore = traceStore.list().filter(
+        (event) => event.name === "artifact.created",
+    ).length;
+    const provider = new StructureTurnIdFailureProvider(transcriptArtifactId, secret);
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: createToolRegistry({ model: "fake-model" }),
+        contextManager: {
+            async build(input) {
+                return { messages: [...input.messages], tools: [...input.tools] };
+            },
+        },
+        model: "fake-model",
+        maxContextTokens: 10_000,
+        maxOutputTokens: 1_000,
+        artifactStore: artifacts,
+        tracer,
+    });
+
+    const answer = await agent.run("结构化面试");
+    const toolResult = JSON.parse(
+        agent.getMessages().find((message) => message.role === "tool")!.content,
+    ) as ToolResult;
+    assert.equal(toolResult.success, false);
+    assert.equal(toolResult.error?.message, "面试问题结构化失败");
+    assert.equal(
+        traceStore.list().filter((event) => event.name === "artifact.created").length,
+        artifactCountBefore,
+    );
+    for (const downstream of [
+        JSON.stringify(toolResult),
+        JSON.stringify(traceStore.list()),
+        answer,
+    ]) {
+        assert.doesNotMatch(downstream, new RegExp(secret));
     }
 });
 

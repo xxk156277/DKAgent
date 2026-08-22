@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { InMemoryArtifactStore } from "../../src/artifact/index.js";
 import type { ParsedTranscript, StructuredInterview } from "../../src/interview/types.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
@@ -168,6 +169,57 @@ test("structure_interview 将模型请求中止返回为 timeout", async () => {
     assert.equal(result.success, false);
     assert.equal(result.error?.code, "timeout");
     assert.equal(result.error?.message, "操作已中止");
+});
+
+test("structure_interview 预中止时不调用模型也不创建 Artifact", async () => {
+    const traceStore = new MemoryTraceStore();
+    const tracer = new Tracer(traceStore);
+    const artifacts = new InMemoryArtifactStore(tracer);
+    const transcriptArtifactId = artifacts.put("parsed_transcript", {
+        source,
+        turns: [
+            {
+                id: "turn-0001",
+                speaker: "interviewer",
+                speakerLabel: "面试官",
+                content: "请介绍项目",
+                sourceStart: 0,
+                sourceEnd: 9,
+            },
+            {
+                id: "turn-0002",
+                speaker: "candidate",
+                speakerLabel: "候选人",
+                content: "我负责渲染链路。",
+                sourceStart: 10,
+                sourceEnd: source.length,
+            },
+        ],
+    } satisfies ParsedTranscript, { producer: "test" });
+    const artifactCountBefore = traceStore.list().filter(
+        (event) => event.name === "artifact.created",
+    ).length;
+    const provider = new FakeTextProvider("{}");
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await createToolRegistry({ model: "fake-model" })
+        .resolve("structure_interview")
+        .execute({ transcriptArtifactId }, {
+            queryEngine: new QueryEngine(provider),
+            abortSignal: controller.signal,
+            artifactStore: artifacts,
+            tracer,
+        });
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "timeout");
+    assert.equal(result.data, undefined);
+    assert.equal(provider.request, undefined);
+    assert.equal(
+        traceStore.list().filter((event) => event.name === "artifact.created").length,
+        artifactCountBefore,
+    );
 });
 
 test("parse_transcript 将不存在的 Artifact ID 作为输入错误", async () => {
