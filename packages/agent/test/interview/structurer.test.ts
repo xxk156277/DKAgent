@@ -330,13 +330,13 @@ test("切换主题后回到旧主题时生成三个连续问题簇", async () =>
     assert.deepEqual(result.clusters.map((cluster) => cluster.questionIds.length), [1, 1, 1]);
 });
 
-test("模型不得返回由程序生成的派生字段", async () => {
+test("模型返回程序派生字段时只暴露固定输出错误", async () => {
     const relation = {
         ...validRelation(),
         questions: [],
     } as ModelRelation;
 
-    await assert.rejects(() => runWith(relation), /unrecognized_keys/);
+    await assert.rejects(() => runWith(relation), /结构化模型输出无效/);
 });
 
 test("非提问轮次不能同时承载具体问题", async () => {

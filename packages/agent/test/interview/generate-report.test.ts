@@ -240,20 +240,26 @@ test("通过 Artifact 引用生成完整报告", async () => {
     assert.equal(result.success, true);
     assert.equal(result.data?.report.score.coverage.analyzed, 2);
     assert.match(result.data?.markdown ?? "", /面试分析报告/);
-    assert.equal(tool.getFinalOutput?.(result), result.data?.markdown);
-    assert.equal(tool.getFinalOutput?.({
+    assert.equal(tool.getFinalOutput?.(input, result), result.data?.markdown);
+    assert.equal(tool.getFinalOutput?.({ ...input, returnDirectly: true }, result), result.data?.markdown);
+    assert.equal(tool.getFinalOutput?.({ ...input, returnDirectly: false }, result), undefined);
+    assert.equal(tool.getFinalOutput?.(input, {
         success: false,
         error: { code: "input_error", message: "失败" },
     }), undefined);
-    assert.equal(tool.getFinalOutput?.({
+    assert.equal(tool.getFinalOutput?.(input, {
         success: true,
         data: { ...result.data!, markdown: " \n\t " },
     }), undefined);
     const paddedMarkdown = ` \n${result.data!.markdown}\n `;
-    assert.equal(tool.getFinalOutput?.({
+    assert.equal(tool.getFinalOutput?.(input, {
         success: true,
         data: { ...result.data!, markdown: paddedMarkdown },
     }), paddedMarkdown);
+    assert.deepEqual(
+        (tool.parameters.properties as Record<string, unknown>).returnDirectly,
+        { type: "boolean", description: "true 直接返回报告；false 供后续 write_file 保存" },
+    );
 });
 
 test("Artifact 不存在或类型错误时返回输入错误", async () => {
@@ -463,6 +469,22 @@ test("总结模型异常时降级但仍返回确定性报告", async () => {
     assert.equal(result.data?.report.summaryStatus, "failed");
     assert.equal(result.data?.report.score.coverage.analyzed, 2);
     assert.equal(result.data?.report.questions.length, 4);
+});
+
+test("总结模型请求中止时返回 timeout 而不降级为成功", async () => {
+    const { context } = toolContext(validSummary);
+    context.queryEngine.query = async () => {
+        throw Object.assign(new Error("不应泄露"), { name: "AbortError" });
+    };
+
+    const result = await createGenerateReportTool("fake-model").execute(
+        baseInput(context),
+        context,
+    );
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "timeout");
+    assert.equal(result.error?.message, "操作已中止");
 });
 
 test("汇总成功但文字条目为空时不误报汇总失败", async () => {

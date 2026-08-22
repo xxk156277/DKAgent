@@ -4,6 +4,18 @@ import type { ModelResponse } from "../query-engine/provider.js";
 import type { QueryEngine } from "../query-engine/query-engine.js";
 
 const SAFE_MODEL_REQUEST_ERROR = "结构化模型请求失败";
+const SAFE_MODEL_OUTPUT_ERROR = "结构化模型输出无效";
+
+function isAbortError(error: unknown): boolean {
+    const value = error as { name?: unknown; code?: unknown } | null;
+    return value?.name === "AbortError" || value?.code === "ABORT_ERR";
+}
+
+function createAbortError(): Error {
+    const error = new Error("操作已中止");
+    error.name = "AbortError";
+    return error;
+}
 
 export async function queryModelJson<T>(input: {
     queryEngine: QueryEngine;
@@ -15,6 +27,8 @@ export async function queryModelJson<T>(input: {
     tracer?: Tracer | undefined;
     traceOperation: string;
 }): Promise<T> {
+    if (input.abortSignal.aborted) throw createAbortError();
+
     const request = {
         model: input.model,
         systemPrompt: input.systemPrompt,
@@ -32,15 +46,14 @@ export async function queryModelJson<T>(input: {
         responseFormat: request.responseFormat,
         thinking: request.thinking,
     };
-    let providerFailed = false;
-    let providerError: unknown;
     const execute = async (span?: TraceSpan): Promise<ModelResponse> => {
         let response: ModelResponse;
         try {
             response = await input.queryEngine.query(request);
         } catch (error) {
-            providerFailed = true;
-            providerError = error;
+            if (isAbortError(error) || input.abortSignal.aborted) {
+                throw createAbortError();
+            }
             throw new Error(SAFE_MODEL_REQUEST_ERROR);
         }
         const responseMetadata = {
@@ -58,20 +71,16 @@ export async function queryModelJson<T>(input: {
         return response;
     };
 
-    let response: ModelResponse;
-    try {
-        response = input.tracer
-            ? await input.tracer.span(
-                "model.request",
-                traceRequest,
-                execute,
-                { module: "skill", operation: input.traceOperation },
-            )
-            : await execute();
-    } catch (error) {
-        if (providerFailed) throw providerError;
-        throw error;
-    }
+    const response = input.tracer
+        ? await input.tracer.span(
+            "model.request",
+            traceRequest,
+            execute,
+            { module: "skill", operation: input.traceOperation },
+        )
+        : await execute();
+
+    if (input.abortSignal.aborted) throw createAbortError();
 
     if (response.stopReason === "max_tokens") {
         throw new Error("结构化模型输出达到 Token 上限，JSON 可能被截断");
@@ -83,5 +92,9 @@ export async function queryModelJson<T>(input: {
     const content = response.content
         .replace(/^```(?:json)?\s*/i, "")
         .replace(/\s*```$/, "");
-    return input.schema.parse(JSON.parse(content));
+    try {
+        return input.schema.parse(JSON.parse(content));
+    } catch {
+        throw new Error(SAFE_MODEL_OUTPUT_ERROR);
+    }
 }

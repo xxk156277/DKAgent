@@ -1,5 +1,6 @@
 import { structureInterview, type StructureOutput } from "../../interview/structurer.js";
 import type { ParsedTranscript, StructuredInterview } from "../../interview/types.js";
+import { toolFailure } from "../filesystem/error.js";
 import type { Tool } from "../types.js";
 
 export interface StructureInterviewInput {
@@ -87,13 +88,7 @@ export function createStructureInterviewTool(
                     },
                 };
             } catch (error) {
-                return {
-                    success: false,
-                    error: {
-                        code: "service_error",
-                        message: error instanceof Error ? error.message : "面试问题结构化失败",
-                    },
-                };
+                return toolFailure(error);
             }
         },
     };

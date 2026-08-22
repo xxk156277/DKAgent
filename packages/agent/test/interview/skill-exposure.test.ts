@@ -32,6 +32,8 @@ test("diagnose-transcript 只把元数据注入系统 Prompt", async () => {
     assert.doesNotMatch(content, /analyze_expression/);
     assert.match(content, /默认不得调用 `write_file`/);
     assert.match(content, /overwrite: false/);
+    assert.match(content, /returnDirectly: true/);
+    assert.match(content, /returnDirectly: false/);
     for (const reference of [
         "storeAsArtifact: true",
         "sourceArtifactId",
@@ -124,6 +126,48 @@ test("structure_interview 将 Artifact 读取失败作为输入错误", async ()
     const wrongKind = await tool.execute({ transcriptArtifactId: wrongKindId }, context);
     assert.equal(wrongKind.success, false);
     assert.equal(wrongKind.error?.code, "input_error");
+});
+
+test("structure_interview 将模型请求中止返回为 timeout", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const transcriptArtifactId = artifacts.put("parsed_transcript", {
+        source,
+        turns: [
+            {
+                id: "turn-0001",
+                speaker: "interviewer",
+                speakerLabel: "面试官",
+                content: "请介绍项目",
+                sourceStart: 0,
+                sourceEnd: 9,
+            },
+            {
+                id: "turn-0002",
+                speaker: "candidate",
+                speakerLabel: "候选人",
+                content: "我负责渲染链路。",
+                sourceStart: 10,
+                sourceEnd: source.length,
+            },
+        ],
+    } satisfies ParsedTranscript, { producer: "test" });
+    const context: ToolContext = {
+        queryEngine: {
+            async query() {
+                throw Object.assign(new Error("不应泄露"), { code: "ABORT_ERR" });
+            },
+        } as unknown as QueryEngine,
+        abortSignal: new AbortController().signal,
+        artifactStore: artifacts,
+    };
+
+    const result = await createToolRegistry({ model: "fake-model" })
+        .resolve("structure_interview")
+        .execute({ transcriptArtifactId }, context);
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "timeout");
+    assert.equal(result.error?.message, "操作已中止");
 });
 
 test("parse_transcript 将不存在的 Artifact ID 作为输入错误", async () => {

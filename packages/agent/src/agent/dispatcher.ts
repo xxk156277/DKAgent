@@ -5,6 +5,7 @@ import type { ToolContext, ToolResult } from "../tools/types.js";
 export interface DispatchedToolResult {
     toolCallId: string;
     name: string;
+    input: Record<string, unknown>;
     result: ToolResult;
 }
 
@@ -16,11 +17,12 @@ export async function dispatchToolCall(
     try {
         const tool = registry.resolve(call.name);
         const result = await tool.execute(call.input, context);
-        return { toolCallId: call.id, name: call.name, result };
+        return { toolCallId: call.id, name: call.name, input: call.input, result };
     } catch (error: unknown) {
         return {
             toolCallId: call.id,
             name: call.name,
+            input: call.input,
             result: {
                 success: false,
                 error: {

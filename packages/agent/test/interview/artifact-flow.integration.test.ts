@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -53,6 +53,143 @@ class SingleToolCallProvider implements LLMProvider {
     }
 }
 
+type StructuredFailureMode = "provider" | "json" | "zod";
+
+function toolCallEvents(
+    id: string,
+    name: string,
+    input: Record<string, unknown>,
+): StreamEvent[] {
+    return [
+        { type: "tool_call_start", index: 0, id, name },
+        {
+            type: "tool_call_delta",
+            index: 0,
+            argumentsDelta: JSON.stringify(input),
+        },
+        { type: "tool_call_end", index: 0 },
+        {
+            type: "message_end",
+            usage: { inputTokens: 1, outputTokens: 1 },
+            stopReason: "tool_use",
+        },
+    ];
+}
+
+class StructuredFailureProvider implements LLMProvider {
+    public readonly name = "structured-failure";
+    public readonly requests: StreamParams[] = [];
+    private ordinaryRequestCount = 0;
+
+    public constructor(
+        private readonly mode: StructuredFailureMode,
+        private readonly secret: string,
+        private readonly structuredInterviewArtifactId: string,
+    ) { }
+
+    public async *stream(params: StreamParams): AsyncIterable<StreamEvent> {
+        this.requests.push(params);
+        if (params.responseFormat === "json_object") {
+            if (this.mode === "provider") throw new Error(this.secret);
+            const content = this.mode === "json"
+                ? `${this.secret} not-json`
+                : JSON.stringify({ ...successfulAnalysisResponse, [this.secret]: true });
+            yield { type: "text_delta", content };
+            yield {
+                type: "message_end",
+                usage: { inputTokens: 1, outputTokens: 1 },
+                stopReason: "end_turn",
+            };
+            return;
+        }
+
+        this.ordinaryRequestCount += 1;
+        if (this.ordinaryRequestCount === 1) {
+            yield* toolCallEvents("call-analyze", "analyze_answer", {
+                structuredInterviewArtifactId: this.structuredInterviewArtifactId,
+                questionId: "question-0001",
+            });
+            return;
+        }
+        if (this.ordinaryRequestCount === 2) {
+            const analyzeResult = latestToolResult(params);
+            assert.equal(analyzeResult.success, true);
+            yield* toolCallEvents("call-report", "generate_report", {
+                structuredInterviewArtifactId: this.structuredInterviewArtifactId,
+                analysisArtifactIds: [(analyzeResult.data as { artifactId: string }).artifactId],
+                stage: "provisional",
+                returnDirectly: true,
+            });
+            return;
+        }
+        throw new Error("安全错误报告后不应再请求模型");
+    }
+
+    public async countTokens(): Promise<number> {
+        return 0;
+    }
+
+}
+
+class SaveReportProvider implements LLMProvider {
+    public readonly name = "save-report";
+    public readonly requests: StreamParams[] = [];
+    public reportMarkdown = "";
+    private requestCount = 0;
+
+    public constructor(
+        private readonly structuredInterviewArtifactId: string,
+        private readonly analysisArtifactId: string,
+        private readonly reportPath: string,
+    ) { }
+
+    public async *stream(params: StreamParams): AsyncIterable<StreamEvent> {
+        this.requests.push(params);
+        this.requestCount += 1;
+        if (this.requestCount === 1) {
+            yield* toolCallEvents("call-report", "generate_report", {
+                structuredInterviewArtifactId: this.structuredInterviewArtifactId,
+                analysisArtifactIds: [this.analysisArtifactId],
+                stage: "provisional",
+                returnDirectly: false,
+            });
+            return;
+        }
+        if (this.requestCount === 2) {
+            const reportResult = latestToolResult(params);
+            assert.equal(reportResult.success, true);
+            this.reportMarkdown = (reportResult.data as { markdown: string }).markdown;
+            yield* toolCallEvents("call-write", "write_file", {
+                path: this.reportPath,
+                content: this.reportMarkdown,
+                overwrite: false,
+            });
+            return;
+        }
+        if (this.requestCount === 3) {
+            yield { type: "text_delta", content: "报告已保存" };
+            yield {
+                type: "message_end",
+                usage: { inputTokens: 1, outputTokens: 1 },
+                stopReason: "end_turn",
+            };
+            return;
+        }
+        throw new Error("保存完成后不应再请求模型");
+    }
+
+    public async countTokens(): Promise<number> {
+        return 0;
+    }
+
+}
+
+function latestToolResult(params: StreamParams): ToolResult {
+    const message = [...params.messages].reverse().find((item) => item.role === "tool");
+    assert.ok(message?.content);
+    return JSON.parse(message.content) as ToolResult;
+}
+
 const sourceSentence = "我负责低代码 DSL 渲染链路，并把首屏耗时降低了百分之三十。";
 const source = [
     "面试官 00:01",
@@ -64,6 +201,51 @@ const source = [
     "候选人 00:04",
     "因为需要兼容多个业务协议。",
 ].join("\n");
+
+function singleQuestionInterview(): StructuredInterview {
+    return {
+        transcript: {
+            source,
+            turns: [
+                {
+                    id: "turn-0001",
+                    speaker: "interviewer",
+                    speakerLabel: "面试官",
+                    content: "请介绍你的低代码项目。",
+                    sourceStart: 0,
+                    sourceEnd: 12,
+                },
+                {
+                    id: "turn-0002",
+                    speaker: "candidate",
+                    speakerLabel: "候选人",
+                    content: sourceSentence,
+                    sourceStart: 13,
+                    sourceEnd: 13 + sourceSentence.length,
+                },
+            ],
+        },
+        clusters: [{
+            id: "cluster-0001",
+            title: "低代码项目",
+            questionIds: ["question-0001"],
+        }],
+        questions: [{
+            id: "question-0001",
+            clusterId: "cluster-0001",
+            promptTurnIds: ["turn-0001"],
+            promptSegments: [{ turnId: "turn-0001", text: "请介绍你的低代码项目。" }],
+            answerTurnIds: ["turn-0002"],
+            originalQuestion: "请介绍你的低代码项目。",
+            originalAnswer: sourceSentence,
+            questionType: "project",
+            scored: true,
+            sourceStart: 0,
+            sourceEnd: source.length,
+        }],
+        nonQuestionTurnIds: [],
+    };
+}
 
 const structureResponse = {
     clusters: [
@@ -351,4 +533,126 @@ test("AgentLoop 在失败题报告生成后直接返回 Tool 的完整 Markdown"
     assert.match(answer, /模型 JSON 无效/);
     assert.match(answer, new RegExp(sourceSentence));
     assert.doesNotMatch(answer, /因篇幅省略/);
+});
+
+test("Provider、JSON 和 Zod 原始错误不进入 Tool、Trace、Failed Artifact 或报告", async () => {
+    for (const [mode, expectedSafeError] of [
+        ["provider", "结构化模型请求失败"],
+        ["json", "结构化模型输出无效"],
+        ["zod", "结构化模型输出无效"],
+    ] as const) {
+        const secret = `STRUCTURED_${mode.toUpperCase()}_SECRET_20260822`;
+        const traceStore = new MemoryTraceStore();
+        const tracer = new Tracer(traceStore);
+        const artifacts = new InMemoryArtifactStore(tracer);
+        const structuredInterviewArtifactId = artifacts.put(
+            "structured_interview",
+            singleQuestionInterview(),
+            { producer: "test" },
+        );
+        const provider = new StructuredFailureProvider(
+            mode,
+            secret,
+            structuredInterviewArtifactId,
+        );
+        const agent = new AgentLoop({
+            queryEngine: new QueryEngine(provider),
+            toolRegistry: createToolRegistry({ model: "fake-model" }),
+            contextManager: {
+                async build(input) {
+                    return { messages: [...input.messages], tools: [...input.tools] };
+                },
+            },
+            model: "fake-model",
+            maxContextTokens: 10_000,
+            maxOutputTokens: 1_000,
+            artifactStore: artifacts,
+            tracer,
+        });
+
+        const answer = await agent.run("分析安全错误");
+        const toolResults = agent.getMessages()
+            .filter((message) => message.role === "tool")
+            .map((message) => JSON.parse(message.content) as ToolResult);
+        const analyzeResult = toolResults[0]!;
+        assert.equal(analyzeResult.success, true);
+        const failedArtifact = artifacts.get<QuestionAnalysisArtifact>(
+            (analyzeResult.data as { artifactId: string }).artifactId,
+            "question_analysis",
+            "test",
+        );
+        assert.equal(failedArtifact.analysis.status, "failed");
+        assert.equal(failedArtifact.analysis.error, expectedSafeError);
+        assert.match(answer, new RegExp(expectedSafeError));
+
+        for (const downstream of [
+            JSON.stringify(toolResults),
+            JSON.stringify(traceStore.list()),
+            JSON.stringify(failedArtifact),
+            answer,
+        ]) {
+            assert.doesNotMatch(downstream, new RegExp(secret));
+        }
+    }
+});
+
+test("AgentLoop 同 Turn 在 generate_report(false) 后将完整报告写入新文件", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "dkagent-save-report-"));
+    try {
+        const artifacts = new InMemoryArtifactStore();
+        const structuredInterviewArtifactId = artifacts.put(
+            "structured_interview",
+            singleQuestionInterview(),
+            { producer: "test" },
+        );
+        const analysisArtifactId = artifacts.put(
+            "question_analysis",
+            {
+                structuredInterviewArtifactId,
+                analysis: {
+                    status: "failed",
+                    questionId: "question-0001",
+                    clusterId: "cluster-0001",
+                    error: "结构化模型输出无效",
+                },
+            } satisfies QuestionAnalysisArtifact,
+            { producer: "test" },
+        );
+        const provider = new SaveReportProvider(
+            structuredInterviewArtifactId,
+            analysisArtifactId,
+            "saved-report.md",
+        );
+        const agent = new AgentLoop({
+            queryEngine: new QueryEngine(provider),
+            toolRegistry: createToolRegistry({ cwd: directory, model: "fake-model" }),
+            contextManager: {
+                async build(input) {
+                    return { messages: [...input.messages], tools: [...input.tools] };
+                },
+            },
+            model: "fake-model",
+            maxContextTokens: 100_000,
+            maxOutputTokens: 20_000,
+            maxSteps: 4,
+            artifactStore: artifacts,
+        });
+
+        assert.equal(await agent.run("分析并保存报告"), "报告已保存");
+        const saved = await readFile(join(directory, "saved-report.md"), "utf8");
+        assert.equal(saved, provider.reportMarkdown);
+        assert.match(saved, /面试分析报告/);
+        assert.match(saved, new RegExp(sourceSentence));
+        assert.equal(provider.requests.length, 3);
+        assert.deepEqual(agent.getMessages().map((message) => message.role), [
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "tool",
+            "assistant",
+        ]);
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
 });

@@ -17,14 +17,14 @@ description: 分析完整面试文字稿，生成有证据边界的逐题复盘�
 2. 调用 `parse_transcript({ sourceArtifactId })`，记录返回的 `artifactId` 为 `transcriptArtifactId`。
 3. 调用 `structure_interview({ transcriptArtifactId })`，记录返回的 `artifactId` 为 `structuredInterviewArtifactId`，并保留 `questionIds`。
 4. 按 `questionIds` 顺序逐题调用 `analyze_answer({ structuredInterviewArtifactId, questionId })`。每次都收集返回的 `artifactId`；`completed`、`not_scored`、`failed` 都继续下一题。
-5. 全部题目处理后调用 `generate_report({ structuredInterviewArtifactId, analysisArtifactIds, stage: "provisional" })`，其中 `analysisArtifactIds` 是上一步按题目顺序收集的全部 Artifact ID。不得复制问题、回答或分析 JSON。
-6. `generate_report` 成功即表示分析完成。直接向用户返回结论、待确认项和生成的 Markdown，不得再询问是否生成正式复盘报告。
+5. 全部题目处理后，用户未要求保存时调用 `generate_report({ structuredInterviewArtifactId, analysisArtifactIds, stage: "provisional", returnDirectly: true })`；用户明确要求保存时传 `returnDirectly: false`。`analysisArtifactIds` 是上一步按题目顺序收集的全部 Artifact ID。不得复制问题、回答或分析 JSON。
+6. `returnDirectly: true` 时，`generate_report` 成功即由宿主直接交付完整 Markdown；`returnDirectly: false` 时，必须完成 `write_file` 后再确认保存路径。不得再询问是否生成正式复盘报告。
 
 ## 保存规则
 
 - 完成分析不等于保存文件，默认不得调用 `write_file`。
 - 只有用户明确要求保存报告时，才调用 `write_file`。
-- 保存时使用 `generate_report` 返回的完整 `markdown`，并设置 `overwrite: false`。
+- 保存时使用 `generate_report(returnDirectly: false)` 返回的完整 `markdown`，紧接着调用 `write_file`，并设置 `overwrite: false`。
 - 未获得明确保存要求时，不得声称已经创建报告文件。
 
 ## 失败边界

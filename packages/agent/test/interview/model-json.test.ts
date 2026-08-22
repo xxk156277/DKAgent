@@ -82,10 +82,9 @@ test("queryModelJson 的所有模型 Trace 只记录元数据", async () => {
     assert.match(serialized, /resultType/);
 });
 
-test("Provider 异常在 Trace 中使用固定安全错误且向调用方重抛原对象", async () => {
+test("Provider 异常对调用方和 Trace 都使用固定安全错误", async () => {
     const secret = "Provider 异常中的秘密面试原文";
     const original = new Error(secret);
-    original.name = "AbortError";
     const provider = {
         name: "throwing",
         async *stream() {
@@ -108,7 +107,10 @@ test("Provider 异常在 Trace 中使用固定安全错误且向调用方重抛�
             tracer: new Tracer(traceStore),
             traceOperation: "test_provider_error",
         }),
-        (error) => error === original,
+        (error: unknown) => {
+            assert.equal((error as Error).message, "结构化模型请求失败");
+            return true;
+        },
     );
 
     const events = traceStore.list().filter((event) => event.name === "model.request");
@@ -116,4 +118,95 @@ test("Provider 异常在 Trace 中使用固定安全错误且向调用方重抛�
     const serialized = JSON.stringify(events);
     assert.doesNotMatch(serialized, new RegExp(secret));
     assert.match(serialized, /结构化模型请求失败/);
+});
+
+test("JSON 解析和 Zod Schema 失败只抛固定输出错误", async () => {
+    const secret = "MODEL_OUTPUT_SECRET_20260822";
+    for (const response of [
+        `${secret} not-json`,
+        JSON.stringify({ value: "ok", [secret]: true }),
+    ]) {
+        await assert.rejects(
+            () => queryModelJson({
+                queryEngine: new QueryEngine(new FakeTextProvider(response)),
+                model: "deepseek-v4-pro",
+                systemPrompt: "只输出 JSON。",
+                userContent: "输入",
+                schema: z.object({ value: z.string() }).strict(),
+                abortSignal: new AbortController().signal,
+                traceOperation: "test_invalid_output",
+            }),
+            (error: unknown) => {
+                assert.equal((error as Error).message, "结构化模型输出无效");
+                assert.doesNotMatch((error as Error).message, new RegExp(secret));
+                return true;
+            },
+        );
+    }
+});
+
+test("AbortError、ABORT_ERR 和已中止 Signal 保持安全取消语义", async () => {
+    const secret = "ABORT_SECRET_20260822";
+    const cases = [
+        Object.assign(new Error(secret), { name: "AbortError" }),
+        Object.assign(new Error(secret), { code: "ABORT_ERR" }),
+    ];
+
+    for (const original of cases) {
+        const provider = {
+            name: "aborting",
+            async *stream() {
+                throw original;
+            },
+            async countTokens() {
+                return 0;
+            },
+        } satisfies LLMProvider;
+        const traceStore = new MemoryTraceStore();
+        await assert.rejects(
+            () => queryModelJson({
+                queryEngine: new QueryEngine(provider),
+                model: "deepseek-v4-pro",
+                systemPrompt: "只输出 JSON。",
+                userContent: "输入",
+                schema: z.object({ value: z.string() }).strict(),
+                abortSignal: new AbortController().signal,
+                tracer: new Tracer(traceStore),
+                traceOperation: "test_abort",
+            }),
+            (error: unknown) => {
+                assert.equal((error as Error).name, "AbortError");
+                assert.equal((error as Error).message, "操作已中止");
+                return true;
+            },
+        );
+        assert.doesNotMatch(JSON.stringify(traceStore.list()), new RegExp(secret));
+    }
+
+    let providerCalled = false;
+    const controller = new AbortController();
+    controller.abort(secret);
+    const provider = {
+        name: "must-not-run",
+        async *stream() {
+            providerCalled = true;
+            yield { type: "text_delta" as const, content: "{}" };
+        },
+        async countTokens() {
+            return 0;
+        },
+    } satisfies LLMProvider;
+    await assert.rejects(
+        () => queryModelJson({
+            queryEngine: new QueryEngine(provider),
+            model: "deepseek-v4-pro",
+            systemPrompt: "只输出 JSON。",
+            userContent: "输入",
+            schema: z.object({ value: z.string() }).strict(),
+            abortSignal: controller.signal,
+            traceOperation: "test_pre_aborted",
+        }),
+        (error: unknown) => (error as Error).name === "AbortError",
+    );
+    assert.equal(providerCalled, false);
 });

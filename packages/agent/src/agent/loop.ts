@@ -227,7 +227,7 @@ export class AgentLoop {
             if (!dispatched.result.success || finalOutput !== undefined) continue;
             finalOutput = this.options.toolRegistry
                 .resolve(dispatched.name)
-                .getFinalOutput?.(dispatched.result);
+                .getFinalOutput?.(dispatched.input, dispatched.result);
         }
         return finalOutput;
     }

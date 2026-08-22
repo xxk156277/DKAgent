@@ -323,7 +323,11 @@ test("终点 Tool 在协议消息完整后原样返回并持久化最终文本",
     const markdown = ["# 完整报告", "", "逐题分析".repeat(500)].join("\n");
     const provider = new FakeProvider([[
         { type: "tool_call_start", index: 0, id: "call-final", name: "final_output" },
-        { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+        {
+            type: "tool_call_delta",
+            index: 0,
+            argumentsDelta: JSON.stringify({ returnDirectly: true }),
+        },
         { type: "tool_call_end", index: 0 },
         { type: "tool_call_start", index: 1, id: "call-auxiliary", name: "auxiliary" },
         { type: "tool_call_delta", index: 1, argumentsDelta: "{}" },
@@ -331,17 +335,24 @@ test("终点 Tool 在协议消息完整后原样返回并持久化最终文本",
         { type: "message_end", usage, stopReason: "tool_use" },
     ]]);
     const registry = new ToolRegistry();
-    const terminalTool: Tool<Record<string, never>, { markdown: string }> & {
-        getFinalOutput(result: ToolResult<{ markdown: string }>): string | undefined;
+    const terminalTool: Tool<{ returnDirectly: boolean }, { markdown: string }> & {
+        getFinalOutput(
+            input: { returnDirectly: boolean },
+            result: ToolResult<{ markdown: string }>,
+        ): string | undefined;
     } = {
         name: "final_output",
         description: "返回最终文本",
-        parameters: { type: "object", properties: {}, additionalProperties: false },
+        parameters: {
+            type: "object",
+            properties: { returnDirectly: { type: "boolean" } },
+            additionalProperties: false,
+        },
         async execute() {
             return { success: true, data: { markdown } };
         },
-        getFinalOutput(result) {
-            return result.success ? result.data?.markdown : undefined;
+        getFinalOutput(input, result) {
+            return input.returnDirectly && result.success ? result.data?.markdown : undefined;
         },
     };
     registry.register(terminalTool);
@@ -376,6 +387,10 @@ test("终点 Tool 在协议消息完整后原样返回并持久化最终文本",
 
     assert.equal(await agent.run("生成完整报告"), markdown);
     assert.equal(provider.requests.length, 1);
+    assert.deepEqual(provider.requests[0]?.messages[0], {
+        role: "user",
+        content: "生成完整报告",
+    });
     assert.equal(auxiliaryExecuteCount, 1);
     assert.deepEqual(agent.getMessages().map((message) => message.role), [
         "user",
@@ -411,7 +426,7 @@ test("终点 Tool 失败时继续交回模型且普通文本不重复推送", as
                 error: { code: "input_error" as const, message: "报告输入无效" },
             };
         },
-        getFinalOutput(result) {
+        getFinalOutput(_input, result) {
             return result.success ? "不应返回" : undefined;
         },
     });
@@ -458,7 +473,7 @@ test("Tool 执行期间中止时完成整批协议配对但不输出终点文本
             controller.abort();
             return { success: true, data: { markdown } };
         },
-        getFinalOutput(result) {
+        getFinalOutput(_input, result) {
             return result.success ? result.data?.markdown : undefined;
         },
     });

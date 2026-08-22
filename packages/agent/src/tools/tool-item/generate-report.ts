@@ -63,6 +63,7 @@ export interface GenerateReportInput {
     structuredInterviewArtifactId: string;
     analysisArtifactIds: string[];
     stage: "provisional" | "final";
+    returnDirectly?: boolean;
     metadata?: Partial<InterviewMetadata>;
 }
 
@@ -81,6 +82,11 @@ export interface GenerateReportOutput {
 }
 
 const IMPACT_ORDER = { high: 2, medium: 1, low: 0 } as const;
+
+function isAbortError(error: unknown): boolean {
+    const value = error as { name?: unknown; code?: unknown } | null;
+    return value?.name === "AbortError" || value?.code === "ABORT_ERR";
+}
 
 const DIMENSION_LABELS = {
     contentQuality: "内容质量",
@@ -503,17 +509,28 @@ export function createGenerateReportTool(
                 },
                 // projectFactSets: { type: "array", description: "项目事实集合" },
                 stage: { type: "string", enum: ["provisional", "final"] },
+                returnDirectly: {
+                    type: "boolean",
+                    description: "true 直接返回报告；false 供后续 write_file 保存",
+                },
                 metadata: { type: "object", description: "面试元数据" },
                 // jdText: { type: "string", description: "可选岗位描述原文" },
             },
             required: ["structuredInterviewArtifactId", "analysisArtifactIds", "stage"],
             additionalProperties: false,
         },
-        getFinalOutput(result) {
+        getFinalOutput(input, result) {
+            if (input.returnDirectly === false) return undefined;
             if (!result.success || !result.data?.markdown.trim()) return undefined;
             return result.data.markdown;
         },
         async execute(input, ctx) {
+            if (
+                input.returnDirectly !== undefined
+                && typeof input.returnDirectly !== "boolean"
+            ) {
+                return inputError("returnDirectly 必须是布尔值");
+            }
             if (!ctx.artifactStore) {
                 return inputError("ArtifactStore 未初始化");
             }
@@ -667,7 +684,13 @@ export function createGenerateReportTool(
                     strengths = summary.strengths;
                     coreIssues = summary.coreIssues;
                     priorityImprovements = summary.priorityImprovements;
-                } catch {
+                } catch (error) {
+                    if (isAbortError(error) || ctx.abortSignal.aborted) {
+                        return {
+                            success: false,
+                            error: { code: "timeout", message: "操作已中止" },
+                        };
+                    }
                     // 汇总是可降级步骤；确定性分数和逐题分析保持可用。
                 }
             }
