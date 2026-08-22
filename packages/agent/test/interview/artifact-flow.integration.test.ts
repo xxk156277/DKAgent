@@ -4,12 +4,54 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { MemoryTraceStore, Tracer } from "@dkagent/trace";
+import { AgentLoop } from "../../src/agent/loop.js";
 import { InMemoryArtifactStore } from "../../src/artifact/index.js";
 import type { QuestionAnalysisArtifact } from "../../src/interview/artifact-payloads.js";
+import type { StructuredInterview } from "../../src/interview/types.js";
+import type {
+    LLMProvider,
+    StreamEvent,
+    StreamParams,
+} from "../../src/query-engine/provider.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { createToolRegistry } from "../../src/tools/index.js";
 import type { ToolContext, ToolResult } from "../../src/tools/types.js";
 import { FakeTextProvider } from "./fake-provider.js";
+
+class SingleToolCallProvider implements LLMProvider {
+    public readonly name = "single-tool-call";
+    public readonly requests: StreamParams[] = [];
+
+    public constructor(private readonly input: Record<string, unknown>) { }
+
+    public async *stream(params: StreamParams): AsyncIterable<StreamEvent> {
+        this.requests.push(params);
+        if (this.requests.length > 1) {
+            throw new Error("终点 Tool 后不应再次请求模型");
+        }
+        yield {
+            type: "tool_call_start",
+            index: 0,
+            id: "call-generate-report",
+            name: "generate_report",
+        };
+        yield {
+            type: "tool_call_delta",
+            index: 0,
+            argumentsDelta: JSON.stringify(this.input),
+        };
+        yield { type: "tool_call_end", index: 0 };
+        yield {
+            type: "message_end",
+            usage: { inputTokens: 1, outputTokens: 1 },
+            stopReason: "tool_use",
+        };
+    }
+
+    public async countTokens(): Promise<number> {
+        return 0;
+    }
+}
 
 const sourceSentence = "我负责低代码 DSL 渲染链路，并把首屏耗时降低了百分之三十。";
 const source = [
@@ -211,4 +253,102 @@ test("Tool Registry Artifact 引用链隐藏中间大对象并在单题模型失
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+});
+
+test("AgentLoop 在失败题报告生成后直接返回 Tool 的完整 Markdown", async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const structuredInterview: StructuredInterview = {
+        transcript: {
+            source,
+            turns: [
+                {
+                    id: "turn-0001",
+                    speaker: "interviewer",
+                    speakerLabel: "面试官",
+                    content: "请介绍你的低代码项目。",
+                    sourceStart: 0,
+                    sourceEnd: 12,
+                },
+                {
+                    id: "turn-0002",
+                    speaker: "candidate",
+                    speakerLabel: "候选人",
+                    content: sourceSentence,
+                    sourceStart: 13,
+                    sourceEnd: 13 + sourceSentence.length,
+                },
+            ],
+        },
+        clusters: [{ id: "cluster-0001", title: "低代码项目", questionIds: ["question-0001"] }],
+        questions: [{
+            id: "question-0001",
+            clusterId: "cluster-0001",
+            promptTurnIds: ["turn-0001"],
+            promptSegments: [{ turnId: "turn-0001", text: "请介绍你的低代码项目。" }],
+            answerTurnIds: ["turn-0002"],
+            originalQuestion: "请介绍你的低代码项目。",
+            originalAnswer: sourceSentence,
+            questionType: "project",
+            scored: true,
+            sourceStart: 0,
+            sourceEnd: source.length,
+        }],
+        nonQuestionTurnIds: [],
+    };
+    const structuredInterviewArtifactId = artifacts.put(
+        "structured_interview",
+        structuredInterview,
+        { producer: "test" },
+    );
+    const analysisArtifactId = artifacts.put(
+        "question_analysis",
+        {
+            structuredInterviewArtifactId,
+            analysis: {
+                status: "failed",
+                questionId: "question-0001",
+                clusterId: "cluster-0001",
+                error: "模型 JSON 无效",
+            },
+        } satisfies QuestionAnalysisArtifact,
+        { producer: "test" },
+    );
+    const provider = new SingleToolCallProvider({
+        structuredInterviewArtifactId,
+        analysisArtifactIds: [analysisArtifactId],
+        stage: "provisional",
+    });
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: createToolRegistry({ model: "fake-model" }),
+        contextManager: {
+            async build(input) {
+                return {
+                    messages: [...input.messages],
+                    tools: [...input.tools],
+                };
+            },
+        },
+        model: "fake-model",
+        maxContextTokens: 10_000,
+        maxOutputTokens: 1_000,
+        artifactStore: artifacts,
+    });
+
+    const answer = await agent.run("生成报告");
+    const messages = agent.getMessages();
+    const toolMessage = messages.find((message) => message.role === "tool");
+    assert.ok(toolMessage?.content);
+    const toolResult = JSON.parse(toolMessage.content) as ToolResult<{
+        markdown: string;
+    }>;
+
+    assert.equal(provider.requests.length, 1);
+    assert.equal(toolResult.success, true);
+    assert.equal(answer, toolResult.data?.markdown);
+    assert.deepEqual(messages.at(-1), { role: "assistant", content: answer });
+    assert.match(answer, /### Q1/);
+    assert.match(answer, /模型 JSON 无效/);
+    assert.match(answer, new RegExp(sourceSentence));
+    assert.doesNotMatch(answer, /因篇幅省略/);
 });

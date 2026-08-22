@@ -73,16 +73,13 @@ test("从任意工作目录启动时仍托管包内 Vite 构建", async (t) => {
 });
 
 test("Tap 启动失败时仍以无 sink 模式启动 Agent CLI", async (t) => {
+  const isolatedCwd = await mkdtemp(join(tmpdir(), "dkagent-observe-fallback-"));
   const occupied = createServer();
   await new Promise<void>((resolve) => occupied.listen(4319, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve, reject) => occupied.close((error) => (error ? reject(error) : resolve()))));
 
-  const child = spawn(process.execPath, [
-    "--import",
-    "tsx",
-    "packages/web-tap/src/observe.ts",
-  ], {
-    cwd: process.cwd(),
+  const child = spawn(process.execPath, ["--import", tsxImportPath, observePath], {
+    cwd: isolatedCwd,
     env: dummyEnv,
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -105,5 +102,5 @@ test("Tap 启动失败时仍以无 sink 模式启动 Agent CLI", async (t) => {
 
   assert.equal(output.code, 0);
   assert.match(output.text, /DKAgent Tap 启动失败，将继续运行 Agent/);
-  assert.match(output.text, /DKAgent 已启动/);
+  assert.match(output.text, /DKAgent 已创建 Session [0-9a-f-]{36}/);
 });

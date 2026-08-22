@@ -162,7 +162,19 @@ export class AgentLoop {
             ...(response.content === undefined ? {} : { content: response.content }),
             toolCalls: response.toolCalls,
         });
-        await this.runToolCalls(response, step);
+        const finalOutput = await this.runToolCalls(response, step);
+        if (finalOutput !== undefined) {
+            this.appendMessage({ role: "assistant", content: finalOutput });
+            this.options.onTextDelta?.(finalOutput);
+            stepSpan.setOutput({
+                toolCallCount: response.toolCalls.length,
+                finalOutput: true,
+            });
+            return {
+                answer: finalOutput,
+                shouldCaptureMemory: false,
+            };
+        }
         stepSpan.setOutput({ toolCallCount: response.toolCalls.length });
         return undefined;
     }
@@ -170,7 +182,8 @@ export class AgentLoop {
     private async runToolCalls(
         response: Extract<ModelResponse, { type: "tool_use" }>,
         step: number,
-    ): Promise<void> {
+    ): Promise<string | undefined> {
+        let finalOutput: string | undefined;
         for (const call of response.toolCalls) {
             const dispatched = await this.tracer.span(
                 "tool.call",
@@ -197,7 +210,13 @@ export class AgentLoop {
                 toolCallId: dispatched.toolCallId,
                 content: JSON.stringify(dispatched.result),
             });
+            if (dispatched.result.success && finalOutput === undefined) {
+                finalOutput = this.options.toolRegistry
+                    .resolve(dispatched.name)
+                    .getFinalOutput?.(dispatched.result);
+            }
         }
+        return finalOutput;
     }
 
     /** Memory 不可用时仍按无记忆模式完成当前 Turn。 */

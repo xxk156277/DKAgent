@@ -509,6 +509,9 @@ export function createGenerateReportTool(
             required: ["structuredInterviewArtifactId", "analysisArtifactIds", "stage"],
             additionalProperties: false,
         },
+        getFinalOutput(result) {
+            return result.success ? result.data?.markdown : undefined;
+        },
         async execute(input, ctx) {
             if (!ctx.artifactStore) {
                 return inputError("ArtifactStore 未初始化");

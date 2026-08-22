@@ -23,7 +23,7 @@ import type {
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import type { SessionSnapshot, SessionStore } from "../../src/session/types.js";
 import { ToolRegistry } from "../../src/tools/registry.js";
-import type { Tool } from "../../src/tools/types.js";
+import type { Tool, ToolResult } from "../../src/tools/types.js";
 import type { MemoryReader, MemoryWriter } from "../../src/memory/types.js";
 import { InMemoryArtifactStore } from "../../src/artifact/index.js";
 import type { ArtifactStore } from "../../src/artifact/types.js";
@@ -317,6 +317,124 @@ test("Tool Call 执行后将结果回传模型", async () => {
     ]);
     assert.ok(traceStore.list().some((event) => event.name === "tool.call"));
     assert.ok(traceStore.list().some((event) => event.name === "tool.result"));
+});
+
+test("终点 Tool 在协议消息完整后原样返回并持久化最终文本", async () => {
+    const markdown = ["# 完整报告", "", "逐题分析".repeat(500)].join("\n");
+    const provider = new FakeProvider([[
+        { type: "tool_call_start", index: 0, id: "call-final", name: "final_output" },
+        { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 0 },
+        { type: "tool_call_start", index: 1, id: "call-auxiliary", name: "auxiliary" },
+        { type: "tool_call_delta", index: 1, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 1 },
+        { type: "message_end", usage, stopReason: "tool_use" },
+    ]]);
+    const registry = new ToolRegistry();
+    const terminalTool: Tool<Record<string, never>, { markdown: string }> & {
+        getFinalOutput(result: ToolResult<{ markdown: string }>): string | undefined;
+    } = {
+        name: "final_output",
+        description: "返回最终文本",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        async execute() {
+            return { success: true, data: { markdown } };
+        },
+        getFinalOutput(result) {
+            return result.success ? result.data?.markdown : undefined;
+        },
+    };
+    registry.register(terminalTool);
+    let auxiliaryExecuteCount = 0;
+    registry.register({
+        name: "auxiliary",
+        description: "同一批次普通工具",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        async execute() {
+            auxiliaryExecuteCount += 1;
+            return { success: true, data: { completed: true } };
+        },
+    });
+    const sessionMessages: AgentMessage[] = [];
+    const deltas: string[] = [];
+    const captures: Array<{ userInput: string; assistantAnswer: string; sessionId: string }> = [];
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: registry,
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        onTextDelta: (text) => deltas.push(text),
+        memoryWriter: {
+            async capture(input) {
+                captures.push(input);
+            },
+        },
+        session: createMemoryTestSession(sessionMessages),
+    });
+
+    assert.equal(await agent.run("生成完整报告"), markdown);
+    assert.equal(provider.requests.length, 1);
+    assert.equal(auxiliaryExecuteCount, 1);
+    assert.deepEqual(agent.getMessages().map((message) => message.role), [
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+        "assistant",
+    ]);
+    assert.deepEqual(sessionMessages, agent.getMessages());
+    assert.deepEqual(agent.getMessages().at(-1), { role: "assistant", content: markdown });
+    assert.deepEqual(deltas, [markdown]);
+    assert.deepEqual(captures, []);
+});
+
+test("终点 Tool 失败时继续交回模型且普通文本不重复推送", async () => {
+    const provider = new FakeProvider([
+        [
+            { type: "tool_call_start", index: 0, id: "call-failed-final", name: "failed_final" },
+            { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+            { type: "tool_call_end", index: 0 },
+            { type: "message_end", usage, stopReason: "tool_use" },
+        ],
+        textResponse("模型处理失败结果"),
+    ]);
+    const registry = new ToolRegistry();
+    registry.register({
+        name: "failed_final",
+        description: "失败终点工具",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        async execute() {
+            return {
+                success: false,
+                error: { code: "input_error" as const, message: "报告输入无效" },
+            };
+        },
+        getFinalOutput(result) {
+            return result.success ? "不应返回" : undefined;
+        },
+    });
+    const deltas: string[] = [];
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: registry,
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        onTextDelta: (text) => deltas.push(text),
+    });
+
+    assert.equal(await agent.run("生成报告"), "模型处理失败结果");
+    assert.equal(provider.requests.length, 2);
+    assert.deepEqual(deltas, ["模型处理失败结果"]);
+    assert.deepEqual(agent.getMessages().map((message) => message.role), [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]);
 });
 
 test("Tool Call 接收 AgentLoop 注入的 ArtifactStore", async () => {

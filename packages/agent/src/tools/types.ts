@@ -7,6 +7,8 @@ export interface Tool<TInput = unknown, TOutput = unknown> {
     readonly description: string;
     readonly parameters: Record<string, unknown>;
     execute(input: TInput, ctx: ToolContext): Promise<ToolResult<TOutput>>;
+    /** 成功结果可直接作为本轮最终 Assistant 文本时，由 Tool 原样提取。 */
+    getFinalOutput?(result: ToolResult<TOutput>): string | undefined;
 }
 
 export type AnyTool = Tool<any, any>;

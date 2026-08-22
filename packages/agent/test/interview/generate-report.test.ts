@@ -233,12 +233,18 @@ test("暂定报告展示暂定总分、覆盖率和完整问题顺序", async ()
 test("通过 Artifact 引用生成完整报告", async () => {
     const { context } = toolContext(validSummary);
     const input = baseInput(context);
+    const tool = createGenerateReportTool("fake-model");
 
-    const result = await createGenerateReportTool("fake-model").execute(input, context);
+    const result = await tool.execute(input, context);
 
     assert.equal(result.success, true);
     assert.equal(result.data?.report.score.coverage.analyzed, 2);
     assert.match(result.data?.markdown ?? "", /面试分析报告/);
+    assert.equal(tool.getFinalOutput?.(result), result.data?.markdown);
+    assert.equal(tool.getFinalOutput?.({
+        success: false,
+        error: { code: "input_error", message: "失败" },
+    }), undefined);
 });
 
 test("Artifact 不存在或类型错误时返回输入错误", async () => {
