@@ -437,6 +437,126 @@ test("终点 Tool 失败时继续交回模型且普通文本不重复推送", as
     ]);
 });
 
+test("Tool 执行期间中止时完成整批协议配对但不输出终点文本", async () => {
+    const controller = new AbortController();
+    const markdown = "# 不应输出的报告";
+    const provider = new FakeProvider([[
+        { type: "tool_call_start", index: 0, id: "call-aborted-final", name: "aborted_final" },
+        { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 0 },
+        { type: "tool_call_start", index: 1, id: "call-after-abort", name: "after_abort" },
+        { type: "tool_call_delta", index: 1, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 1 },
+        { type: "message_end", usage, stopReason: "tool_use" },
+    ]]);
+    const registry = new ToolRegistry();
+    registry.register({
+        name: "aborted_final",
+        description: "执行中中止的终点工具",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        async execute() {
+            controller.abort();
+            return { success: true, data: { markdown } };
+        },
+        getFinalOutput(result) {
+            return result.success ? result.data?.markdown : undefined;
+        },
+    });
+    let afterAbortExecuteCount = 0;
+    registry.register({
+        name: "after_abort",
+        description: "中止后仍需完成配对的工具",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        async execute() {
+            afterAbortExecuteCount += 1;
+            return { success: true, data: { completed: true } };
+        },
+    });
+    const sessionMessages: AgentMessage[] = [];
+    const deltas: string[] = [];
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: registry,
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        abortSignal: controller.signal,
+        onTextDelta: (text) => deltas.push(text),
+        session: createMemoryTestSession(sessionMessages),
+    });
+
+    await assert.rejects(agent.run("生成报告"), /Agent Run 已中止/);
+    assert.equal(afterAbortExecuteCount, 1);
+    assert.deepEqual(sessionMessages.map((message) => message.role), [
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+    ]);
+    assert.equal(
+        sessionMessages.some((message) => (
+            message.role === "assistant" && message.content === markdown
+        )),
+        false,
+    );
+    assert.equal(sessionMessages.at(-1)?.role, "tool");
+    assert.deepEqual(deltas, []);
+});
+
+test("终点提取 hook 抛错前已执行并持久化整批 Tool Result", async () => {
+    const provider = new FakeProvider([[
+        { type: "tool_call_start", index: 0, id: "call-throwing-final", name: "throwing_final" },
+        { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 0 },
+        { type: "tool_call_start", index: 1, id: "call-after-hook", name: "after_hook" },
+        { type: "tool_call_delta", index: 1, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 1 },
+        { type: "message_end", usage, stopReason: "tool_use" },
+    ]]);
+    const registry = new ToolRegistry();
+    registry.register({
+        name: "throwing_final",
+        description: "提取失败的终点工具",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        async execute() {
+            return { success: true, data: { markdown: "报告" } };
+        },
+        getFinalOutput() {
+            throw new Error("终点提取失败");
+        },
+    });
+    let afterHookExecuteCount = 0;
+    registry.register({
+        name: "after_hook",
+        description: "hook 后续工具",
+        parameters: { type: "object", properties: {}, additionalProperties: false },
+        async execute() {
+            afterHookExecuteCount += 1;
+            return { success: true, data: { completed: true } };
+        },
+    });
+    const sessionMessages: AgentMessage[] = [];
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider),
+        toolRegistry: registry,
+        contextManager: new RecordingContextBuilder(),
+        model: "fake-model",
+        maxContextTokens: 1_000,
+        maxOutputTokens: 100,
+        session: createMemoryTestSession(sessionMessages),
+    });
+
+    await assert.rejects(agent.run("生成报告"), /终点提取失败/);
+    assert.equal(afterHookExecuteCount, 1);
+    assert.deepEqual(sessionMessages.map((message) => message.role), [
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+    ]);
+});
+
 test("Tool Call 接收 AgentLoop 注入的 ArtifactStore", async () => {
     const provider = new FakeProvider([
         [

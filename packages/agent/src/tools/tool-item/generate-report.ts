@@ -510,7 +510,8 @@ export function createGenerateReportTool(
             additionalProperties: false,
         },
         getFinalOutput(result) {
-            return result.success ? result.data?.markdown : undefined;
+            if (!result.success || !result.data?.markdown.trim()) return undefined;
+            return result.data.markdown;
         },
         async execute(input, ctx) {
             if (!ctx.artifactStore) {

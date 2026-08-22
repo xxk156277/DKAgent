@@ -245,6 +245,15 @@ test("通过 Artifact 引用生成完整报告", async () => {
         success: false,
         error: { code: "input_error", message: "失败" },
     }), undefined);
+    assert.equal(tool.getFinalOutput?.({
+        success: true,
+        data: { ...result.data!, markdown: " \n\t " },
+    }), undefined);
+    const paddedMarkdown = ` \n${result.data!.markdown}\n `;
+    assert.equal(tool.getFinalOutput?.({
+        success: true,
+        data: { ...result.data!, markdown: paddedMarkdown },
+    }), paddedMarkdown);
 });
 
 test("Artifact 不存在或类型错误时返回输入错误", async () => {

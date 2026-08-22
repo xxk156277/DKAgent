@@ -1,5 +1,8 @@
 import { Tracer, type TraceSpan } from "@dkagent/trace";
-import { dispatchToolCall } from "./dispatcher.js";
+import {
+    dispatchToolCall,
+    type DispatchedToolResult,
+} from "./dispatcher.js";
 import type { AgentLoopOptions } from "./types.js";
 import { InMemoryArtifactStore, type ArtifactStore } from "../artifact/index.js";
 import type { AgentMessage, ModelResponse } from "../query-engine/provider.js";
@@ -162,7 +165,9 @@ export class AgentLoop {
             ...(response.content === undefined ? {} : { content: response.content }),
             toolCalls: response.toolCalls,
         });
-        const finalOutput = await this.runToolCalls(response, step);
+        const toolResults = await this.runToolCalls(response, step);
+        if (this.abortSignal.aborted) throw new Error("Agent Run 已中止");
+        const finalOutput = this.extractFinalOutput(toolResults);
         if (finalOutput !== undefined) {
             this.appendMessage({ role: "assistant", content: finalOutput });
             this.options.onTextDelta?.(finalOutput);
@@ -182,8 +187,8 @@ export class AgentLoop {
     private async runToolCalls(
         response: Extract<ModelResponse, { type: "tool_use" }>,
         step: number,
-    ): Promise<string | undefined> {
-        let finalOutput: string | undefined;
+    ): Promise<DispatchedToolResult[]> {
+        const toolResults: DispatchedToolResult[] = [];
         for (const call of response.toolCalls) {
             const dispatched = await this.tracer.span(
                 "tool.call",
@@ -210,11 +215,19 @@ export class AgentLoop {
                 toolCallId: dispatched.toolCallId,
                 content: JSON.stringify(dispatched.result),
             });
-            if (dispatched.result.success && finalOutput === undefined) {
-                finalOutput = this.options.toolRegistry
-                    .resolve(dispatched.name)
-                    .getFinalOutput?.(dispatched.result);
-            }
+            toolResults.push(dispatched);
+        }
+        return toolResults;
+    }
+
+    /** Tool Call/Result 全部配对完成后，才允许 Tool 提取本轮终点文本。 */
+    private extractFinalOutput(toolResults: DispatchedToolResult[]): string | undefined {
+        let finalOutput: string | undefined;
+        for (const dispatched of toolResults) {
+            if (!dispatched.result.success || finalOutput !== undefined) continue;
+            finalOutput = this.options.toolRegistry
+                .resolve(dispatched.name)
+                .getFinalOutput?.(dispatched.result);
         }
         return finalOutput;
     }
