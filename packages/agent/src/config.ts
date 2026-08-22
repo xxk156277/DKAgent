@@ -30,19 +30,39 @@ export interface AgentConfig {
     knowledgeDatabasePath?: string;
 }
 
+type ProviderName = "qwen" | "deepseek";
+
+interface ProviderProfile {
+    apiKeyVariable: string;
+    modelVariable: string;
+    baseUrlVariable: string;
+    defaultModel: string;
+    defaultBaseUrl: string;
+}
+
+const DEFAULT_PROVIDER: ProviderName = "qwen";
+
+const PROVIDER_PROFILES: Record<ProviderName, ProviderProfile> = {
+    qwen: {
+        apiKeyVariable: "QWEN_API_KEY",
+        modelVariable: "QWEN_MODEL_ID",
+        baseUrlVariable: "QWEN_BASE_URL",
+        defaultModel: "qwen3.7-flash",
+        defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    },
+    deepseek: {
+        apiKeyVariable: "DEEPSEEK_API_KEY",
+        modelVariable: "DEEPSEEK_MODEL_ID",
+        baseUrlVariable: "DEEPSEEK_BASE_URL",
+        defaultModel: "deepseek-v4-pro",
+        defaultBaseUrl: "https://api.deepseek.com",
+    },
+};
+
 export function loadConfig(
     env: NodeJS.ProcessEnv = process.env,
 ): AgentConfig {
-    const apiKey = env.LLM_API_KEY?.trim();
-
-    if (!apiKey) {
-        throw new Error(
-            "缺少环境变量 LLM_API_KEY",
-        );
-    }
-
-    /** ------ 从env中获取基本配置信息 -------- */
-    const baseURL = env.LLM_BASE_URL?.trim();
+    const providerConfig = loadProviderConfig(env);
 
     const maxContextTokens = parsePositiveInteger(
         env.LLM_CONTEXT_WINDOW_TOKENS,
@@ -66,21 +86,77 @@ export function loadConfig(
         );
     }
 
-    const model = env.LLM_MODEL_ID?.trim() || "gpt-4.1-mini";
     const knowledgeDatabasePath = env.KNOWLEDGE_DATABASE_PATH?.trim();
 
     return {
-        apiKey,
-        model,
+        apiKey: providerConfig.apiKey,
+        model: providerConfig.model,
         maxContextTokens,
         maxOutputTokens,
         contextCompaction: {
             ...DEFAULT_CONTEXT_COMPACTION_OPTIONS,
         },
         summaryModel:
-            env.LLM_SUMMARY_MODEL_ID?.trim() || model,
-        ...(baseURL ? { baseURL } : {}),
+            env.LLM_SUMMARY_MODEL_ID?.trim() || providerConfig.model,
+        ...(providerConfig.baseURL
+            ? { baseURL: providerConfig.baseURL }
+            : {}),
         ...(knowledgeDatabasePath ? { knowledgeDatabasePath } : {}),
+    };
+}
+
+/**
+ * 解析模型配置档；旧版 LLM_* 变量保持兼容，便于已有部署平滑迁移。
+ */
+function loadProviderConfig(env: NodeJS.ProcessEnv): {
+    apiKey: string;
+    model: string;
+    baseURL?: string;
+} {
+    const configuredProvider = env.LLM_PROVIDER?.trim().toLowerCase();
+
+    if (!configuredProvider && env.LLM_API_KEY?.trim()) {
+        const baseURL = env.LLM_BASE_URL?.trim();
+        return {
+            apiKey: env.LLM_API_KEY.trim(),
+            model: env.LLM_MODEL_ID?.trim() || "gpt-4.1-mini",
+            ...(baseURL ? { baseURL } : {}),
+        };
+    }
+
+    const provider = configuredProvider || DEFAULT_PROVIDER;
+    if (provider !== "qwen" && provider !== "deepseek") {
+        throw new Error("LLM_PROVIDER 必须是 qwen 或 deepseek");
+    }
+
+    const profile = PROVIDER_PROFILES[provider];
+    const profileApiKey = env[profile.apiKeyVariable]?.trim();
+    const legacyApiKey = provider === "deepseek"
+        ? env.LLM_API_KEY?.trim()
+        : undefined;
+    const apiKey = profileApiKey || legacyApiKey;
+    if (!apiKey) {
+        throw new Error(`缺少环境变量 ${profile.apiKeyVariable}`);
+    }
+
+    const usesLegacyDeepSeekProfile = provider === "deepseek" && !profileApiKey;
+    const legacyModel = usesLegacyDeepSeekProfile
+        ? env.LLM_MODEL_ID?.trim()
+        : undefined;
+    const legacyBaseUrl = usesLegacyDeepSeekProfile
+        ? env.LLM_BASE_URL?.trim()
+        : undefined;
+
+    return {
+        apiKey,
+        model:
+            env[profile.modelVariable]?.trim()
+            || legacyModel
+            || profile.defaultModel,
+        baseURL:
+            env[profile.baseUrlVariable]?.trim()
+            || legacyBaseUrl
+            || profile.defaultBaseUrl,
     };
 }
 
