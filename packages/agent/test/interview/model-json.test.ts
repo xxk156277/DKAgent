@@ -3,6 +3,7 @@ import test from "node:test";
 import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { z } from "zod";
 import { queryModelJson } from "../../src/interview/model-json.js";
+import type { LLMProvider } from "../../src/query-engine/provider.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { FakeTextProvider } from "./fake-provider.js";
 
@@ -79,4 +80,40 @@ test("queryModelJson 的所有模型 Trace 只记录元数据", async () => {
     assert.match(serialized, /outputTokens/);
     assert.match(serialized, /stopReason/);
     assert.match(serialized, /resultType/);
+});
+
+test("Provider 异常在 Trace 中使用固定安全错误且向调用方重抛原对象", async () => {
+    const secret = "Provider 异常中的秘密面试原文";
+    const original = new Error(secret);
+    original.name = "AbortError";
+    const provider = {
+        name: "throwing",
+        async *stream() {
+            throw original;
+        },
+        async countTokens() {
+            return 0;
+        },
+    } satisfies LLMProvider;
+    const traceStore = new MemoryTraceStore();
+
+    await assert.rejects(
+        () => queryModelJson({
+            queryEngine: new QueryEngine(provider),
+            model: "deepseek-v4-pro",
+            systemPrompt: "只输出 JSON。",
+            userContent: "输入",
+            schema: z.object({ value: z.string() }).strict(),
+            abortSignal: new AbortController().signal,
+            tracer: new Tracer(traceStore),
+            traceOperation: "test_provider_error",
+        }),
+        (error) => error === original,
+    );
+
+    const events = traceStore.list().filter((event) => event.name === "model.request");
+    assert.deepEqual(events.map((event) => event.phase), ["start", "error"]);
+    const serialized = JSON.stringify(events);
+    assert.doesNotMatch(serialized, new RegExp(secret));
+    assert.match(serialized, /结构化模型请求失败/);
 });

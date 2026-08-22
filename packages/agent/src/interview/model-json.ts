@@ -3,6 +3,8 @@ import type { TraceSpan, Tracer } from "@dkagent/trace";
 import type { ModelResponse } from "../query-engine/provider.js";
 import type { QueryEngine } from "../query-engine/query-engine.js";
 
+const SAFE_MODEL_REQUEST_ERROR = "结构化模型请求失败";
+
 export async function queryModelJson<T>(input: {
     queryEngine: QueryEngine;
     model: string;
@@ -30,8 +32,17 @@ export async function queryModelJson<T>(input: {
         responseFormat: request.responseFormat,
         thinking: request.thinking,
     };
+    let providerFailed = false;
+    let providerError: unknown;
     const execute = async (span?: TraceSpan): Promise<ModelResponse> => {
-        const response = await input.queryEngine.query(request);
+        let response: ModelResponse;
+        try {
+            response = await input.queryEngine.query(request);
+        } catch (error) {
+            providerFailed = true;
+            providerError = error;
+            throw new Error(SAFE_MODEL_REQUEST_ERROR);
+        }
         const responseMetadata = {
             model: request.model,
             resultType: response.type,
@@ -47,14 +58,20 @@ export async function queryModelJson<T>(input: {
         return response;
     };
 
-    const response = input.tracer
-        ? await input.tracer.span(
-            "model.request",
-            traceRequest,
-            execute,
-            { module: "skill", operation: input.traceOperation },
-        )
-        : await execute();
+    let response: ModelResponse;
+    try {
+        response = input.tracer
+            ? await input.tracer.span(
+                "model.request",
+                traceRequest,
+                execute,
+                { module: "skill", operation: input.traceOperation },
+            )
+            : await execute();
+    } catch (error) {
+        if (providerFailed) throw providerError;
+        throw error;
+    }
 
     if (response.stopReason === "max_tokens") {
         throw new Error("结构化模型输出达到 Token 上限，JSON 可能被截断");

@@ -206,8 +206,8 @@ export async function structureInterview(input: StructureInput): Promise<Structu
             }
         }
 
-        const interviewerRunEnd = Math.max(
-            ...draft.question.promptSegments.map((segment) => {
+        const interviewerRunEnds = new Set(
+            draft.question.promptSegments.map((segment) => {
                 let index = turnIndexById.get(segment.turnId)!;
                 while (input.transcript.turns[index + 1]?.speaker === "interviewer") {
                     index += 1;
@@ -215,6 +215,11 @@ export async function structureInterview(input: StructureInput): Promise<Structu
                 return index;
             }),
         );
+        if (interviewerRunEnds.size !== 1) {
+            throw new Error(`问题片段跨越了多个提问组: ${draft.modelOrder + 1}`);
+        }
+
+        const interviewerRunEnd = [...interviewerRunEnds][0]!;
         const expectedAnswerTurnIds: string[] = [];
         for (
             let index = interviewerRunEnd + 1;

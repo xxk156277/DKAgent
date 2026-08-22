@@ -239,7 +239,7 @@ test("连续多个面试官提问共享其后紧邻的候选人回答块", async
     ]);
 });
 
-test("同一问题的提示片段跨提问组时使用最后一组确定回答窗口", async () => {
+test("拒绝把主问题和回答后的追问合成同一题", async () => {
     const relation = validRelation();
     relation.clusters[0]!.questions[0] = {
         promptSegments: [
@@ -251,10 +251,7 @@ test("同一问题的提示片段跨提问组时使用最后一组确定回答�
     };
     relation.clusters[0]!.questions.splice(2, 1);
 
-    const { result } = await runWith(relation);
-
-    assert.deepEqual(result.questions[0]?.promptTurnIds, ["turn-0001", "turn-0003"]);
-    assert.deepEqual(result.questions[0]?.answerTurnIds, ["turn-0004"]);
+    await assert.rejects(() => runWith(relation), /问题片段跨越了多个提问组/);
 });
 
 test("按原文位置规范化问题和问题簇顺序后生成稳定 ID", async () => {
