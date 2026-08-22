@@ -15,13 +15,13 @@ export interface ParsedTranscript {
     turns: TranscriptTurn[];
 }
 
-export interface TranscriptCorrection {
-    turnId: string;
-    original: string;
-    replacement: string;
-    confidence: number;
-    reason: string;
-}
+// export interface TranscriptCorrection {
+//     turnId: string;
+//     original: string;
+//     replacement: string;
+//     confidence: number;
+//     reason: string;
+// }
 
 export interface TranscriptSegment {
     turnId: string;
@@ -58,7 +58,7 @@ export interface QuestionCluster {
 
 export interface StructuredInterview {
     transcript: ParsedTranscript;
-    corrections: TranscriptCorrection[];
+    // corrections: TranscriptCorrection[];
     questions: InterviewQuestion[];
     clusters: QuestionCluster[];
     nonQuestionTurnIds: string[];

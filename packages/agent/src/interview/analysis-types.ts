@@ -62,32 +62,32 @@ export type QuestionAnalysis =
     | FailedQuestionAnalysis
     | NotScoredQuestionAnalysis;
 
-export type ProjectFactStatus = "stated" | "inferred" | "unknown";
-export type ProjectFactCategory =
-    | "background"
-    | "responsibility"
-    | "decision"
-    | "implementation"
-    | "metric"
-    | "result";
-
-export interface ProjectFact {
-    key: string;
-    category: ProjectFactCategory;
-    value: string | null;
-    status: ProjectFactStatus;
-    evidenceTurnIds: string[];
-    evidenceQuote: string | null;
-    affectedQuestionIds: string[];
-    clarificationQuestion: string | null;
-    impact: EvidenceImpact;
-}
-
-export interface ProjectFactSet {
-    clusterId: string;
-    facts: ProjectFact[];
-    clarificationCandidates: ClarificationCandidate[];
-}
+// export type ProjectFactStatus = "stated" | "inferred" | "unknown";
+// export type ProjectFactCategory =
+//     | "background"
+//     | "responsibility"
+//     | "decision"
+//     | "implementation"
+//     | "metric"
+//     | "result";
+//
+// export interface ProjectFact {
+//     key: string;
+//     category: ProjectFactCategory;
+//     value: string | null;
+//     status: ProjectFactStatus;
+//     evidenceTurnIds: string[];
+//     evidenceQuote: string | null;
+//     affectedQuestionIds: string[];
+//     clarificationQuestion: string | null;
+//     impact: EvidenceImpact;
+// }
+//
+// export interface ProjectFactSet {
+//     clusterId: string;
+//     facts: ProjectFact[];
+//     clarificationCandidates: ClarificationCandidate[];
+// }
 
 export interface ExpressionStats {
     /** 识别到的语气词及各自出现次数。 */
@@ -141,17 +141,17 @@ export interface InterviewMetadata {
     round: string | null;
 }
 
-export interface JobMatchItem {
-    text: string;
-    jdEvidence: string;
-    questionIds: string[];
-}
-
-export interface JobMatchAnalysis {
-    summary: string;
-    matches: JobMatchItem[];
-    gaps: JobMatchItem[];
-}
+// export interface JobMatchItem {
+//     text: string;
+//     jdEvidence: string;
+//     questionIds: string[];
+// }
+//
+// export interface JobMatchAnalysis {
+//     summary: string;
+//     matches: JobMatchItem[];
+//     gaps: JobMatchItem[];
+// }
 
 export interface InterviewReport {
     stage: "provisional" | "final";
@@ -163,8 +163,8 @@ export interface InterviewReport {
     strengths: ReportReferenceItem[];
     coreIssues: ReportReferenceItem[];
     priorityImprovements: ReportReferenceItem[];
-    jobMatchStatus: "not_provided" | "completed" | "failed";
-    jobMatch: JobMatchAnalysis | null;
+    // jobMatchStatus: "not_provided" | "completed" | "failed";
+    // jobMatch: JobMatchAnalysis | null;
     pendingClarifications: ClarificationCandidate[];
     questions: ReportQuestionItem[];
 }

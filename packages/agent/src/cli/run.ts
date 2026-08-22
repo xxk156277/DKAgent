@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { Tracer } from "@dkagent/trace";
 import { createInterface } from "node:readline";
-import { existsSync } from "node:fs";
+// import { existsSync } from "node:fs";
 import { AgentLoop } from "../agent/loop.js";
 import { AGENT_SYSTEM_PROMPT } from "../agent/prompt.js";
 import { loadConfig } from "../config.js";
@@ -26,12 +26,12 @@ import {
 } from "../memory/index.js";
 import { createToolRegistry } from "../tools/index.js";
 import { InMemoryArtifactStore, type ArtifactStore } from "../artifact/index.js";
-import {
-    KnowledgeRepository,
-    KnowledgeSearch,
-    openKnowledgeDatabase,
-} from "../knowledge/index.js";
-import { createKnowledgeReferenceRetriever } from "../skills/knowledge-reference-retriever.js";
+// import {
+//     KnowledgeRepository,
+//     KnowledgeSearch,
+//     openKnowledgeDatabase,
+// } from "../knowledge/index.js";
+// import { createKnowledgeReferenceRetriever } from "../skills/knowledge-reference-retriever.js";
 import { appendAvailableSkills } from "../skills/prompt.js";
 import { createSkillRegistry } from "../skills/registry.js";
 import { createSafePrompt } from "./safe-prompt.js";
@@ -47,18 +47,18 @@ export async function runAgentCli(options: {
     const config = loadConfig();
     const provider = new OpenAICompatibleProvider(config.apiKey, config.baseURL);
     const queryEngine = new QueryEngine(provider);
-    const knowledgeDatabase = config.knowledgeDatabasePath
-        && existsSync(config.knowledgeDatabasePath)
-        ? openKnowledgeDatabase(config.knowledgeDatabasePath)
-        : undefined;
-    const referenceRetriever = knowledgeDatabase
-        ? createKnowledgeReferenceRetriever(
-            new KnowledgeSearch(new KnowledgeRepository(knowledgeDatabase)),
-        )
-        : undefined;
+    // const knowledgeDatabase = config.knowledgeDatabasePath
+    //     && existsSync(config.knowledgeDatabasePath)
+    //     ? openKnowledgeDatabase(config.knowledgeDatabasePath)
+    //     : undefined;
+    // const referenceRetriever = knowledgeDatabase
+    //     ? createKnowledgeReferenceRetriever(
+    //         new KnowledgeSearch(new KnowledgeRepository(knowledgeDatabase)),
+    //     )
+    //     : undefined;
     const toolRegistry = createToolRegistry({
         model: config.model,
-        ...(referenceRetriever ? { referenceRetriever } : {}),
+        // ...(referenceRetriever ? { referenceRetriever } : {}),
     });
     const systemPrompt = appendAvailableSkills(
         AGENT_SYSTEM_PROMPT,
@@ -334,11 +334,11 @@ export async function runAgentCli(options: {
                 closeError ??= error;
             }
         }
-        try {
-            knowledgeDatabase?.close();
-        } catch (error: unknown) {
-            closeError ??= error;
-        }
+        // try {
+        //     knowledgeDatabase?.close();
+        // } catch (error: unknown) {
+        //     closeError ??= error;
+        // }
         if (closeError) throw closeError;
     }
 }

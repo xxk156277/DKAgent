@@ -9,6 +9,7 @@ import type {
     QuestionAnalysis,
 } from "../../interview/analysis-types.js";
 import { collectExpressionStats } from "../../interview/expression-statistics.js";
+import type { QuestionAnalysisArtifact } from "../../interview/artifact-payloads.js";
 import { queryModelJson } from "../../interview/model-json.js";
 import { QUESTION_RUBRICS } from "../../interview/rubrics.js";
 import { calculateQuestionScore } from "../../interview/scoring.js";
@@ -288,12 +289,16 @@ export function createAnalyzeAnswerTool(
             }
 
             const storeAnalysis = (analysis: QuestionAnalysis): AnalyzeAnswerOutput => {
+                const payload: QuestionAnalysisArtifact = {
+                    structuredInterviewArtifactId: input.structuredInterviewArtifactId,
+                    analysis,
+                };
                 const artifactId = ctx.artifactStore!.put(
                     "question_analysis",
-                    analysis,
+                    payload,
                     {
                         producer: "analyze_answer",
-                        characterCount: JSON.stringify(analysis).length,
+                        characterCount: JSON.stringify(payload).length,
                         itemCount: 1,
                     },
                 );

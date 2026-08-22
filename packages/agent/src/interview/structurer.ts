@@ -42,8 +42,8 @@ type ModelQuestion = z.infer<typeof modelQuestionSchema>;
 export interface StructureInput {
     /** 已解析的原始面试稿及全部说话轮次。 */
     transcript: ParsedTranscript;
-    /** 纠错后的同一组轮次；省略时使用原始轮次。 */
-    correctedTurns?: TranscriptTurn[];
+    // /** 纠错后的同一组轮次；省略时使用原始轮次。 */
+    // correctedTurns?: TranscriptTurn[];
     /** 用于发起结构化模型请求的查询引擎。 */
     queryEngine: QueryEngine;
     /** 结构化请求使用的模型名称。 */
@@ -121,11 +121,11 @@ const JSON_OUTPUT_EXAMPLE = JSON.stringify({
 }, null, 2);
 
 export async function structureInterview(input: StructureInput): Promise<StructureOutput> {
-    const correctedById = new Map(
-        (input.correctedTurns ?? input.transcript.turns).map(
-            (turn) => [turn.id, turn.content],
-        ),
-    );
+    // const correctedById = new Map(
+    //     (input.correctedTurns ?? input.transcript.turns).map(
+    //         (turn) => [turn.id, turn.content],
+    //     ),
+    // );
     const relation = await queryModelJson({
         queryEngine: input.queryEngine,
         model: input.model,
@@ -135,8 +135,8 @@ export async function structureInterview(input: StructureInput): Promise<Structu
         schema: relationSchema,
         systemPrompt: [
             "把完整面试轮次结构化为问题簇和具体问题，只返回一个 JSON 对象。",
-            "输入中 originalContent 是不可修改的证据原文；correctedContent 只帮助理解转写错词。",
-            "promptSegments.text 必须逐字复制 originalContent 的子串，不得复制纠错文本或改写原文。",
+            "输入中的 content 是不可修改的证据原文。",
+            "promptSegments.text 必须逐字复制 content 的子串，不得改写原文。",
             "promptSegments 只能引用 interviewer 轮次；候选人反问不得生成问题。",
             "每个具体问题都必须属于一个问题簇；没有追问的独立问题自成单题簇。",
             "问题簇只包含同一主题的连续主问题和追问。切换主题后即使回到旧主题，也必须新建问题簇。",
@@ -159,8 +159,9 @@ export async function structureInterview(input: StructureInput): Promise<Structu
         userContent: JSON.stringify(input.transcript.turns.map((turn) => ({
             id: turn.id,
             speaker: turn.speaker,
-            originalContent: turn.content,
-            correctedContent: correctedById.get(turn.id) ?? turn.content,
+            content: turn.content,
+            // originalContent: turn.content,
+            // correctedContent: correctedById.get(turn.id) ?? turn.content,
         }))),
     });
 
@@ -205,8 +206,8 @@ export async function structureInterview(input: StructureInput): Promise<Structu
             }
         }
 
-        const interviewerRunEnds = new Set(
-            draft.question.promptSegments.map((segment) => {
+        const interviewerRunEnd = Math.max(
+            ...draft.question.promptSegments.map((segment) => {
                 let index = turnIndexById.get(segment.turnId)!;
                 while (input.transcript.turns[index + 1]?.speaker === "interviewer") {
                     index += 1;
@@ -214,11 +215,6 @@ export async function structureInterview(input: StructureInput): Promise<Structu
                 return index;
             }),
         );
-        if (interviewerRunEnds.size !== 1) {
-            throw new Error(`问题片段跨越了多个提问组: ${draft.modelOrder + 1}`);
-        }
-
-        const interviewerRunEnd = [...interviewerRunEnds][0]!;
         const expectedAnswerTurnIds: string[] = [];
         for (
             let index = interviewerRunEnd + 1;

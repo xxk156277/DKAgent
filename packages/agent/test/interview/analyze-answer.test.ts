@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { InMemoryArtifactStore } from "../../src/artifact/index.js";
 import type { QuestionAnalysis } from "../../src/interview/analysis-types.js";
+import type { QuestionAnalysisArtifact } from "../../src/interview/artifact-payloads.js";
 import { collectExpressionStats } from "../../src/interview/expression-statistics.js";
 import { QUESTION_RUBRICS } from "../../src/interview/rubrics.js";
 import type {
@@ -158,7 +159,11 @@ function storedAnalysis(
     artifactId: string | undefined,
 ): QuestionAnalysis {
     assert.ok(artifactId);
-    return artifacts.get<QuestionAnalysis>(artifactId, "question_analysis", "test");
+    return artifacts.get<QuestionAnalysisArtifact>(
+        artifactId,
+        "question_analysis",
+        "test",
+    ).analysis;
 }
 
 test("题型 Rubric 只声明各题型适用的语义维度", () => {
@@ -168,7 +173,7 @@ test("题型 Rubric 只声明各题型适用的语义维度", () => {
             applicableDimensions: ["contentQuality", "depthAndEvidence", "analysisAndTradeoffs"],
         },
         knowledge: {
-            prompt: "评价技术事实、关键知识点和原理深度；只有提供参考资料时才据其核验。",
+            prompt: "只基于当前问题和原回答，评价技术事实、关键知识点和原理深度；没有外部资料时不得假装完成资料核验。",
             applicableDimensions: ["contentQuality", "depthAndEvidence"],
         },
         open: {
@@ -220,6 +225,23 @@ test("一次模型请求同时使用表达统计并返回表达质量分", async
     assert.match(provider.request?.systemPrompt ?? "", /"evidenceTurnIds"/);
     assert.match(provider.request?.systemPrompt ?? "", /"dimensions"/);
     assert.match(provider.request?.systemPrompt ?? "", /"confidenceReason"/);
+});
+
+test("逐题分析 Artifact 记录所属的结构化面试 Artifact", async () => {
+    const { context, artifacts } = toolContext(validProjectResponse);
+    const input = projectInput(artifacts);
+
+    const result = await createAnalyzeAnswerTool("fake-model").execute(input, context);
+
+    assert.equal(result.success, true);
+    assert.ok(result.data?.artifactId);
+    const stored = artifacts.get<{
+        structuredInterviewArtifactId: string;
+        analysis: QuestionAnalysis;
+    }>(result.data!.artifactId, "question_analysis", "test");
+    assert.equal(stored.structuredInterviewArtifactId, input.structuredInterviewArtifactId);
+    assert.equal(stored.analysis.questionId, input.questionId);
+    assert.equal("structuredInterviewArtifactId" in stored.analysis, false);
 });
 
 /* test("项目事实提取失败时置信度上限为 0.54", async () => {

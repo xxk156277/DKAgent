@@ -13,11 +13,13 @@ import type {
     QuestionCluster,
     StructuredInterview,
 } from "../../src/interview/types.js";
+import type { QuestionAnalysisArtifact } from "../../src/interview/artifact-payloads.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import {
     confidenceLabel,
     createGenerateReportTool,
 } from "../../src/tools/tool-item/generate-report.js";
+import { createAnalyzeAnswerTool } from "../../src/tools/tool-item/analyze-answer.js";
 import type { ToolContext } from "../../src/tools/types.js";
 import { FakeTextProvider } from "./fake-provider.js";
 
@@ -187,15 +189,19 @@ function baseInput(
     const artifacts = context.artifactStore!;
     const interview = overrides.structuredInterview ?? structuredInterview;
     const inputAnalyses = overrides.analyses ?? analyses;
+    const structuredInterviewArtifactId = artifacts.put(
+        "structured_interview",
+        interview,
+        { producer: "test" },
+    );
     return {
-        structuredInterviewArtifactId: artifacts.put(
-            "structured_interview",
-            interview,
-            { producer: "test" },
-        ),
+        structuredInterviewArtifactId,
         analysisArtifactIds: inputAnalyses.map((analysis) => artifacts.put(
             "question_analysis",
-            analysis,
+            {
+                structuredInterviewArtifactId,
+                analysis,
+            } satisfies QuestionAnalysisArtifact,
             { producer: "test" },
         )),
         stage: overrides.stage ?? "provisional" as const,
@@ -296,11 +302,14 @@ test("拒绝与结构化面试不匹配的逐题分析 Artifact", async () => {
     const { provider, context } = toolContext(validSummary);
     const input = baseInput(context);
     const mismatchedId = context.artifactStore!.put("question_analysis", {
-        status: "failed",
-        questionId: "q-1",
-        clusterId: "cluster-knowledge",
-        error: "模型失败",
-    }, { producer: "test" });
+        structuredInterviewArtifactId: input.structuredInterviewArtifactId,
+        analysis: {
+            status: "failed",
+            questionId: "q-1",
+            clusterId: "cluster-knowledge",
+            error: "模型失败",
+        },
+    } satisfies QuestionAnalysisArtifact, { producer: "test" });
 
     const result = await createGenerateReportTool("fake-model").execute({
         ...input,
@@ -309,6 +318,51 @@ test("拒绝与结构化面试不匹配的逐题分析 Artifact", async () => {
 
     assert.equal(result.success, false);
     assert.equal(result.error?.code, "input_error");
+    assert.equal(provider.request, undefined);
+});
+
+test("同 Session 中题目 ID 相同的两份面试不可串用分析 Artifact", async () => {
+    const { provider, context } = toolContext(validSummary);
+    const proceduralQuestion = questions[3]!;
+    const proceduralCluster = clusters[2]!;
+    const interview: StructuredInterview = {
+        transcript: {
+            source: "同 ID 面试原文",
+            turns: structuredInterview.transcript.turns.filter((turn) => (
+                proceduralQuestion.promptTurnIds.includes(turn.id)
+                || proceduralQuestion.answerTurnIds.includes(turn.id)
+            )),
+        },
+        questions: [proceduralQuestion],
+        clusters: [proceduralCluster],
+        nonQuestionTurnIds: [],
+    };
+    const firstInterviewId = context.artifactStore!.put(
+        "structured_interview",
+        interview,
+        { producer: "test" },
+    );
+    const secondInterviewId = context.artifactStore!.put(
+        "structured_interview",
+        structuredClone(interview),
+        { producer: "test" },
+    );
+    const analysis = await createAnalyzeAnswerTool("fake-model").execute({
+        structuredInterviewArtifactId: firstInterviewId,
+        questionId: proceduralQuestion.id,
+    }, context);
+    assert.equal(analysis.success, true);
+    assert.ok(analysis.data?.artifactId);
+
+    const result = await createGenerateReportTool("fake-model").execute({
+        structuredInterviewArtifactId: secondInterviewId,
+        analysisArtifactIds: [analysis.data!.artifactId],
+        stage: "provisional",
+    }, context);
+
+    assert.equal(result.success, false);
+    assert.equal(result.error?.code, "input_error");
+    assert.match(result.error?.message ?? "", /来自其他结构化面试/);
     assert.equal(provider.request, undefined);
 });
 

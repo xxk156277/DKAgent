@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseTranscript } from "../../src/interview/transcript-parser.js";
 import { structureInterview } from "../../src/interview/structurer.js";
-import type { ParsedTranscript, TranscriptTurn } from "../../src/interview/types.js";
+import type { ParsedTranscript } from "../../src/interview/types.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { FakeTextProvider } from "./fake-provider.js";
 
@@ -70,13 +70,13 @@ function validRelation(): ModelRelation {
 
 async function runWith(
     relation: ModelRelation,
-    input?: { transcript?: ParsedTranscript; correctedTurns?: TranscriptTurn[] },
+    input?: { transcript?: ParsedTranscript /* correctedTurns?: TranscriptTurn[] */ },
 ) {
     const transcript = input?.transcript ?? parseTranscript(source);
     const provider = new FakeTextProvider(JSON.stringify(relation));
     const result = await structureInterview({
         transcript,
-        ...(input?.correctedTurns ? { correctedTurns: input.correctedTurns } : {}),
+        // ...(input?.correctedTurns ? { correctedTurns: input.correctedTurns } : {}),
         queryEngine: new QueryEngine(provider),
         model: "fake-model",
         abortSignal: new AbortController().signal,
@@ -239,6 +239,24 @@ test("连续多个面试官提问共享其后紧邻的候选人回答块", async
     ]);
 });
 
+test("同一问题的提示片段跨提问组时使用最后一组确定回答窗口", async () => {
+    const relation = validRelation();
+    relation.clusters[0]!.questions[0] = {
+        promptSegments: [
+            { turnId: "turn-0001", text: "先介绍低代码项目。" },
+            { turnId: "turn-0003", text: "这里最难的问题是什么？" },
+        ],
+        answerTurnIds: ["turn-0004"],
+        questionType: "project",
+    };
+    relation.clusters[0]!.questions.splice(2, 1);
+
+    const { result } = await runWith(relation);
+
+    assert.deepEqual(result.questions[0]?.promptTurnIds, ["turn-0001", "turn-0003"]);
+    assert.deepEqual(result.questions[0]?.answerTurnIds, ["turn-0004"]);
+});
+
 test("按原文位置规范化问题和问题簇顺序后生成稳定 ID", async () => {
     const relation = validRelation();
     relation.clusters[0]!.questions.reverse();
@@ -335,14 +353,14 @@ test("程序根据问题类型生成 scored", async () => {
     assert.deepEqual(result.questions.map((question) => question.scored), [true, true, true, false]);
 });
 
-test("系统 Prompt 说明 JSON 格式且模型同时看到原文和纠错文本", async () => {
+test("系统 Prompt 说明 JSON 格式且模型看到不可修改的原文", async () => {
     const transcript = parseTranscript([
         "面试官", "请介绍 reat 项目。", "候选人", "这是一个前端项目。",
     ].join("\n"));
-    const correctedTurns = transcript.turns.map((turn) => ({
-        ...turn,
-        content: turn.content.replace("reat", "React"),
-    }));
+    // const correctedTurns = transcript.turns.map((turn) => ({
+    //     ...turn,
+    //     content: turn.content.replace("reat", "React"),
+    // }));
     const relation: ModelRelation = {
         clusters: [{
             title: "React 项目",
@@ -354,7 +372,7 @@ test("系统 Prompt 说明 JSON 格式且模型同时看到原文和纠错文本
         }],
         nonQuestionTurnIds: [],
     };
-    const { provider } = await runWith(relation, { transcript, correctedTurns });
+    const { provider } = await runWith(relation, { transcript /* correctedTurns */ });
     const systemPrompt = provider.request?.systemPrompt ?? "";
     assert.match(systemPrompt, /"clusters"/);
     assert.match(systemPrompt, /"questions"/);
@@ -367,7 +385,8 @@ test("系统 Prompt 说明 JSON 格式且模型同时看到原文和纠错文本
     assert.deepEqual(turns[0], {
         id: "turn-0001",
         speaker: "interviewer",
-        originalContent: "请介绍 reat 项目。",
-        correctedContent: "请介绍 React 项目。",
+        content: "请介绍 reat 项目。",
+        // originalContent: "请介绍 reat 项目。",
+        // correctedContent: "请介绍 React 项目。",
     });
 });

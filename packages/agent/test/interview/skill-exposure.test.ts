@@ -53,16 +53,11 @@ test("ToolRegistry 暴露原子分析能力且不再暴露 analyze_interview", (
     const names = registry.list().map((tool) => tool.name);
 
     assert.equal(names.includes("analyze_interview"), false);
-    for (const name of [
-        "parse_transcript",
-        "preprocess_transcript",
-        "structure_interview",
-        "extract_project_facts",
-        "analyze_expression",
-        "analyze_answer",
-        "generate_report",
-    ]) {
+    for (const name of ["parse_transcript", "structure_interview", "analyze_answer", "generate_report"]) {
         assert.equal(names.includes(name), true, `缺少原子 Tool: ${name}`);
+    }
+    for (const name of ["preprocess_transcript", "extract_project_facts", "analyze_expression"]) {
+        assert.equal(names.includes(name), false, `不应暴露停用 Tool: ${name}`);
     }
 });
 
@@ -181,26 +176,7 @@ test("parse_transcript 将无法解析的 Artifact 文字稿作为输入错误",
     assert.equal(result.error?.code, "input_error");
 });
 
-test("参考资料能力仅在 Retriever 存在时暴露", async () => {
-    const withoutRetriever = createToolRegistry({ model: "fake-model" });
-    assert.equal(withoutRetriever.has("search_interview_reference"), false);
-
-    const withRetriever = createToolRegistry({
-        model: "fake-model",
-        referenceRetriever: {
-            async search(question) {
-                return [`参考：${question}`];
-            },
-        },
-    });
-    assert.equal(withRetriever.has("search_interview_reference"), true);
-
-    const result = await withRetriever.resolve("search_interview_reference").execute(
-        { question: "事件循环是什么" },
-        {
-            queryEngine: {} as QueryEngine,
-            abortSignal: new AbortController().signal,
-        },
-    );
-    assert.deepEqual(result.data, { references: ["参考：事件循环是什么"] });
-});
+/*
+ * 最小流程不包含参考资料检索。原“参考资料能力仅在 Retriever 存在时暴露”测试
+ * 整段停用，待该能力重新进入工作流时恢复。
+ */

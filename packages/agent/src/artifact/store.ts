@@ -42,7 +42,7 @@ export class InMemoryArtifactStore implements ArtifactStore {
 
     public get<T>(id: string, expectedKind: ArtifactKind, consumer: string): T {
         const artifact = this.artifacts.get(id);
-        const hit = artifact !== undefined;
+        const hit = artifact !== undefined && artifact.kind === expectedKind;
         this.tracer?.event(
             "artifact.resolved",
             {

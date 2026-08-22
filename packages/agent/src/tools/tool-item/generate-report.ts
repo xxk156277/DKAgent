@@ -11,6 +11,7 @@ import type {
     ReportReferenceItem,
 } from "../../interview/analysis-types.js";
 import { queryModelJson } from "../../interview/model-json.js";
+import type { QuestionAnalysisArtifact } from "../../interview/artifact-payloads.js";
 import { scoreInterview } from "../../interview/scoring.js";
 import type {
     InterviewQuestionType,
@@ -527,19 +528,27 @@ export function createGenerateReportTool(
 
             let resolvedInput: ResolvedGenerateReportInput;
             try {
-                resolvedInput = {
-                    structuredInterview: ctx.artifactStore.get<StructuredInterview>(
-                        input.structuredInterviewArtifactId,
-                        "structured_interview",
+                const structuredInterview = ctx.artifactStore.get<StructuredInterview>(
+                    input.structuredInterviewArtifactId,
+                    "structured_interview",
+                    "generate_report",
+                );
+                const analysisArtifacts = input.analysisArtifactIds.map((artifactId) => (
+                    ctx.artifactStore!.get<QuestionAnalysisArtifact>(
+                        artifactId,
+                        "question_analysis",
                         "generate_report",
-                    ),
-                    analyses: input.analysisArtifactIds.map((artifactId) => (
-                        ctx.artifactStore!.get<QuestionAnalysis>(
-                            artifactId,
-                            "question_analysis",
-                            "generate_report",
-                        )
-                    )),
+                    )
+                ));
+                if (analysisArtifacts.some((artifact) => (
+                    artifact.structuredInterviewArtifactId
+                    !== input.structuredInterviewArtifactId
+                ))) {
+                    throw new Error("逐题分析 Artifact 来自其他结构化面试");
+                }
+                resolvedInput = {
+                    structuredInterview,
+                    analyses: analysisArtifacts.map((artifact) => artifact.analysis),
                     stage: input.stage,
                     ...(input.metadata ? { metadata: input.metadata } : {}),
                 };

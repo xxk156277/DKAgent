@@ -15,7 +15,8 @@ export const QUESTION_RUBRICS: Record<
         applicableDimensions: ["contentQuality", "depthAndEvidence", "analysisAndTradeoffs"],
     },
     knowledge: {
-        prompt: "评价技术事实、关键知识点和原理深度；只有提供参考资料时才据其核验。",
+        // prompt: "评价技术事实、关键知识点和原理深度；只有提供参考资料时才据其核验。",
+        prompt: "只基于当前问题和原回答，评价技术事实、关键知识点和原理深度；没有外部资料时不得假装完成资料核验。",
         applicableDimensions: ["contentQuality", "depthAndEvidence"],
     },
     open: {

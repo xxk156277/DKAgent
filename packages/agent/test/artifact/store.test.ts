@@ -40,6 +40,25 @@ test("Artifact Store 拒绝未知 ID 和错误类型", () => {
     );
 });
 
+test("Artifact 类型不匹配时 Trace 记录解析失败", () => {
+    const traceStore = new MemoryTraceStore();
+    const artifacts = new InMemoryArtifactStore(new Tracer(traceStore));
+    const id = artifacts.put("file_text", "text", { producer: "read_file" });
+
+    assert.throws(
+        () => artifacts.get(id, "parsed_transcript", "structure_interview"),
+        /Artifact 类型不匹配/,
+    );
+
+    const resolved = traceStore.list().find((event) => event.name === "artifact.resolved");
+    assert.deepEqual(resolved?.data, {
+        artifactId: id,
+        artifactType: "parsed_transcript",
+        consumer: "structure_interview",
+        hit: false,
+    });
+});
+
 test("Artifact Store 不将额外元数据写入 Trace", () => {
     const traceStore = new MemoryTraceStore();
     const artifacts = new InMemoryArtifactStore(new Tracer(traceStore));

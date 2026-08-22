@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { InMemoryArtifactStore } from "../../src/artifact/index.js";
-import type { FailedQuestionAnalysis } from "../../src/interview/analysis-types.js";
+import type { QuestionAnalysisArtifact } from "../../src/interview/artifact-payloads.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { createToolRegistry } from "../../src/tools/index.js";
 import type { ToolContext, ToolResult } from "../../src/tools/types.js";
@@ -137,11 +137,11 @@ test("Tool Registry Artifact 引用链隐藏中间大对象并在单题模型失
         const failed = analyzeData.find((item) => item.status === "failed");
         assert.ok(failed);
         assert.equal(
-            artifacts.get<FailedQuestionAnalysis>(
+            artifacts.get<QuestionAnalysisArtifact>(
                 failed.artifactId,
                 "question_analysis",
                 "test",
-            ).status,
+            ).analysis.status,
             "failed",
         );
 
@@ -190,6 +190,23 @@ test("Tool Registry Artifact 引用链隐藏中间大对象并在单题模型失
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("originalAnswer")));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("strengths")));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("issues")));
+
+        const modelEvents = traceStore.list().filter((event) => (
+            event.name === "model.request" || event.name === "model.response"
+        ));
+        assert.ok(modelEvents.length > 0);
+        assert.ok(modelEvents.every((event) => event.module === "skill"));
+        const serializedModelEvents = JSON.stringify(modelEvents);
+        assert.doesNotMatch(serializedModelEvents, new RegExp(sourceSentence));
+        assert.doesNotMatch(serializedModelEvents, /originalAnswer|"strengths"|"issues"/);
+        assert.doesNotMatch(
+            serializedModelEvents,
+            /"systemPrompt":|"messages":|"content":/,
+        );
+        assert.match(serializedModelEvents, /systemPromptCharacterCount/);
+        assert.match(serializedModelEvents, /userContentCharacterCount/);
+        assert.match(serializedModelEvents, /resultType/);
+        assert.match(serializedModelEvents, /stopReason/);
         assert.equal(provider.remainingResponses, 0);
     } finally {
         await rm(directory, { recursive: true, force: true });
