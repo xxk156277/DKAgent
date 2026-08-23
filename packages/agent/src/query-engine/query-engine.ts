@@ -4,6 +4,8 @@ import type {
     ModelResponse,
 } from "./provider.js";
 import { parseModelStream } from "./stream-parser.js";
+import { Tracer } from "@dkagent/trace";
+import type { JsonValue, SpanInputMap, SpanOutputMap } from "@dkagent/trace";
 
 /**
  * 一次模型调用的编排入口。
@@ -13,14 +15,40 @@ import { parseModelStream } from "./stream-parser.js";
 export class QueryEngine {
     public constructor(
         private readonly provider: LLMProvider,
+        private readonly tracer = new Tracer(),
     ) {}
 
     /** 发送请求并把 Provider Stream 组装成统一响应。 */
     public query(request: ModelRequest): Promise<ModelResponse> {
-        return parseModelStream(
-            this.provider.stream(request),
-            request.onTextDelta,
-        );
+        const traceRequest: SpanInputMap["model.generate"] = {
+            provider: this.provider.name,
+            model: request.model,
+            messages: request.messages as unknown as JsonValue[],
+            ...(request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt }),
+            ...(request.tools === undefined ? {} : { tools: request.tools as unknown as JsonValue[] }),
+            ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
+            ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+            ...(request.responseFormat === undefined ? {} : { responseFormat: request.responseFormat }),
+            ...(request.thinking === undefined ? {} : { thinking: request.thinking }),
+        };
+        return this.tracer.span("model.generate", traceRequest, async (span) => {
+            const response = await parseModelStream(
+                this.provider.stream(request),
+                request.onTextDelta,
+            );
+            span.setTokenUsage(response.usage);
+            if (response.type === "text") {
+                const output: SpanOutputMap["model.generate"] = { type: "text", content: response.content, stopReason: response.stopReason };
+                span.setOutput(output);
+            } else {
+                const output: SpanOutputMap["model.generate"] = {
+                    type: "tool_use", ...(response.content === undefined ? {} : { content: response.content }),
+                    toolCalls: response.toolCalls as unknown as JsonValue[], stopReason: response.stopReason,
+                };
+                span.setOutput(output);
+            }
+            return response;
+        });
     }
 }
 
