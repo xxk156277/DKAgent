@@ -46,7 +46,8 @@ export async function runAgentCli(options: {
 } = {}): Promise<void> {
     const config = loadConfig();
     const provider = new OpenAICompatibleProvider(config.apiKey, config.baseURL);
-    const queryEngine = new QueryEngine(provider);
+    const tracer = options.tracer ?? new Tracer();
+    const queryEngine = new QueryEngine(provider, tracer);
     // const knowledgeDatabase = config.knowledgeDatabasePath
     //     && existsSync(config.knowledgeDatabasePath)
     //     ? openKnowledgeDatabase(config.knowledgeDatabasePath)
@@ -65,13 +66,8 @@ export async function runAgentCli(options: {
         createSkillRegistry(),
     );
     // 摘要复用统一 QueryEngine；Compressor 不直接依赖具体 Provider。
-    const tracer = options.tracer ?? new Tracer();
-    const compressor = new Compressor(queryEngine, tracer);
-    const contextManager = new ContextManager(
-        new ProviderTokenCounter(provider),
-        compressor,
-        tracer,
-    );
+    const compressor = new Compressor(queryEngine);
+    const contextManager = new ContextManager(new ProviderTokenCounter(provider), compressor);
     let memoryStore: SqliteMemoryStore;
     try {
         memoryStore = new SqliteMemoryStore(".dkagent/memory.db");
@@ -95,13 +91,9 @@ export async function runAgentCli(options: {
         }
     }
     try {
-    const memoryExtractor = new MemoryExtractor(queryEngine, config.model, tracer);
+    const memoryExtractor = new MemoryExtractor(queryEngine, config.model);
     const memoryRetriever = new MemoryRetriever(memoryStore);
-    const memoryWriter = new AutomaticMemoryWriter(
-        memoryExtractor,
-        memoryStore,
-        tracer,
-    );
+    const memoryWriter = new AutomaticMemoryWriter(memoryExtractor, memoryStore);
     const artifactStores = new Map<string, ArtifactStore>();
     const getOrCreateArtifactStore = (sessionId: string): ArtifactStore => {
         const existingStore = artifactStores.get(sessionId);
