@@ -69,7 +69,7 @@ function createAgent(
     artifactStore?: ArtifactStore,
 ): AgentLoop {
     return new AgentLoop({
-        queryEngine: new QueryEngine(provider),
+        queryEngine: new QueryEngine(provider, tracer ?? new Tracer()),
         toolRegistry: registry,
         contextManager,
         model: "fake-model",
@@ -315,8 +315,7 @@ test("Tool Call 执行后将结果回传模型", async () => {
         "assistant",
         "tool",
     ]);
-    assert.ok(traceStore.list().some((event) => event.name === "tool.call"));
-    assert.ok(traceStore.list().some((event) => event.name === "tool.result"));
+    assert.deepEqual(traceStore.list().filter((span) => span.name === "tool.execute").length, 1);
 });
 
 test("终点 Tool 在协议消息完整后原样返回并持久化最终文本", async () => {
@@ -648,13 +647,9 @@ test("Agent 失败时记录 agent.turn error 后原样抛出错误", async () =>
         assert.equal(error, expectedError);
         return true;
     });
-    const errorEvent = traceStore.list().find(
-        (event) => event.name === "agent.turn" && event.phase === "error",
-    );
-    assert.equal(
-        (errorEvent?.data as { error: { message: string } }).error.message,
-        "context failed",
-    );
+    const errorSpan = traceStore.list().find((span) => span.name === "agent.turn");
+    assert.equal(errorSpan?.status, "error");
+    assert.equal(errorSpan?.error?.message, "context failed");
 });
 
 test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆", async () => {
@@ -688,7 +683,7 @@ test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆",
     };
 
     const agent = new AgentLoop({
-        queryEngine: new QueryEngine(provider),
+        queryEngine: new QueryEngine(provider, tracer),
         toolRegistry: registry,
         contextManager,
         model: "fake-model",
@@ -701,24 +696,85 @@ test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆",
 
     assert.equal(await agent.run("请使用工具"), "最终回答");
     assert.deepEqual(recallQueries, ["请使用工具"]);
-    const recallEvents = traceStore.list().filter((event) => event.name === "memory.recall");
-    assert.deepEqual(recallEvents.map((event) => event.phase), ["start", "end"]);
-    assert.ok(recallEvents.every((event) => (
-        event.module === "memory" && event.operation === "recall"
-    )));
+    const recallEvents = traceStore.list().filter((span) => span.name === "memory.recall");
+    assert.equal(recallEvents.length, 1);
+    assert.deepEqual(recallEvents[0]?.output, { content: "<recalled_memory>用户偏好简洁</recalled_memory>", characterCount: 41 });
     assert.deepEqual(contextManager.systemPrompts, [
         "test prompt\n\n<recalled_memory>用户偏好简洁</recalled_memory>",
         "test prompt\n\n<recalled_memory>用户偏好简洁</recalled_memory>",
     ]);
 });
 
-test("召回记忆保留在真实模型请求中，但不进入 model.request Trace", async () => {
+test("canonical turn/step/model/tool flow has one owner and typed parent chain", async () => {
+    const provider = new FakeProvider([
+        [
+            { type: "tool_call_start", index: 0, id: "call-read", name: "read_file" },
+            { type: "tool_call_delta", index: 0, argumentsDelta: '{"path":"a"}' },
+            { type: "tool_call_end", index: 0 },
+            { type: "message_end", usage, stopReason: "tool_use" },
+        ],
+        textResponse("done"),
+    ]);
+    const registry = new ToolRegistry();
+    registry.register({
+        name: "read_file", description: "read", parameters: { type: "object" },
+        async execute(input) { return { success: true, data: { path: input.path } }; },
+    });
+    const store = new MemoryTraceStore();
+    const tracer = new Tracer(store);
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider, tracer), toolRegistry: registry,
+        contextManager: new RecordingContextBuilder(), model: "fake-model",
+        maxContextTokens: 1000, maxOutputTokens: 100, tracer,
+    });
+    assert.equal(await agent.run("read"), "done");
+    const spans = store.list();
+    assert.deepEqual(spans.map((span) => span.name), [
+        "agent.turn", "agent.step", "model.generate", "tool.execute", "agent.step", "model.generate",
+    ]);
+    const root = spans[0]!;
+    assert.equal(spans[1]!.parentSpanId, root.spanId);
+    assert.equal(spans[2]!.parentSpanId, spans[1]!.spanId);
+    assert.equal(spans[3]!.parentSpanId, spans[1]!.spanId);
+    assert.equal(spans[4]!.parentSpanId, root.spanId);
+    assert.equal(spans[5]!.parentSpanId, spans[4]!.spanId);
+    assert.deepEqual(spans[3]!.input, { toolCallId: "call-read", name: "read_file", input: { path: "a" } });
+    assert.deepEqual(spans[3]!.output, { success: true, data: { path: "a" } });
+    assert.equal(spans.filter((span) => span.name === "model.generate").length, 2);
+    assert.equal(spans.filter((span) => span.name === "model.generate").every((span) => span.tokenUsage && span.durationMs !== undefined), true);
+});
+
+test("AgentLoop inherits QueryEngine tracer when options.tracer is omitted", async () => {
+    const provider = new FakeProvider([textResponse("inherited")]);
+    const store = new MemoryTraceStore();
+    const tracer = new Tracer(store);
+    const engine = new QueryEngine(provider, tracer);
+    const agent = new AgentLoop({
+        queryEngine: engine, toolRegistry: new ToolRegistry(), contextManager: new RecordingContextBuilder(),
+        model: "fake-model", maxContextTokens: 1000, maxOutputTokens: 100,
+    });
+    assert.equal(await agent.run("hello"), "inherited");
+    assert.deepEqual(store.list().map((span) => span.name), ["agent.turn", "agent.step", "model.generate"]);
+});
+
+test("AgentLoop rejects a tracer different from QueryEngine tracer", () => {
+    const provider = new FakeProvider([]);
+    const queryTracer = new Tracer();
+    const loopTracer = new Tracer();
+    assert.throws(() => new AgentLoop({
+        queryEngine: new QueryEngine(provider, queryTracer), tracer: loopTracer,
+        toolRegistry: new ToolRegistry(), contextManager: new RecordingContextBuilder(),
+        model: "fake-model", maxContextTokens: 1000, maxOutputTokens: 100,
+    }), /AgentLoop tracer must match QueryEngine tracer/);
+});
+
+test("召回记忆保留在真实模型请求、memory.recall 与 model.generate Trace", async () => {
     const memoryFact = "用户偏好先讲结论";
     const provider = new FakeProvider([textResponse("回答")]);
     const traceStore = new MemoryTraceStore();
     const tracer = new Tracer(traceStore);
     const agent = new AgentLoop({
-        queryEngine: new QueryEngine(provider),
+        queryEngine: new QueryEngine(provider, tracer),
         toolRegistry: new ToolRegistry(),
         contextManager: new ContextManager(
             new ProviderTokenCounter(provider),
@@ -740,14 +796,10 @@ test("召回记忆保留在真实模型请求中，但不进入 model.request Tr
     await agent.run("问题");
 
     assert.match(provider.requests[0]?.systemPrompt ?? "", new RegExp(memoryFact));
-    assert.doesNotMatch(JSON.stringify(traceStore.list()), new RegExp(memoryFact));
-    const modelRequestStart = traceStore.list().find((event) => (
-        event.name === "model.request" && event.phase === "start"
-    ));
-    assert.equal(
-        (modelRequestStart?.data as { input: { systemPrompt: string } }).input.systemPrompt,
-        "test prompt\n\n[RECALLED_MEMORY_REDACTED]",
-    );
+    const recall = traceStore.list().find((span) => span.name === "memory.recall");
+    const model = traceStore.list().find((span) => span.name === "model.generate");
+    assert.match(JSON.stringify(recall), new RegExp(memoryFact));
+    assert.match(JSON.stringify(model), new RegExp(memoryFact));
 });
 
 test("召回记忆只注入 Context System Prompt，不进入历史或 Session", async () => {
@@ -797,7 +849,7 @@ test("成功最终文本追加后按 Session 捕获记忆", async () => {
         },
     };
     const agent = new AgentLoop({
-        queryEngine: new QueryEngine(provider),
+        queryEngine: new QueryEngine(provider, tracer),
         toolRegistry: new ToolRegistry(),
         contextManager: new RecordingContextBuilder(),
         model: "fake-model",
@@ -815,11 +867,7 @@ test("成功最终文本追加后按 Session 捕获记忆", async () => {
         sessionId: "session-memory",
     }]);
     assert.deepEqual(sessionMessages.at(-1), { role: "assistant", content: "最终回答" });
-    const writeEvents = traceStore.list().filter((event) => event.name === "memory.write");
-    assert.deepEqual(writeEvents.map((event) => event.phase), ["start", "end"]);
-    assert.ok(writeEvents.every((event) => (
-        event.module === "memory" && event.operation === "write"
-    )));
+    assert.equal(traceStore.list().some((span) => span.name === "memory.write"), false);
 
     const noSessionAgent = new AgentLoop({
         queryEngine: new QueryEngine(new FakeProvider([textResponse("无 Session 回答")])),
@@ -881,7 +929,7 @@ test("Memory 失败降级，空文本或循环失败不捕获", async () => {
         },
     };
     const normalAgent = new AgentLoop({
-        queryEngine: new QueryEngine(new FakeProvider([textResponse("正常回答")])),
+        queryEngine: new QueryEngine(new FakeProvider([textResponse("正常回答")]), tracer),
         toolRegistry: new ToolRegistry(),
         contextManager: new RecordingContextBuilder(),
         model: "fake-model",
@@ -894,12 +942,8 @@ test("Memory 失败降级，空文本或循环失败不捕获", async () => {
     });
 
     assert.equal(await normalAgent.run("问题"), "正常回答");
-    assert.ok(traceStore.list().some((event) => (
-        event.name === "memory.recall" && event.phase === "error"
-    )));
-    assert.ok(traceStore.list().some((event) => (
-        event.name === "memory.write" && event.phase === "error"
-    )));
+    assert.equal(traceStore.list().some((span) => span.name === "memory.recall" && span.status === "error"), true);
+    assert.equal(traceStore.list().some((span) => span.name === "memory.write"), false);
 
     const captures: Array<{ userInput: string; assistantAnswer: string; sessionId: string }> = [];
     const captureRecorder: MemoryWriter = {

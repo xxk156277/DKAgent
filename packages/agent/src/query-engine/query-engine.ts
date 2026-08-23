@@ -18,6 +18,10 @@ export class QueryEngine {
         private readonly tracer = new Tracer(),
     ) {}
 
+    public getTracer(): Tracer {
+        return this.tracer;
+    }
+
     /** 发送请求并把 Provider Stream 组装成统一响应。 */
     public query(request: ModelRequest): Promise<ModelResponse> {
         const traceRequest: SpanInputMap["model.generate"] = {

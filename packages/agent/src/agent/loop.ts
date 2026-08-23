@@ -1,4 +1,4 @@
-import { Tracer, type TraceSpan } from "@dkagent/trace";
+import { Tracer, type JsonObject, type SpanOutputMap, type TraceSpanHandle } from "@dkagent/trace";
 import {
     dispatchToolCall,
     type DispatchedToolResult,
@@ -30,7 +30,11 @@ export class AgentLoop {
                 firstKeptMessageIndex: 0,
             };
         this.abortSignal = options.abortSignal ?? new AbortController().signal;
-        this.tracer = options.tracer ?? new Tracer();
+        const queryTracer = options.queryEngine.getTracer();
+        if (options.tracer !== undefined && options.tracer !== queryTracer) {
+            throw new Error("AgentLoop tracer must match QueryEngine tracer");
+        }
+        this.tracer = options.tracer ?? queryTracer;
         this.artifactStore = options.artifactStore
             ?? new InMemoryArtifactStore(this.tracer);
     }
@@ -45,7 +49,7 @@ export class AgentLoop {
     }
 
     public run(userInput: string): Promise<string> {
-        return this.tracer.trace("agent.turn", { input: userInput }, async (turnSpan) => {
+        return this.tracer.trace("agent.turn", { userInput }, async (turnSpan) => {
             const recalledMemory = await this.safeRecall(userInput);
             this.appendMessage({ role: "user", content: userInput });
             const maxSteps = this.options.maxSteps ?? 4;
@@ -55,7 +59,6 @@ export class AgentLoop {
                     "agent.step",
                     { step },
                     (stepSpan) => this.runStep(step, stepSpan, recalledMemory),
-                    { step },
                 );
                 if (result !== undefined) {
                     turnSpan.setOutput({ answer: result.answer });
@@ -72,7 +75,7 @@ export class AgentLoop {
 
     private async runStep(
         step: number,
-        stepSpan: TraceSpan,
+        stepSpan: TraceSpanHandle<"agent.step">,
         recalledMemory: string,
     ): Promise<{ answer: string; shouldCaptureMemory: boolean } | undefined> {
         if (this.abortSignal.aborted) throw new Error("Agent Run 已中止");
@@ -128,32 +131,13 @@ export class AgentLoop {
                 ? {}
                 : { onTextDelta: this.options.onTextDelta }),
         };
-        const traceRequest = recalledMemory
-            ? {
-                ...request,
-                systemPrompt: this.createTraceSystemPrompt(
-                    request.systemPrompt,
-                    recalledMemory,
-                ),
-            }
-            : { ...request };
-        const response = await this.tracer.span(
-            "model.request",
-            traceRequest,
-            async (modelSpan) => {
-                const result = await this.options.queryEngine.query(request);
-                modelSpan.event("model.response", result, { step });
-                modelSpan.setOutput(result);
-                return result;
-            },
-            { step },
-        );
+        const response = await this.options.queryEngine.query(request);
 
         if (response.type === "text") {
             const answer = response.content.trim();
             if (!answer) throw new Error("模型返回空文本");
             this.appendMessage({ role: "assistant", content: answer });
-            stepSpan.setOutput({ answer });
+            stepSpan.setOutput({ outcome: "answer", stopReason: response.stopReason, toolCallCount: 0 });
             return {
                 answer,
                 shouldCaptureMemory: response.stopReason === "end_turn",
@@ -165,34 +149,30 @@ export class AgentLoop {
             ...(response.content === undefined ? {} : { content: response.content }),
             toolCalls: response.toolCalls,
         });
-        const toolResults = await this.runToolCalls(response, step);
+        const toolResults = await this.runToolCalls(response);
         if (this.abortSignal.aborted) throw new Error("Agent Run 已中止");
         const finalOutput = this.extractFinalOutput(toolResults);
         if (finalOutput !== undefined) {
             this.appendMessage({ role: "assistant", content: finalOutput });
             this.options.onTextDelta?.(finalOutput);
-            stepSpan.setOutput({
-                toolCallCount: response.toolCalls.length,
-                finalOutput: true,
-            });
+            stepSpan.setOutput({ outcome: "answer", stopReason: response.stopReason, toolCallCount: response.toolCalls.length });
             return {
                 answer: finalOutput,
                 shouldCaptureMemory: false,
             };
         }
-        stepSpan.setOutput({ toolCallCount: response.toolCalls.length });
+        stepSpan.setOutput({ outcome: "tool_calls", stopReason: response.stopReason, toolCallCount: response.toolCalls.length });
         return undefined;
     }
 
     private async runToolCalls(
         response: Extract<ModelResponse, { type: "tool_use" }>,
-        step: number,
     ): Promise<DispatchedToolResult[]> {
         const toolResults: DispatchedToolResult[] = [];
         for (const call of response.toolCalls) {
-            const dispatched = await this.tracer.span(
-                "tool.call",
-                call,
+            const dispatched = await this.tracer.span<"tool.execute", DispatchedToolResult>(
+                "tool.execute",
+                { toolCallId: call.id, name: call.name, input: call.input as unknown as JsonObject },
                 async (toolSpan) => {
                     const result = await dispatchToolCall(
                         this.options.toolRegistry,
@@ -204,11 +184,9 @@ export class AgentLoop {
                             artifactStore: this.artifactStore,
                         },
                     );
-                    toolSpan.event("tool.result", result, { step });
-                    toolSpan.setOutput(result);
+                    toolSpan.setOutput(result.result as unknown as SpanOutputMap["tool.execute"]);
                     return result;
                 },
-                { step },
             );
             this.appendMessage({
                 role: "tool",
@@ -240,31 +218,16 @@ export class AgentLoop {
         try {
             return await this.tracer.span(
                 "memory.recall",
-                { userInputCharacterCount: userInput.length },
+                { query: userInput },
                 async (span) => {
                     const recalledMemory = await reader.recall(userInput);
-                    span.setOutput({ characterCount: recalledMemory.length });
+                    span.setOutput({ content: recalledMemory, characterCount: recalledMemory.length });
                     return recalledMemory;
                 },
-                { module: "memory", operation: "recall" },
             );
         } catch {
             return "";
         }
-    }
-
-    /** 记忆只供模型使用；所有 Trace 必须使用不含原文的副本。 */
-    private createTraceSystemPrompt(
-        systemPrompt: string | undefined,
-        recalledMemory: string,
-    ): string | undefined {
-        if (!recalledMemory) return systemPrompt;
-        if (!systemPrompt?.includes(recalledMemory)) {
-            return "[RECALLED_MEMORY_REDACTED]";
-        }
-        return systemPrompt
-            .split(recalledMemory)
-            .join("[RECALLED_MEMORY_REDACTED]");
     }
 
     /** 自动提取失败不能影响已生成的最终回答。 */
@@ -274,23 +237,7 @@ export class AgentLoop {
         if (!writer || !sessionId) return;
 
         try {
-            await this.tracer.span(
-                "memory.write",
-                {
-                    sessionId,
-                    userInputCharacterCount: userInput.length,
-                    answerCharacterCount: answer.length,
-                },
-                async (span) => {
-                    await writer.capture({
-                        userInput,
-                        assistantAnswer: answer,
-                        sessionId,
-                    });
-                    span.setOutput({ captured: true });
-                },
-                { module: "memory", operation: "write" },
-            );
+            await writer.capture({ userInput, assistantAnswer: answer, sessionId });
         } catch {
             // Memory 是附加能力，写入失败不改变已经生成的回答。
         }
