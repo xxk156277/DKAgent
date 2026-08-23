@@ -47,6 +47,7 @@ export interface MemoryCaptureInput {
 /** 提取稳定 Memory 候选的端口。 */
 export interface MemoryExtractorPort {
     extract(input: MemoryCaptureInput): Promise<MemoryCandidate[]>;
+    getTracer?(): import("@dkagent/trace").Tracer;
 }
 
 /** 从一次成功 Turn 中提取并保存稳定记忆。 */
