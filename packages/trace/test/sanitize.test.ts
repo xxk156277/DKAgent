@@ -1,57 +1,45 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-    sanitizeTraceEvent,
-    Tracer,
-    type TraceEvent,
-    type TraceSink,
-} from "../src/index.js";
+import { sanitizeJson } from "../src/index.js";
 
-const memoryFact = "用户偏好先讲结论";
-
-function traceEvent(data: unknown): TraceEvent {
-    return {
-        id: "event-1",
-        traceId: "trace-1",
-        sequence: 1,
-        timestamp: "2026-08-16T00:00:00.000Z",
-        name: "context.build",
-        phase: "start",
-        data,
-    };
-}
-
-test("sanitizeTraceEvent 替换任意字符串中的 recalled memory 块", () => {
-    const sanitized = sanitizeTraceEvent(traceEvent({
-        systemPrompt: [
-            "规则",
-            `<recalled_memory>${memoryFact}</recalled_memory>`,
-            `<recalled_memory>${memoryFact}</recalled_memory>`,
-        ].join("\n"),
-        nested: { value: `<recalled_memory>${memoryFact}</recalled_memory>` },
-        ordinaryText: "普通用户文本保持原样",
-    }));
-
-    assert.doesNotMatch(JSON.stringify(sanitized), new RegExp(memoryFact));
-    assert.match(JSON.stringify(sanitized), /\[RECALLED_MEMORY_REDACTED\]/);
-    assert.match(JSON.stringify(sanitized), /普通用户文本保持原样/);
+test("敏感字段递归脱敏，普通字段和 recalled memory 内容保留", () => {
+    const value = sanitizeJson({
+        apiKey: "secret",
+        nested: { authorization: "Bearer secret", headers: { env: "prod" }, value: "keep" },
+        recalled: "<recalled_memory>真实记忆</recalled_memory>",
+    });
+    assert.deepEqual(value, {
+        apiKey: "[REDACTED]",
+        nested: { authorization: "[REDACTED]", headers: "[REDACTED]", value: "keep" },
+        recalled: "<recalled_memory>真实记忆</recalled_memory>",
+    });
 });
 
-test("Tracer 在调用任意 sink 前脱敏 recalled memory", async () => {
-    const received: TraceEvent[] = [];
-    const sink: TraceSink = {
-        emit(event) {
-            received.push(event);
-        },
-    };
-    const tracer = new Tracer(sink);
+test("常见 credential key 变体递归脱敏", () => {
+    const value = sanitizeJson({
+        OPENAI_API_KEY: "a", "x-api-key": "b", token: "c", password: "d", secret: "e",
+        ordinary: "keep", recalled: "<recalled_memory>keep</recalled_memory>",
+    });
+    assert.deepEqual(value, {
+        OPENAI_API_KEY: "[REDACTED]", "x-api-key": "[REDACTED]", token: "[REDACTED]",
+        password: "[REDACTED]", secret: "[REDACTED]", ordinary: "keep",
+        recalled: "<recalled_memory>keep</recalled_memory>",
+    });
+});
 
-    await tracer.trace(
-        "agent.turn",
-        { systemPrompt: `<recalled_memory>${memoryFact}</recalled_memory>` },
-        async () => undefined,
-    );
-
-    assert.doesNotMatch(JSON.stringify(received), new RegExp(memoryFact));
-    assert.match(JSON.stringify(received), /\[RECALLED_MEMORY_REDACTED\]/);
+test("token usage 和 context 计数不是 credential key，保留数字", () => {
+    const value = sanitizeJson({
+        inputTokens: 12,
+        outputTokens: 7,
+        maxContextTokens: 4096,
+        tokensBefore: 100,
+        token: "secret",
+    });
+    assert.deepEqual(value, {
+        inputTokens: 12,
+        outputTokens: 7,
+        maxContextTokens: 4096,
+        tokensBefore: 100,
+        token: "[REDACTED]",
+    });
 });
