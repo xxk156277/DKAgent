@@ -72,13 +72,13 @@ export async function runAgentCli(options: {
         compressor,
         tracer,
     );
-    let memoryStore: SqliteMemoryStore;
-    try {
-        memoryStore = new SqliteMemoryStore(".dkagent/memory.db");
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Memory 数据库初始化失败：${message}`);
-    }
+    // let memoryStore: SqliteMemoryStore;
+    // try {
+    //     memoryStore = new SqliteMemoryStore(".dkagent/memory.db");
+    // } catch (error: unknown) {
+    //     const message = error instanceof Error ? error.message : String(error);
+    //     throw new Error(`Memory 数据库初始化失败：${message}`);
+    // }
     let ownedSessionStore: SqliteSessionStore | undefined;
     let sessionStore = options.sessionStore;
     if (!sessionStore) {
@@ -87,7 +87,7 @@ export async function runAgentCli(options: {
             sessionStore = ownedSessionStore;
         } catch (error: unknown) {
             try {
-                memoryStore.close();
+                // memoryStore.close();
             } catch {
                 // Session 初始化失败时，Memory 关闭失败不能掩盖原始错误。
             }
@@ -95,69 +95,69 @@ export async function runAgentCli(options: {
         }
     }
     try {
-    const memoryExtractor = new MemoryExtractor(queryEngine, config.model, tracer);
-    const memoryRetriever = new MemoryRetriever(memoryStore);
-    const memoryWriter = new AutomaticMemoryWriter(
-        memoryExtractor,
-        memoryStore,
-        tracer,
-    );
-    const artifactStores = new Map<string, ArtifactStore>();
-    const getOrCreateArtifactStore = (sessionId: string): ArtifactStore => {
-        const existingStore = artifactStores.get(sessionId);
-        if (existingStore) return existingStore;
+        // const memoryExtractor = new MemoryExtractor(queryEngine, config.model, tracer);
+        // const memoryRetriever = new MemoryRetriever(memoryStore);
+        // const memoryWriter = new AutomaticMemoryWriter(
+        //     memoryExtractor,
+        //     memoryStore,
+        //     tracer,
+        // );
+        const artifactStores = new Map<string, ArtifactStore>();
+        const getOrCreateArtifactStore = (sessionId: string): ArtifactStore => {
+            const existingStore = artifactStores.get(sessionId);
+            if (existingStore) return existingStore;
 
-        const artifactStore = options.artifactStoreFactory?.()
-            ?? new InMemoryArtifactStore(tracer);
-        artifactStores.set(sessionId, artifactStore);
-        return artifactStore;
-    };
+            const artifactStore = options.artifactStoreFactory?.()
+                ?? new InMemoryArtifactStore(tracer);
+            artifactStores.set(sessionId, artifactStore);
+            return artifactStore;
+        };
 
-    const createAgent = (
-        snapshot: SessionSnapshot
-    ): AgentLoop => {
-        return new AgentLoop({
-            queryEngine,
-            toolRegistry,
-            contextManager,
-            model: config.model,
-            maxContextTokens: config.maxContextTokens,
-            maxOutputTokens: config.maxOutputTokens,
-            contextCompaction: config.contextCompaction,
-            summaryModel: config.summaryModel,
-            maxSteps: 12,
-            systemPrompt,
-            onTextDelta: (text) => process.stdout.write(text),
-            tracer,
-            session: {
-                snapshot,
-                store: sessionStore,
-            },
-            memoryReader: memoryRetriever,
-            memoryWriter,
-            artifactStore: getOrCreateArtifactStore(snapshot.id),
+        const createAgent = (
+            snapshot: SessionSnapshot
+        ): AgentLoop => {
+            return new AgentLoop({
+                queryEngine,
+                toolRegistry,
+                contextManager,
+                model: config.model,
+                maxContextTokens: config.maxContextTokens,
+                maxOutputTokens: config.maxOutputTokens,
+                contextCompaction: config.contextCompaction,
+                summaryModel: config.summaryModel,
+                maxSteps: 12,
+                systemPrompt,
+                onTextDelta: (text) => process.stdout.write(text),
+                tracer,
+                session: {
+                    snapshot,
+                    store: sessionStore,
+                },
+                // memoryReader: memoryRetriever,
+                // memoryWriter,
+                artifactStore: getOrCreateArtifactStore(snapshot.id),
+            });
+        }
+
+
+        const restored = sessionStore.loadLatest();
+        let currentSession = restored ?? sessionStore.create();
+        let agent = createAgent(currentSession);
+
+        const readline = createInterface({ input: process.stdin, output: process.stdout });
+        const startupMessage = restored
+            ? `DKAgent 已恢复 Session ${currentSession.id}，输入 /new 创建新会话。`
+            : `DKAgent 已创建 Session ${currentSession.id}，输入自然语言开始对话。`;
+        console.log(`${startupMessage}\n`);
+        readline.setPrompt("> ");
+        const prompt = createSafePrompt(readline);
+        prompt();
+
+        // 在提示符处按 Ctrl+C 时优雅退出：结束 readline 输入循环，
+        // 循环结束后由 finally 统一调用 sessionStore.close() 保存并关闭数据库。
+        readline.on("SIGINT", () => {
+            readline.close();
         });
-    }
-
-
-    const restored = sessionStore.loadLatest();
-    let currentSession = restored ?? sessionStore.create();
-    let agent = createAgent(currentSession);
-
-    const readline = createInterface({ input: process.stdin, output: process.stdout });
-    const startupMessage = restored
-        ? `DKAgent 已恢复 Session ${currentSession.id}，输入 /new 创建新会话。`
-        : `DKAgent 已创建 Session ${currentSession.id}，输入自然语言开始对话。`;
-    console.log(`${startupMessage}\n`);
-    readline.setPrompt("> ");
-    const prompt = createSafePrompt(readline);
-    prompt();
-
-    // 在提示符处按 Ctrl+C 时优雅退出：结束 readline 输入循环，
-    // 循环结束后由 finally 统一调用 sessionStore.close() 保存并关闭数据库。
-    readline.on("SIGINT", () => {
-        readline.close();
-    });
 
         for await (const input of readline) {
             const userInput = input.trim();
@@ -182,7 +182,6 @@ export async function runAgentCli(options: {
                 prompt();
                 continue;
             }
-
             if (userInput === "/switch" || /^\/switch\s/.test(userInput)) {
                 const sessionId = userInput.slice("/switch".length).trim();
                 if (!sessionId) {
@@ -210,103 +209,99 @@ export async function runAgentCli(options: {
                 prompt();
                 continue;
             }
+            // if (userInput === "/delete" || /^\/delete\s/.test(userInput)) {
+            //     const sessionId = userInput.slice("/delete".length).trim();
+            //     if (!sessionId) {
+            //         console.log("用法：/delete <sessionId>\n");
+            //         prompt();
+            //         continue;
+            //     }
+            //     if (sessionId === currentSession.id) {
+            //         console.log("不能删除当前 Session，请先执行 /new 或 /switch。\n");
+            //         prompt();
+            //         continue;
+            //     }
+            //     if (!sessionStore.delete(sessionId)) {
+            //         console.log(`Session ${sessionId} 不存在\n`);
+            //         prompt();
+            //         continue;
+            //     }
+            //     artifactStores.delete(sessionId);
 
-            if (userInput === "/delete" || /^\/delete\s/.test(userInput)) {
-                const sessionId = userInput.slice("/delete".length).trim();
-                if (!sessionId) {
-                    console.log("用法：/delete <sessionId>\n");
-                    prompt();
-                    continue;
-                }
-                if (sessionId === currentSession.id) {
-                    console.log("不能删除当前 Session，请先执行 /new 或 /switch。\n");
-                    prompt();
-                    continue;
-                }
-                if (!sessionStore.delete(sessionId)) {
-                    console.log(`Session ${sessionId} 不存在\n`);
-                    prompt();
-                    continue;
-                }
-                artifactStores.delete(sessionId);
+            //     console.log(`已删除 Session ${sessionId}\n`);
+            //     prompt();
+            //     continue;
+            // }
+            // if (/^\/remember(?:\s|$)/.test(userInput)) {
+            //     const match = /^\/remember\s+(\S+)\s+(\S+)\s+(.+)$/.exec(userInput);
+            //     const [, type, key, content] = match ?? [];
+            //     if (!type || !key || !content) {
+            //         console.log(
+            //             "用法：/remember <profile|preference|decision> <key> <content>\n",
+            //         );
+            //         prompt();
+            //         continue;
+            //     }
 
-                console.log(`已删除 Session ${sessionId}\n`);
-                prompt();
-                continue;
-            }
+            //     try {
+            //         const memory = memoryStore.upsert({
+            //             type: type as MemoryType,
+            //             key,
+            //             content,
+            //             source: "explicit",
+            //             sourceSessionId: currentSession.id,
+            //         });
+            //         console.log(`已保存 Memory ${memory.id}\n`);
+            //     } catch (error: unknown) {
+            //         const message = error instanceof Error ? error.message : String(error);
+            //         console.log(`Memory 操作失败：${message}\n`);
+            //     }
+            //     prompt();
+            //     continue;
+            // }
+            // if (/^\/memories(?:\s|$)/.test(userInput)) {
+            //     if (userInput !== "/memories") {
+            //         console.log("用法：/memories\n");
+            //         prompt();
+            //         continue;
+            //     }
+            //     try {
+            //         const memories = memoryStore.list();
+            //         if (memories.length === 0) {
+            //             console.log("暂无 Memory\n");
+            //         } else {
+            //             console.log(`${memories.map((memory) => (
+            //                 `[${memory.type}] ${memory.key} = ${memory.content} (${memory.source}, ${memory.id})`
+            //             )).join("\n")}\n`);
+            //         }
+            //     } catch (error: unknown) {
+            //         const message = error instanceof Error ? error.message : String(error);
+            //         console.log(`Memory 操作失败：${message}\n`);
+            //     }
+            //     prompt();
+            //     continue;
+            // }
+            // if (/^\/forget(?:\s|$)/.test(userInput)) {
+            //     const [, memoryId, ...extra] = userInput.split(/\s+/);
+            //     if (!memoryId || extra.length > 0) {
+            //         console.log("用法：/forget <memoryId>\n");
+            //         prompt();
+            //         continue;
+            //     }
 
-            if (/^\/remember(?:\s|$)/.test(userInput)) {
-                const match = /^\/remember\s+(\S+)\s+(\S+)\s+(.+)$/.exec(userInput);
-                const [, type, key, content] = match ?? [];
-                if (!type || !key || !content) {
-                    console.log(
-                        "用法：/remember <profile|preference|decision> <key> <content>\n",
-                    );
-                    prompt();
-                    continue;
-                }
-
-                try {
-                    const memory = memoryStore.upsert({
-                        type: type as MemoryType,
-                        key,
-                        content,
-                        source: "explicit",
-                        sourceSessionId: currentSession.id,
-                    });
-                    console.log(`已保存 Memory ${memory.id}\n`);
-                } catch (error: unknown) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    console.log(`Memory 操作失败：${message}\n`);
-                }
-                prompt();
-                continue;
-            }
-
-            if (/^\/memories(?:\s|$)/.test(userInput)) {
-                if (userInput !== "/memories") {
-                    console.log("用法：/memories\n");
-                    prompt();
-                    continue;
-                }
-                try {
-                    const memories = memoryStore.list();
-                    if (memories.length === 0) {
-                        console.log("暂无 Memory\n");
-                    } else {
-                        console.log(`${memories.map((memory) => (
-                            `[${memory.type}] ${memory.key} = ${memory.content} (${memory.source}, ${memory.id})`
-                        )).join("\n")}\n`);
-                    }
-                } catch (error: unknown) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    console.log(`Memory 操作失败：${message}\n`);
-                }
-                prompt();
-                continue;
-            }
-
-            if (/^\/forget(?:\s|$)/.test(userInput)) {
-                const [, memoryId, ...extra] = userInput.split(/\s+/);
-                if (!memoryId || extra.length > 0) {
-                    console.log("用法：/forget <memoryId>\n");
-                    prompt();
-                    continue;
-                }
-
-                try {
-                    if (memoryStore.delete(memoryId)) {
-                        console.log(`已删除 Memory ${memoryId}\n`);
-                    } else {
-                        console.log(`Memory ${memoryId} 不存在\n`);
-                    }
-                } catch (error: unknown) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    console.log(`Memory 操作失败：${message}\n`);
-                }
-                prompt();
-                continue;
-            }
+            //     try {
+            //         if (memoryStore.delete(memoryId)) {
+            //             console.log(`已删除 Memory ${memoryId}\n`);
+            //         } else {
+            //             console.log(`Memory ${memoryId} 不存在\n`);
+            //         }
+            //     } catch (error: unknown) {
+            //         const message = error instanceof Error ? error.message : String(error);
+            //         console.log(`Memory 操作失败：${message}\n`);
+            //     }
+            //     prompt();
+            //     continue;
+            // }
 
             try {
                 await tracer.withSession(
@@ -322,11 +317,11 @@ export async function runAgentCli(options: {
         }
     } finally {
         let closeError: unknown;
-        try {
-            memoryStore.close();
-        } catch (error: unknown) {
-            closeError = error;
-        }
+        // try {
+        //     memoryStore.close();
+        // } catch (error: unknown) {
+        //     closeError = error;
+        // }
         if (ownedSessionStore) {
             try {
                 ownedSessionStore.close();
