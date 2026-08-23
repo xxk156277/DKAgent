@@ -3,7 +3,6 @@ import type {
     HistorySummaryEngine,
     HistorySummaryInput,
 } from "./types.js";
-import { Tracer } from "@dkagent/trace";
 
 const SUMMARY_SYSTEM_PROMPT = `你是 Agent 的上下文压缩器。
 你的输出会作为后续模型继续工作的上下文，而不是面向用户的普通回答。
@@ -51,8 +50,11 @@ const SUMMARY_SYSTEM_PROMPT = `你是 Agent 的上下文压缩器。
 export class Compressor {
     public constructor(
         private readonly summaryEngine: HistorySummaryEngine,
-        private readonly tracer: Tracer = new Tracer(),
     ) { }
+
+    public getTracer() {
+        return this.summaryEngine.getTracer?.();
+    }
 
     /**
      * 按 Token 粗略估算比例截断文本。
@@ -201,16 +203,7 @@ export class Compressor {
                 : { abortSignal: input.abortSignal }),
         };
 
-        const response = await this.tracer.span(
-            "context.summary.request",
-            request,
-            async (span) => {
-                const result = await this.summaryEngine.query(request);
-                span.event("context.summary.response", result);
-                span.setOutput(result);
-                return result;
-            },
-        );
+        const response = await this.summaryEngine.query(request);
 
         if (response.type !== "text") {
             throw new Error("历史摘要模型意外返回 Tool Call");

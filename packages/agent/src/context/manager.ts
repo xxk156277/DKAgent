@@ -1,4 +1,4 @@
-import { Tracer, type TraceSpan } from "@dkagent/trace";
+import { Tracer, type SpanInputMap, type SpanOutputMap, type TraceSpanHandle } from "@dkagent/trace";
 import { groupContextMessages } from "./grouper.js";
 import type { Compressor } from "./compressor.js";
 import type { AgentMessage } from "../query-engine/provider.js";
@@ -39,14 +39,22 @@ function validateContextBudget(input: ContextBuildInput): void {
 
 /** 无状态的请求 Context 构建器；观测统计只发送到 Trace。 */
 export class ContextManager implements ContextBuilder {
+    private readonly tracer: Tracer;
+
     public constructor(
         private readonly tokenCounter: ContextTokenCounter,
         private readonly compressor?: Compressor,
-        private readonly tracer: Tracer = new Tracer(),
-    ) { }
+        tracer?: Tracer,
+    ) {
+        const summaryTracer = compressor?.getTracer();
+        if (tracer !== undefined && summaryTracer !== undefined && tracer !== summaryTracer) {
+            throw new Error("ContextManager tracer must match Compressor tracer");
+        }
+        this.tracer = tracer ?? summaryTracer ?? new Tracer();
+    }
 
     public build(input: ContextBuildInput): Promise<ContextSnapshot> {
-        return this.tracer.span("context.build", input, async (span) => {
+        return this.tracer.span("context.build", this.toBuildTraceInput(input), async (span) => {
             validateContextBudget(input);
             const availableInputTokens = input.maxContextTokens - input.reservedOutputTokens;
             const compaction = input.compaction;
@@ -65,10 +73,6 @@ export class ContextManager implements ContextBuilder {
                     summarizedMessageCount: 0,
                 });
 
-            span.event("context.snapshot.created", {
-                context: built.snapshot,
-                metrics: this.toTraceMetrics(built),
-            });
             span.event("context.tokens.counted", {
                 stage: "final_request",
                 tokens: built.estimatedInputTokens,
@@ -80,21 +84,16 @@ export class ContextManager implements ContextBuilder {
                     stage: "after_compaction",
                     tokens: built.estimatedInputTokens,
                 });
-                span.event("context.compaction.completed", {
-                    tokensBefore: built.tokensBeforeCompaction,
-                    tokensAfter: built.estimatedInputTokens,
-                    tokensSaved: Math.max(0, built.tokensBeforeCompaction - built.estimatedInputTokens),
-                    savedRatio: built.tokensBeforeCompaction === 0
-                        ? 0
-                        : Math.max(0, built.tokensBeforeCompaction - built.estimatedInputTokens)
-                            / built.tokensBeforeCompaction,
-                    summarizedMessageCount: built.summarizedMessageCount,
-                    retainedMessageCount: built.retainedMessageCount,
-                    fallbackUsed: built.fallbackUsed,
-                });
             }
 
-            span.setOutput({ context: built.snapshot, metrics: this.toTraceMetrics(built) });
+            const output: SpanOutputMap["context.build"] = {
+                messageCount: built.snapshot.messages.length,
+                toolCount: built.snapshot.tools.length,
+                estimatedInputTokens: built.estimatedInputTokens,
+                availableInputTokens: built.availableInputTokens,
+                compacted: built.compacted,
+            };
+            span.setOutput(output);
             return built.snapshot;
         });
     }
@@ -102,7 +101,7 @@ export class ContextManager implements ContextBuilder {
     private async buildWithCompaction(
         input: ContextBuildInput,
         availableInputTokens: number,
-        span: TraceSpan,
+        span: TraceSpanHandle<"context.build">,
     ): Promise<BuiltContext> {
         this.validateCompactionInput(input);
         const compaction = input.compaction;
@@ -123,7 +122,7 @@ export class ContextManager implements ContextBuilder {
         span.event("context.tokens.counted", {
             stage: "before_compaction",
             tokens: tokensBeforeCompaction,
-            activeMessages,
+            messageCount: activeMessages.length,
         });
 
         const exceeded = tokensBeforeCompaction > triggerTokens;
@@ -165,21 +164,30 @@ export class ContextManager implements ContextBuilder {
             span.event("context.compaction.planned", {
                 strategy: "deletion_fallback",
                 reason: "没有可进入摘要的旧消息",
-                groups,
+                groupCount: groups.length,
             });
-            return this.buildWithDeletionFallback({
-                input,
-                messages: activeMessages,
-                systemPrompt: currentSystemPrompt,
-                tokenLimit: availableInputTokens,
-                hardTokenLimit: availableInputTokens,
-                availableInputTokens,
-                compactionAttempted: true,
-                compacted: false,
-                fallbackUsed: true,
-                tokensBeforeCompaction,
-                nextContextState: compaction.state,
-                summarizedMessageCount: 0,
+            return this.tracer.span("context.compact", {
+                messageCountBefore: activeMessages.length,
+                tokensBefore: tokensBeforeCompaction,
+                decision: "deletion_fallback",
+            }, async (compactSpan) => {
+                const result = await this.buildWithDeletionFallback({
+                    input, messages: activeMessages, systemPrompt: currentSystemPrompt,
+                    tokenLimit: availableInputTokens, hardTokenLimit: availableInputTokens,
+                    availableInputTokens, compactionAttempted: true, compacted: false,
+                    fallbackUsed: true, tokensBeforeCompaction, nextContextState: compaction.state,
+                    summarizedMessageCount: 0,
+                });
+                compactSpan.setOutput({
+                    messageCountBefore: activeMessages.length,
+                    messageCountAfter: result.snapshot.messages.length,
+                    summarizedMessageCount: 0,
+                    retainedMessageCount: result.snapshot.messages.length,
+                    tokensBefore: tokensBeforeCompaction,
+                    tokensAfter: result.estimatedInputTokens,
+                    fallbackUsed: true,
+                });
+                return result;
             });
         }
 
@@ -192,55 +200,61 @@ export class ContextManager implements ContextBuilder {
         span.event("context.compaction.planned", {
             strategy: "summary",
             rawMessageBudget,
-            messagesToSummarize,
-            retainedMessages,
+            summarizedMessageCount: messagesToSummarize.length,
+            retainedMessageCount: retainedMessages.length,
         });
 
-        try {
-            const summary = await compressor.summarizeHistory({
-                existingSummary: compaction.state.summary,
-                messages: messagesToSummarize,
-                model: compaction.summaryModel,
-                maxTokens: compaction.options.maxSummaryTokens,
-                maxToolResultChars: compaction.options.maxToolResultChars,
-                ...(compaction.abortSignal === undefined ? {} : { abortSignal: compaction.abortSignal }),
-            });
-            const nextContextState: ConversationContextState = {
-                summary,
-                firstKeptMessageIndex:
-                    compaction.state.firstKeptMessageIndex + messagesToSummarize.length,
-            };
-            return this.buildWithDeletionFallback({
+        return this.tracer.span("context.compact", {
+            messageCountBefore: activeMessages.length,
+            tokensBefore: tokensBeforeCompaction,
+            decision: "summary",
+        }, async (compactSpan) => {
+            let summary: string | undefined;
+            try {
+                summary = await compressor.summarizeHistory({
+                    existingSummary: compaction.state.summary,
+                    messages: messagesToSummarize,
+                    model: compaction.summaryModel,
+                    maxTokens: compaction.options.maxSummaryTokens,
+                    maxToolResultChars: compaction.options.maxToolResultChars,
+                    ...(compaction.abortSignal === undefined ? {} : { abortSignal: compaction.abortSignal }),
+                });
+            } catch {
+                // 摘要失败保持旧状态，下面执行确定性整组删除 fallback。
+            }
+            const fallbackUsed = summary === undefined;
+            const result = await this.buildWithDeletionFallback({
                 input,
-                messages: retainedMessages,
-                systemPrompt: this.createSystemPrompt(input.systemPrompt, summary),
-                tokenLimit: targetTokens,
+                messages: fallbackUsed ? activeMessages : retainedMessages,
+                systemPrompt: fallbackUsed
+                    ? currentSystemPrompt
+                    : this.createSystemPrompt(input.systemPrompt, summary!),
+                tokenLimit: fallbackUsed ? availableInputTokens : targetTokens,
                 hardTokenLimit: availableInputTokens,
                 availableInputTokens,
                 compactionAttempted: true,
-                compacted: true,
-                fallbackUsed: false,
+                compacted: !fallbackUsed,
+                fallbackUsed,
                 tokensBeforeCompaction,
-                nextContextState,
-                summarizedMessageCount: messagesToSummarize.length,
+                nextContextState: fallbackUsed
+                    ? compaction.state
+                    : {
+                        summary: summary!,
+                        firstKeptMessageIndex: compaction.state.firstKeptMessageIndex + messagesToSummarize.length,
+                    },
+                summarizedMessageCount: fallbackUsed ? 0 : messagesToSummarize.length,
             });
-        } catch {
-            // 摘要是非确定性能力，失败后保持旧状态并执行确定性删除。
-            return this.buildWithDeletionFallback({
-                input,
-                messages: activeMessages,
-                systemPrompt: currentSystemPrompt,
-                tokenLimit: availableInputTokens,
-                hardTokenLimit: availableInputTokens,
-                availableInputTokens,
-                compactionAttempted: true,
-                compacted: false,
-                fallbackUsed: true,
-                tokensBeforeCompaction,
-                nextContextState: compaction.state,
-                summarizedMessageCount: 0,
+            compactSpan.setOutput({
+                messageCountBefore: activeMessages.length,
+                messageCountAfter: result.snapshot.messages.length,
+                summarizedMessageCount: result.summarizedMessageCount,
+                retainedMessageCount: result.retainedMessageCount,
+                tokensBefore: tokensBeforeCompaction,
+                tokensAfter: result.estimatedInputTokens,
+                fallbackUsed,
             });
-        }
+            return result;
+        });
     }
 
     private findSummaryCutGroupIndex(groups: ContextMessageGroup[], rawMessageBudget: number): number {
@@ -400,9 +414,23 @@ export class ContextManager implements ContextBuilder {
         };
     }
 
-    private toTraceMetrics(built: BuiltContext): Omit<BuiltContext, "snapshot"> {
-        const { snapshot: _snapshot, ...metrics } = built;
-        return metrics;
+    private toBuildTraceInput(input: ContextBuildInput): SpanInputMap["context.build"] {
+        const compaction = input.compaction?.options;
+        return {
+            messageCount: input.messages.length,
+            toolCount: input.tools.length,
+            maxContextTokens: input.maxContextTokens,
+            reservedOutputTokens: input.reservedOutputTokens,
+            ...(compaction === undefined ? {} : {
+                compaction: {
+                    enabled: compaction.enabled,
+                    triggerRatio: compaction.triggerRatio,
+                    targetRatio: compaction.targetRatio,
+                    maxSummaryTokens: compaction.maxSummaryTokens,
+                    maxToolResultChars: compaction.maxToolResultChars,
+                },
+            }),
+        };
     }
 
     private validateCompactionInput(input: ContextBuildInput): void {

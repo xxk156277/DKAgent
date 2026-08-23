@@ -90,6 +90,8 @@ export interface HistorySummaryInput {
 export interface HistorySummaryEngine {
     /** 发送一次模型请求，并返回 Provider 中立的模型响应。 */
     query(request: ModelRequest): Promise<ModelResponse>;
+    /** QueryEngine 提供此只读句柄，使 compact 下的 model.generate 归属同一 Trace。 */
+    getTracer?(): import("@dkagent/trace").Tracer;
 }
 
 /**
