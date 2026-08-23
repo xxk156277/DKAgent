@@ -1,4 +1,3 @@
-import type { Tracer } from "@dkagent/trace";
 import { z } from "zod";
 import type { QueryEngine } from "../query-engine/query-engine.js";
 import { queryModelJson } from "./model-json.js";
@@ -50,7 +49,6 @@ export interface StructureInput {
     model: string;
     /** 上层任务的取消信号。 */
     abortSignal: AbortSignal;
-    tracer?: Tracer | undefined;
 }
 
 export interface StructureOutput {
@@ -130,8 +128,6 @@ export async function structureInterview(input: StructureInput): Promise<Structu
         queryEngine: input.queryEngine,
         model: input.model,
         abortSignal: input.abortSignal,
-        tracer: input.tracer,
-        traceOperation: "structure_interview",
         schema: relationSchema,
         systemPrompt: [
             "把完整面试轮次结构化为问题簇和具体问题，只返回一个 JSON 对象。",

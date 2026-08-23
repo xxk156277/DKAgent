@@ -606,7 +606,7 @@ test("预中止的无可评分报告返回 timeout，不调用模型也不产生
         analyses: [notScoredAnalysis],
     });
     const artifactCountBefore = traceStore.list().filter(
-        (event) => event.name === "artifact.created",
+        (event) => event.name === "artifact.put",
     ).length;
     const controller = new AbortController();
     controller.abort();
@@ -619,7 +619,7 @@ test("预中止的无可评分报告返回 timeout，不调用模型也不产生
     assert.equal(result.data, undefined);
     assert.equal(provider.request, undefined);
     assert.equal(
-        traceStore.list().filter((event) => event.name === "artifact.created").length,
+        traceStore.list().filter((event) => event.name === "artifact.put").length,
         artifactCountBefore,
     );
 });

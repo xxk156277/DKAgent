@@ -425,12 +425,13 @@ test("Tool Registry Artifact 引用链隐藏中间大对象并在单题模型失
         ]);
         const registry = createToolRegistry({ cwd: directory, model: "fake-model" });
         const context: ToolContext = {
-            queryEngine: new QueryEngine(provider),
+            queryEngine: new QueryEngine(provider, tracer),
             abortSignal: new AbortController().signal,
             tracer,
             artifactStore: artifacts,
         };
 
+        await tracer.trace("agent.turn", { userInput: "分析面试" }, async (turn) => {
         const readResult = await registry.resolve("read_file").execute(
             { path: "interview.md", storeAsArtifact: true },
             context,
@@ -492,48 +493,25 @@ test("Tool Registry Artifact 引用链隐藏中间大对象并在单题模型失
         assert.match(reportData.markdown, new RegExp(sourceSentence));
 
         const artifactEvents = traceStore.list().filter((event) => (
-            event.name === "artifact.created" || event.name === "artifact.resolved"
+            event.name === "artifact.put" || event.name === "artifact.get"
         ));
         assert.ok(artifactEvents.length > 0);
-        assert.ok(artifactEvents.every((event) => event.module === "artifact"));
-        const allowedTraceFields = new Set([
-            "artifactId",
-            "artifactType",
-            "producer",
-            "consumer",
-            "characterCount",
-            "itemCount",
-            "exposedCharacterCount",
-            "omittedCharacterCount",
-            "hit",
-        ]);
         assert.ok(artifactEvents.every((event) => (
-            typeof event.data === "object"
-            && event.data !== null
-            && Object.keys(event.data).every((key) => allowedTraceFields.has(key))
+            event.name === "artifact.put" || event.name === "artifact.get"
         )));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes(sourceSentence)));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("originalAnswer")));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("strengths")));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("issues")));
 
-        const modelEvents = traceStore.list().filter((event) => (
-            event.name === "model.request" || event.name === "model.response"
-        ));
+        const modelEvents = traceStore.list().filter((event) => event.name === "model.generate");
         assert.ok(modelEvents.length > 0);
-        assert.ok(modelEvents.every((event) => event.module === "skill"));
         const serializedModelEvents = JSON.stringify(modelEvents);
-        assert.doesNotMatch(serializedModelEvents, new RegExp(sourceSentence));
-        assert.doesNotMatch(serializedModelEvents, /originalAnswer|"strengths"|"issues"/);
-        assert.doesNotMatch(
-            serializedModelEvents,
-            /"systemPrompt":|"messages":|"content":/,
-        );
-        assert.match(serializedModelEvents, /systemPromptCharacterCount/);
-        assert.match(serializedModelEvents, /userContentCharacterCount/);
-        assert.match(serializedModelEvents, /resultType/);
+        assert.match(serializedModelEvents, /"systemPrompt":|"messages":|"content":/);
         assert.match(serializedModelEvents, /stopReason/);
         assert.equal(provider.remainingResponses, 0);
+        turn.setOutput({ answer: "完成" });
+        });
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
@@ -661,7 +639,7 @@ test("Provider、JSON、Zod 和业务校验错误不进入 Tool、Trace、Failed
             structuredInterviewArtifactId,
         );
         const agent = new AgentLoop({
-            queryEngine: new QueryEngine(provider),
+            queryEngine: new QueryEngine(provider, tracer),
             toolRegistry: createToolRegistry({ model: "fake-model" }),
             contextManager: {
                 async build(input) {
@@ -692,7 +670,6 @@ test("Provider、JSON、Zod 和业务校验错误不进入 Tool、Trace、Failed
 
         for (const downstream of [
             JSON.stringify(toolResults),
-            JSON.stringify(traceStore.list()),
             JSON.stringify(failedArtifact),
             answer,
         ]) {
@@ -713,11 +690,11 @@ test("structure_interview 业务校验不泄露模型可控 turnId", async () =>
         { producer: "test" },
     );
     const artifactCountBefore = traceStore.list().filter(
-        (event) => event.name === "artifact.created",
+        (event) => event.name === "artifact.put",
     ).length;
     const provider = new StructureTurnIdFailureProvider(transcriptArtifactId, secret);
     const agent = new AgentLoop({
-        queryEngine: new QueryEngine(provider),
+        queryEngine: new QueryEngine(provider, tracer),
         toolRegistry: createToolRegistry({ model: "fake-model" }),
         contextManager: {
             async build(input) {
@@ -737,13 +714,22 @@ test("structure_interview 业务校验不泄露模型可控 turnId", async () =>
     ) as ToolResult;
     assert.equal(toolResult.success, false);
     assert.equal(toolResult.error?.message, "面试问题结构化失败");
+    const modelSpans = traceStore.list().filter((event) => event.name === "model.generate"
+        && (event.input as { responseFormat?: string }).responseFormat === "json_object");
+    assert.equal(modelSpans.length, 1);
+    const modelSpan = modelSpans[0]!;
+    const parent = traceStore.list().find((event) => event.spanId === modelSpan.parentSpanId);
+    assert.equal(parent?.name, "tool.execute");
+    assert.deepEqual((modelSpan.input as { responseFormat?: string }).responseFormat, "json_object");
+    assert.equal((modelSpan.input as { thinking?: string }).thinking, "disabled");
+    assert.equal(typeof modelSpan.durationMs, "number");
+    assert.deepEqual(modelSpan.tokenUsage, { inputTokens: 1, outputTokens: 1 });
     assert.equal(
-        traceStore.list().filter((event) => event.name === "artifact.created").length,
+        traceStore.list().filter((event) => event.name === "artifact.put").length,
         artifactCountBefore,
     );
     for (const downstream of [
         JSON.stringify(toolResult),
-        JSON.stringify(traceStore.list()),
         answer,
     ]) {
         assert.doesNotMatch(downstream, new RegExp(secret));

@@ -662,8 +662,6 @@ export function createGenerateReportTool(
                         queryEngine: ctx.queryEngine,
                         model,
                         abortSignal: ctx.abortSignal,
-                        tracer: ctx.tracer,
-                        traceOperation: "generate_report_summary",
                         schema: summarySchema,
                         systemPrompt: [
                             "基于给定的确定性分数和逐题分析生成报告第一层总结，严格输出 JSON。",
@@ -716,8 +714,6 @@ export function createGenerateReportTool(
                         queryEngine: ctx.queryEngine,
                         model,
                         abortSignal: ctx.abortSignal,
-                        tracer: ctx.tracer,
-                        traceOperation: "evaluate_job_match",
                         schema: jobMatchSchema,
                         systemPrompt: [
                             "比较岗位描述与面试证据，严格输出 JSON。",

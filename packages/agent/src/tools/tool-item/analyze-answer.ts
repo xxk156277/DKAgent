@@ -354,8 +354,6 @@ export function createAnalyzeAnswerTool(
                     queryEngine: ctx.queryEngine,
                     model,
                     abortSignal: ctx.abortSignal,
-                    tracer: ctx.tracer,
-                    traceOperation: "analyze_answer",
                     schema: responseSchema,
                     systemPrompt: [
                         "只基于输入分析当前面试回答，严格输出 JSON。",

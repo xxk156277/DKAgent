@@ -466,7 +466,7 @@ test("预中止的流程题返回 timeout，不调用模型也不创建分析 Ar
         clusterQuestions: [proceduralQuestion],
     });
     const artifactCountBefore = traceStore.list().filter(
-        (event) => event.name === "artifact.created",
+        (event) => event.name === "artifact.put",
     ).length;
     controller.abort();
 
@@ -482,7 +482,7 @@ test("预中止的流程题返回 timeout，不调用模型也不创建分析 Ar
     assert.equal(result.data, undefined);
     assert.equal(provider.request, undefined);
     assert.equal(
-        traceStore.list().filter((event) => event.name === "artifact.created").length,
+        traceStore.list().filter((event) => event.name === "artifact.put").length,
         artifactCountBefore,
     );
 });

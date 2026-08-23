@@ -1,6 +1,4 @@
 import { z } from "zod";
-import type { TraceSpan, Tracer } from "@dkagent/trace";
-import type { ModelResponse } from "../query-engine/provider.js";
 import type { QueryEngine } from "../query-engine/query-engine.js";
 
 const SAFE_MODEL_REQUEST_ERROR = "结构化模型请求失败";
@@ -24,8 +22,6 @@ export async function queryModelJson<T>(input: {
     userContent: string;
     schema: z.ZodType<T>;
     abortSignal: AbortSignal;
-    tracer?: Tracer | undefined;
-    traceOperation: string;
 }): Promise<T> {
     if (input.abortSignal.aborted) throw createAbortError();
 
@@ -38,47 +34,15 @@ export async function queryModelJson<T>(input: {
         thinking: "disabled" as const,
         abortSignal: input.abortSignal,
     };
-    const traceRequest = {
-        model: request.model,
-        systemPromptCharacterCount: input.systemPrompt.length,
-        userContentCharacterCount: input.userContent.length,
-        temperature: request.temperature,
-        responseFormat: request.responseFormat,
-        thinking: request.thinking,
-    };
-    const execute = async (span?: TraceSpan): Promise<ModelResponse> => {
-        let response: ModelResponse;
-        try {
-            response = await input.queryEngine.query(request);
-        } catch (error) {
-            if (isAbortError(error) || input.abortSignal.aborted) {
-                throw createAbortError();
-            }
-            throw new Error(SAFE_MODEL_REQUEST_ERROR);
+    let response;
+    try {
+        response = await input.queryEngine.query(request);
+    } catch (error) {
+        if (isAbortError(error) || input.abortSignal.aborted) {
+            throw createAbortError();
         }
-        const responseMetadata = {
-            model: request.model,
-            resultType: response.type,
-            contentCharacterCount: response.content?.length ?? 0,
-            usage: response.usage,
-            stopReason: response.stopReason,
-            ...(response.type === "tool_use"
-                ? { toolCallCount: response.toolCalls.length }
-                : {}),
-        };
-        span?.event("model.response", responseMetadata);
-        span?.setOutput(responseMetadata);
-        return response;
-    };
-
-    const response = input.tracer
-        ? await input.tracer.span(
-            "model.request",
-            traceRequest,
-            execute,
-            { module: "skill", operation: input.traceOperation },
-        )
-        : await execute();
+        throw new Error(SAFE_MODEL_REQUEST_ERROR);
+    }
 
     if (input.abortSignal.aborted) throw createAbortError();
 

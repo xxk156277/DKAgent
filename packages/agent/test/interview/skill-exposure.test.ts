@@ -197,7 +197,7 @@ test("structure_interview 预中止时不调用模型也不创建 Artifact", asy
         ],
     } satisfies ParsedTranscript, { producer: "test" });
     const artifactCountBefore = traceStore.list().filter(
-        (event) => event.name === "artifact.created",
+        (event) => event.name === "artifact.put",
     ).length;
     const provider = new FakeTextProvider("{}");
     const controller = new AbortController();
@@ -217,7 +217,7 @@ test("structure_interview 预中止时不调用模型也不创建 Artifact", asy
     assert.equal(result.data, undefined);
     assert.equal(provider.request, undefined);
     assert.equal(
-        traceStore.list().filter((event) => event.name === "artifact.created").length,
+        traceStore.list().filter((event) => event.name === "artifact.put").length,
         artifactCountBefore,
     );
 });

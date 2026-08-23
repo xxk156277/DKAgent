@@ -85,7 +85,6 @@ export function createStructureInterviewTool(
                     queryEngine: context.queryEngine,
                     model,
                     abortSignal: context.abortSignal,
-                    tracer: context.tracer,
                 });
                 const interview: StructuredInterview = { transcript, ...output };
                 const artifactId = context.artifactStore.put(
