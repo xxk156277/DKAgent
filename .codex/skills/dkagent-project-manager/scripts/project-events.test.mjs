@@ -906,6 +906,166 @@ test("snapshot exposes a safe ACK-intent recovery before event moves", () => {
   assert.equal(lockStatus({ cwd }).held, false);
 });
 
+test("ACK lifecycle blocks acquire, release, and recover until its owner is removed", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-LIFECYCLE" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  let checked = false;
+
+  ackEvents({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
+    _testAfterLifecycleAcquired() {
+      checked = true;
+      assert.throws(() => acquireLock({ cwd }), /lifecycle operation is in progress/);
+      assert.throws(() => releaseLock({ cwd, token: owner.token }), /lifecycle operation is in progress/);
+      assert.throws(() => recoverLock({ cwd, confirm: true }), /lifecycle operation is in progress/);
+      const markers = lockStatus({ cwd }).intentMarkers;
+      assert.equal(markers.length, 1);
+      assert.match(markers[0], /^aggregate\.intent-ack-/);
+      assert.equal(JSON.parse(readFileSync(path.join(stateRoot(cwd), markers[0]), "utf8")).operation, "ack");
+    },
+  });
+
+  assert.equal(checked, true);
+  assert.equal(lockStatus({ cwd }).held, false);
+  assert.equal(lockStatus({ cwd }).intentMarkers, undefined);
+});
+
+test("ACK revalidates its owner before writing reconciled state", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-OWNER-RECHECK" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const replacement = { ...owner, token: "00000000-0000-4000-8000-000000000001" };
+
+  assert.throws(
+    () => ackEvents({
+      cwd,
+      token: owner.token,
+      eventIds: [event.eventId],
+      expectedDocumentHashes: documentHashes(cwd),
+      _testBeforeStateWrite() {
+        writeFileSync(
+          path.join(stateRoot(cwd), "aggregate.lock"),
+          `${JSON.stringify(replacement, null, 2)}\n`,
+        );
+      },
+    }),
+    /aggregate lock token mismatch/,
+  );
+
+  const root = stateRoot(cwd);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(root, "state.json"), "utf8")).processedEventIds, []);
+  assert.equal(existsSync(path.join(root, "events", "processed", `${event.eventId}.json`)), true);
+  assert.equal(lockStatus({ cwd }).owner.token, replacement.token);
+});
+
+test("ACK intent recovery freezes out pending events emitted after journal publication", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const first = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-FROZEN" }) });
+  const firstOwner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, firstOwner.token, [first]);
+  const firstHashes = documentHashes(cwd);
+  assert.throws(
+    () => ackEvents({
+      cwd,
+      token: firstOwner.token,
+      eventIds: [first.eventId],
+      expectedDocumentHashes: firstHashes,
+      _testCrashAfterPhase: "intent",
+    }),
+    /simulated crash after ACK intent/,
+  );
+  const finished = emitEvent({
+    cwd,
+    input: started({
+      taskId: first.taskId,
+      action: "finished",
+      status: "needs_verification",
+      summary: "Finish after ACK journal publication",
+    }),
+  });
+
+  assert.throws(
+    () => ackEvents({
+      cwd,
+      token: firstOwner.token,
+      eventIds: [first.eventId, finished.eventId],
+      expectedDocumentHashes: firstHashes,
+    }),
+    /ACK intent does not match/,
+  );
+  ackEvents({
+    cwd,
+    token: firstOwner.token,
+    eventIds: [first.eventId],
+    expectedDocumentHashes: firstHashes,
+  });
+
+  let snapshot = readSnapshot({ cwd });
+  assert.deepEqual(snapshot.events.map((event) => event.eventId), [finished.eventId]);
+  assert.deepEqual(snapshot.state.processedEventIds, [first.eventId]);
+  const secondOwner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, secondOwner.token, [finished]);
+  ackEvents({
+    cwd,
+    token: secondOwner.token,
+    eventIds: [finished.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
+  });
+  snapshot = readSnapshot({ cwd });
+  assert.deepEqual(snapshot.events, []);
+  assert.deepEqual(snapshot.state.processedEventIds, [first.eventId, finished.eventId]);
+});
+
+test("ACK intent recovery leaves later WIP conflicts for the next transaction", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const first = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-FROZEN-WIP" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [first]);
+  const expectedDocumentHashes = documentHashes(cwd);
+  assert.throws(
+    () => ackEvents({
+      cwd,
+      token: owner.token,
+      eventIds: [first.eventId],
+      expectedDocumentHashes,
+      _testCrashAfterPhase: "intent",
+    }),
+    /simulated crash after ACK intent/,
+  );
+  const later = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-LATER-WIP" }) });
+  assert.deepEqual(readSnapshot({ cwd }).conflicts, [{
+    kind: "worktree_claims_multiple_tasks",
+    worktreePath: cwd,
+    taskIds: [first.taskId, later.taskId].sort(),
+  }]);
+
+  ackEvents({
+    cwd,
+    token: owner.token,
+    eventIds: [first.eventId],
+    expectedDocumentHashes,
+  });
+
+  const snapshot = readSnapshot({ cwd });
+  assert.deepEqual(snapshot.events.map((event) => event.eventId), [later.eventId]);
+  assert.deepEqual(snapshot.state.processedEventIds, [first.eventId]);
+  assert.deepEqual(snapshot.conflicts, [{
+    kind: "worktree_claims_multiple_tasks",
+    worktreePath: cwd,
+    taskIds: [first.taskId, later.taskId].sort(),
+  }]);
+});
+
 test("ACK intent recovers events moved before state persistence", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
@@ -1552,31 +1712,32 @@ test("CLI owner token is recovered from lock status after its process exits", ()
   assert.equal(lockStatus({ cwd }).held, false);
 });
 
-test("release intent blocks acquires before and after the current lock is removed", () => {
+test("a lifecycle intent blocks acquire and release before either reads or changes owner", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const root = stateRoot(cwd);
   const owner = acquireLock({ cwd });
   const intent = path.join(root, "aggregate.intent-release-test");
-  mkdirSync(intent);
+  writeLifecycleIntent(cwd, path.basename(intent), process.pid);
   assert.throws(() => acquireLock({ cwd }), /lifecycle operation is in progress/);
-  assert.equal(releaseLock({ cwd, token: owner.token }), true);
-  assert.throws(() => acquireLock({ cwd }), /lifecycle operation is in progress/);
+  assert.throws(() => releaseLock({ cwd, token: owner.token }), /lifecycle operation is in progress/);
   assert.deepEqual(lockStatus({ cwd }).intentMarkers, ["aggregate.intent-release-test"]);
-  assert.equal(recoverLock({ cwd, confirm: true }), true);
+  assert.equal(lockStatus({ cwd }).owner.token, owner.token);
+  unlinkSync(intent);
+  assert.equal(releaseLock({ cwd, token: owner.token }), true);
   assert.ok(acquireLock({ cwd }).token);
 });
 
-test("dead recovery intent and a legacy lock converge on explicit recovery", () => {
+test("a dead lifecycle marker blocks recovery and is never deleted implicitly", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const root = stateRoot(cwd);
   const lock = path.join(root, "aggregate.lock");
   mkdirSync(lock);
   writeLifecycleIntent(cwd, "aggregate.intent-recover-dead", 999999999);
-  assert.equal(recoverLock({ cwd, confirm: true }), true);
-  assert.equal(existsSync(lock), false);
-  assert.equal(lockStatus({ cwd }).intentMarkers, undefined);
+  assert.throws(() => recoverLock({ cwd, confirm: true }), /lifecycle operation is in progress/);
+  assert.equal(existsSync(lock), true);
+  assert.deepEqual(lockStatus({ cwd }).intentMarkers, ["aggregate.intent-recover-dead"]);
 });
 
 test("live lifecycle intent blocks recovery of an invalid lock", () => {
@@ -1596,8 +1757,9 @@ test("a normal owner prevents stale intent cleanup", () => {
   const owner = acquireLock({ cwd });
   const intent = "aggregate.intent-recover-dead";
   writeLifecycleIntent(cwd, intent, 999999999);
-  assert.throws(() => recoverLock({ cwd, confirm: true }), /release requires token/);
+  assert.throws(() => recoverLock({ cwd, confirm: true }), /lifecycle operation is in progress/);
   assert.ok(lockStatus({ cwd }).intentMarkers.includes(intent));
+  unlinkSync(path.join(stateRoot(cwd), intent));
   assert.equal(releaseLock({ cwd, token: owner.token }), true);
 });
 
@@ -1750,6 +1912,9 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(skill, /recoveryMode.*ack_intent/);
   assert.match(skill, /do not re-render or adopt/i);
   assert.match(skill, /ACK intent.*release-lock/);
+  assert.match(skill, /ACK lifecycle marker.*owner.*deleted/i);
+  assert.match(skill, /existing ACK journal.*later pending.*next aggregation/i);
+  assert.match(skill, /any lifecycle marker.*hard stop/i);
   const contracts = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/references/document-contracts.md"), "utf8");
   assert.match(contracts, /- \[project-task\]/);
   assert.match(contracts, /- \[project-event\]/);
@@ -1768,6 +1933,8 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(contracts, /ack-intent\.json/);
   assert.match(contracts, /same token.*eventIds.*hashes/);
   assert.match(contracts, /intent.*move.*state.*delete.*release/i);
+  assert.match(contracts, /ACK lifecycle marker.*release.*recover.*acquire/i);
+  assert.match(contracts, /journal freezes.*eventIds.*expectedDocumentHashes/i);
   assert.match(contracts, /git diff --check.*cannot/);
   assert.match(contracts, /deterministically downgrades.*`needs_verification`/);
   const report = readFileSync(path.join(repositoryRoot, ".superpowers/sdd/final-fix-report.md"), "utf8");

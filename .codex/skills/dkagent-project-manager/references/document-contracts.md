@@ -35,13 +35,17 @@ STATUS/BACKLOG hold one current projection per `taskId`: the current projection 
 
 The processed directory is the source of truth for derived state. Snapshot scans every valid stored event in `(createdAt,eventId)` order and returns a read-only reconciled `state` plus `recoveryEvents` for processed events absent from persisted `processedEventIds`; snapshot never writes state. Conflicts use the reconciled active claims plus all pending events, so a restart cannot hide WIP.
 
-ACK requires all recoveryEvents IDs in `eventIds`; they participate in the same task-folded projection validation with pending events instead of being silently recorded. Before moving anything, ACK reconciles processed state and checks WIP conflicts. On success it scans processed again and persists complete sorted `processedEventIds` and replayed `activeClaims`, including recovered events. On failure it writes neither state nor event moves and retains the lock.
+ACK requires all recoveryEvents IDs in `eventIds`; they participate in the same task-folded projection validation with pending events instead of being silently recorded. Before publishing a new journal, ACK reconciles processed state and checks WIP conflicts against all pending events. On success it scans processed again and persists complete sorted `processedEventIds` and replayed `activeClaims`, including recovered events. On failure it writes neither state nor event moves and retains the lock.
 
 ACK scans canonical projection blocks in both documents. Each selected task must have exactly one current block across STATUS and BACKLOG, and that block must equal the folded latest event. It rejects only-old projection, old+new coexistence, repeated blocks in one file, and duplicates split across both files.
 
 ## Two-phase ACK journal
 
+ACK, release, and recover each first publish a unique lifecycle marker and then reject the operation if any other marker exists. Acquire checks markers both before and after publishing an owner. The ACK lifecycle marker remains held while journal validation/publication, event moves, state persistence, journal deletion, and owner deletion run; release, recover, and acquire cannot proceed during that interval. ACK removes its owned lock inside the same lifecycle instead of starting a nested release operation, and revalidates the owner token before journal publication, event moves, and state write. Competing operations may both stop, but cannot both continue.
+
 After every hash, branch, WIP, event-set, and projection check succeeds but before moving an event, ACK exclusively publishes common-root `ack-intent.json`. Its fixed schema contains only `schemaVersion`, `lockOwner` (`token`, `pid`, `acquiredAt`), sorted `eventIds`, `expectedDocumentHashes`, `baselineHashes`, and `createdAt`; commands, logs, secrets, and extra fields are forbidden. An existing journal permits only the same token, owner identity, eventIds, and hashes. Any invalid or different journal hard-blocks without overwrite.
+
+Journal freezes transaction facts to its exact `eventIds` and `expectedDocumentHashes`. New journal creation still checks all pending events for WIP and selected-task completeness. During exact recovery of an existing journal, pending events emitted afterward do not join its WIP or completeness checks and cannot be added to the retry; they remain pending for the next snapshot, projection, and ACK.
 
 The commit order is intent → move events → write reconciled state → delete intent → release owner. A retry with the exact recorded inputs is idempotent before moves, after partial/all moves, and after state persistence. While the journal exists, ordinary `release-lock` and replacement lock acquisition are blocked, and `recover-lock` still cannot remove the valid owner.
 
@@ -64,7 +68,7 @@ Snapshot conflicts are a stable discriminated union:
 {"kind":"worktree_claims_multiple_tasks","worktreePath":"/canonical/a","taskIds":["DKA-AAA","DKA-BBB"]}
 ```
 
-Arrays and conflict groups are sorted. Any snapshot conflict stops document edits. ACK independently recomputes both conflict kinds from current processed state plus every pending event immediately before moving files; any conflict preserves the lock and all events.
+Arrays and conflict groups are sorted. Any snapshot conflict stops document edits. Before a new journal is published, ACK independently recomputes both conflict kinds from current processed state plus every pending event; any conflict preserves the lock and all events. Recovery of an already published journal uses only its frozen event set, leaving later pending events for the next transaction.
 
 ## Priority
 
@@ -78,4 +82,4 @@ If a Worker submits `finished/completed` without successful behavior evidence or
 
 ## Lock recovery
 
-Use `lock-status` first. A valid owner is a durable Agent lease even when its CLI PID has exited, and `recover-lock` never removes it. If the local token was lost, retrieve `owner.token` from status and release it only when the remaining owner facts match the current aggregation; otherwise stop for human confirmation. Confirmed recovery is limited to invalid/legacy ownerless locks, stale creating files, and stale lifecycle intents. Live intents and owned recovery tombstones hard-block recovery. After recovery, check status and acquire a new token.
+Use `lock-status` first. A valid owner is a durable Agent lease even when its CLI PID has exited, and `recover-lock` never removes it. If the local token was lost, retrieve `owner.token` from status and release it only when the remaining owner facts match the current aggregation; otherwise stop for human confirmation. Confirmed recovery is limited to invalid/legacy ownerless locks and stale creating files when no lifecycle marker exists. Any lifecycle marker, regardless of PID liveness or apparent age, and any owned recovery tombstone hard-block recovery; the current operation removes only its own marker. After valid recovery, check status and acquire a new token.

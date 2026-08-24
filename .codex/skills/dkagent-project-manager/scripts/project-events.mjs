@@ -201,38 +201,6 @@ function readLockOwner(lock) {
   }
 }
 
-function validLifecycleIntent(intent) {
-  return intent
-    && typeof intent === "object"
-    && !Array.isArray(intent)
-    && new Set(["release", "recover"]).has(intent.operation)
-    && EVENT_ID.test(intent.token)
-    && Number.isInteger(intent.pid)
-    && intent.pid > 0
-    && typeof intent.createdAt === "string"
-    && !Number.isNaN(Date.parse(intent.createdAt));
-}
-
-function readLifecycleIntent(marker) {
-  try {
-    const intent = readJson(marker);
-    return validLifecycleIntent(intent) ? intent : null;
-  } catch {
-    return null;
-  }
-}
-
-function isProcessAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (error.code === "ESRCH") return false;
-    if (error.code === "EPERM") return true;
-    throw error;
-  }
-}
-
 function lockDiagnostics(root) {
   const entries = existsSync(root) ? readdirSync(root) : [];
   const recoveryTombstones = entries.filter((name) => name.startsWith(LOCK_RECOVERY_PREFIX)).sort();
@@ -270,6 +238,12 @@ function removeLifecycleIntent(marker) {
 function hasOtherLifecycleIntent(diagnostics, marker) {
   const ownName = path.basename(marker);
   return diagnostics.intentMarkers.some((name) => name !== ownName);
+}
+
+function assertExclusiveLifecycleIntent(root, marker) {
+  if (hasOtherLifecycleIntent(lockDiagnostics(root), marker)) {
+    throw new Error("aggregate lifecycle operation is in progress");
+  }
 }
 
 function containsHighConfidenceCredential(value) {
@@ -768,26 +742,31 @@ export function releaseLock({ cwd, token }) {
   const root = stateRoot(cwd);
   const marker = createLifecycleIntent(root, "release");
   try {
-    requireToken(root, token);
+    assertExclusiveLifecycleIntent(root, marker);
     if (existsSync(path.join(root, ACK_INTENT_FILE))) {
       throw new Error("ACK intent must be completed before releasing its owner");
     }
-    const lock = path.join(root, LOCK_FILE);
-    try {
-      if (statSync(lock).isDirectory()) {
-        const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
-        renameSync(lock, tombstone);
-        rmSync(tombstone, { recursive: true });
-      } else {
-        unlinkSync(lock);
-      }
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-    return true;
+    return removeOwnedLockUnderLifecycle(root, token);
   } finally {
     removeLifecycleIntent(marker);
   }
+}
+
+function removeOwnedLockUnderLifecycle(root, token) {
+  requireToken(root, token);
+  const lock = path.join(root, LOCK_FILE);
+  try {
+    if (statSync(lock).isDirectory()) {
+      const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
+      renameSync(lock, tombstone);
+      rmSync(tombstone, { recursive: true });
+    } else {
+      unlinkSync(lock);
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return true;
 }
 
 export function lockStatus({ cwd }) {
@@ -813,33 +792,15 @@ export function recoverLock({ cwd, confirm = false }) {
   const lock = path.join(root, LOCK_FILE);
   const marker = createLifecycleIntent(root, "recover");
   try {
-    let diagnostics = lockDiagnostics(root);
-    let cleanedStaleIntents = false;
+    assertExclusiveLifecycleIntent(root, marker);
+    const diagnostics = lockDiagnostics(root);
     const currentOwner = readLockOwner(lock);
     if (currentOwner) throw new Error("aggregate lock owner exists; release requires token");
     if (diagnostics.blockingTombstones.length) {
       throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
     }
-    if (hasOtherLifecycleIntent(diagnostics, marker)) {
-      const otherIntents = diagnostics.intentMarkers.filter((name) => name !== path.basename(marker));
-      if (otherIntents.some((name) => {
-        const intent = readLifecycleIntent(path.join(root, name));
-        return intent && isProcessAlive(intent.pid);
-      })) {
-        throw new Error("aggregate lifecycle operation is in progress");
-      }
-      if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
-      for (const name of otherIntents) {
-        if (name !== path.basename(marker)) {
-          removeLifecycleIntent(path.join(root, name));
-          cleanedStaleIntents = true;
-        }
-      }
-      diagnostics = lockDiagnostics(root);
-    }
     if (!existsSync(lock)) {
       if (!diagnostics.creatingFiles.length) {
-        if (cleanedStaleIntents) return true;
         throw new Error("aggregate lock is not held");
       }
       if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
@@ -902,90 +863,114 @@ export function readSnapshot({ cwd, token } = {}) {
   };
 }
 
-export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes, _testCrashAfterPhase }) {
+export function ackEvents({
+  cwd,
+  token,
+  eventIds,
+  expectedDocumentHashes,
+  _testCrashAfterPhase,
+  _testAfterLifecycleAcquired,
+  _testBeforeStateWrite,
+}) {
   const root = stateRoot(cwd);
-  const owner = requireToken(root, token);
-  const config = readJson(path.join(root, "config.json"));
-  const stateFile = path.join(root, "state.json");
-  const persistedState = readJson(stateFile);
-  const { state, recoveryEvents } = reconcileProcessedState(root, persistedState);
-  if (!existsSync(config.managementWorktree)) throw new Error("management worktree is missing");
-  const branch = git(config.managementWorktree, ["branch", "--show-current"]);
-  if (branch !== config.managementBranch) throw new Error(`management branch mismatch: ${branch || "detached"}`);
-  if (!validDocumentHashes(expectedDocumentHashes)) throw new Error("invalid expected document hashes");
-  const currentDocumentHashes = documentHashes(config.managementWorktree);
-  if (!sameDocumentHashes(currentDocumentHashes, expectedDocumentHashes)) {
-    throw new Error("management document hashes do not match expected results");
-  }
-  if (!Array.isArray(eventIds)
-    || eventIds.length === 0
-    || new Set(eventIds).size !== eventIds.length
-    || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
-    throw new Error("invalid event ID");
-  }
-  const existingIntent = ackIntentRecord(root);
-  if (existingIntent.exists) {
-    if (!existingIntent.intent) throw new Error("ACK intent is invalid; manual inspection required");
-    if (!ackIntentMatchesRequest(existingIntent.intent, owner, eventIds, expectedDocumentHashes)) {
-      throw new Error("ACK intent does not match lock owner, event IDs, or document hashes");
+  const marker = createLifecycleIntent(root, "ack");
+  try {
+    assertExclusiveLifecycleIntent(root, marker);
+    _testAfterLifecycleAcquired?.();
+    const owner = requireToken(root, token);
+    const config = readJson(path.join(root, "config.json"));
+    const stateFile = path.join(root, "state.json");
+    const persistedState = readJson(stateFile);
+    const { state, recoveryEvents } = reconcileProcessedState(root, persistedState);
+    if (!existsSync(config.managementWorktree)) throw new Error("management worktree is missing");
+    const branch = git(config.managementWorktree, ["branch", "--show-current"]);
+    if (branch !== config.managementBranch) throw new Error(`management branch mismatch: ${branch || "detached"}`);
+    if (!validDocumentHashes(expectedDocumentHashes)) throw new Error("invalid expected document hashes");
+    const currentDocumentHashes = documentHashes(config.managementWorktree);
+    if (!sameDocumentHashes(currentDocumentHashes, expectedDocumentHashes)) {
+      throw new Error("management document hashes do not match expected results");
     }
-    const recoveryReasons = ackIntentRecoveryReasons(root, config, persistedState, existingIntent.intent, owner);
-    if (recoveryReasons.length) throw new Error(`ACK intent recovery is unsafe: ${recoveryReasons.join("; ")}`);
-  } else if (!sameDocumentHashes(owner.baselineHashes, state.documentHashes)) {
-    throw new Error("document baseline changed after lock acquisition");
-  }
-  const allPendingEvents = readPendingEvents(root);
-  const conflicts = activeClaimConflicts(state, allPendingEvents);
-  if (conflicts.length) throw new Error(`active claim conflicts block ACK: ${JSON.stringify(conflicts)}`);
-  const requestedIds = new Set(eventIds);
-  if (recoveryEvents.some((event) => !requestedIds.has(event.eventId))) {
-    throw new Error("event IDs must include all recovery events");
-  }
-  const requestedEvents = [];
-  const pendingEvents = [];
-  for (const eventId of eventIds) {
-    const source = path.join(root, "events", "pending", `${eventId}.json`);
-    const destination = path.join(root, "events", "processed", `${eventId}.json`);
-    if (!existsSync(source) && !existsSync(destination)) throw new Error(`event not found: ${eventId}`);
-    const event = readJson(existsSync(source) ? source : destination);
-    if (!isStoredEvent(event, eventId)) throw new Error(`invalid stored event: ${eventId}`);
-    requestedEvents.push(event);
-    if (!state.processedEventIds.includes(eventId)) pendingEvents.push(event);
-  }
-  const selectedTaskIds = new Set(requestedEvents.map((event) => event.taskId));
-  for (const event of allPendingEvents) {
-    if (selectedTaskIds.has(event.taskId) && !requestedIds.has(event.eventId)) {
-      throw new Error(`event IDs must include all pending events for selected task: ${event.taskId}`);
+    if (!Array.isArray(eventIds)
+      || eventIds.length === 0
+      || new Set(eventIds).size !== eventIds.length
+      || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
+      throw new Error("invalid event ID");
     }
-  }
-  const currentBlocks = currentProjectionBlocks(config.managementWorktree);
-  for (const event of latestEventsByTask(requestedEvents)) {
-    const taskBlocks = currentBlocks.filter((block) => block.taskId === event.taskId);
-    if (taskBlocks.length !== 1) {
-      throw new Error(`event is not canonically projected; selected task must have exactly one current projection: ${event.taskId}`);
+    const existingIntent = ackIntentRecord(root);
+    if (existingIntent.exists) {
+      if (!existingIntent.intent) throw new Error("ACK intent is invalid; manual inspection required");
+      if (!ackIntentMatchesRequest(existingIntent.intent, owner, eventIds, expectedDocumentHashes)) {
+        throw new Error("ACK intent does not match lock owner, event IDs, or document hashes");
+      }
+      const recoveryReasons = ackIntentRecoveryReasons(root, config, persistedState, existingIntent.intent, owner);
+      if (recoveryReasons.length) throw new Error(`ACK intent recovery is unsafe: ${recoveryReasons.join("; ")}`);
+    } else if (!sameDocumentHashes(owner.baselineHashes, state.documentHashes)) {
+      throw new Error("document baseline changed after lock acquisition");
     }
-    const expected = projectionBlock(event);
-    if (taskBlocks[0].taskLine !== expected.taskLine || taskBlocks[0].projectionLine !== expected.projectionLine) {
-      throw new Error(`event is not canonically projected in STATUS.md or BACKLOG.md: ${event.eventId}`);
+    const allPendingEvents = readPendingEvents(root);
+    const requestedIds = new Set(eventIds);
+    const transactionPendingEvents = existingIntent.exists
+      ? allPendingEvents.filter((event) => requestedIds.has(event.eventId))
+      : allPendingEvents;
+    const conflicts = activeClaimConflicts(state, transactionPendingEvents);
+    if (conflicts.length) throw new Error(`active claim conflicts block ACK: ${JSON.stringify(conflicts)}`);
+    if (!existingIntent.exists && recoveryEvents.some((event) => !requestedIds.has(event.eventId))) {
+      throw new Error("event IDs must include all recovery events");
     }
+    const requestedEvents = [];
+    const pendingEvents = [];
+    for (const eventId of eventIds) {
+      const source = path.join(root, "events", "pending", `${eventId}.json`);
+      const destination = path.join(root, "events", "processed", `${eventId}.json`);
+      if (!existsSync(source) && !existsSync(destination)) throw new Error(`event not found: ${eventId}`);
+      const event = readJson(existsSync(source) ? source : destination);
+      if (!isStoredEvent(event, eventId)) throw new Error(`invalid stored event: ${eventId}`);
+      requestedEvents.push(event);
+      if (!state.processedEventIds.includes(eventId)) pendingEvents.push(event);
+    }
+    if (!existingIntent.exists) {
+      const selectedTaskIds = new Set(requestedEvents.map((event) => event.taskId));
+      for (const event of allPendingEvents) {
+        if (selectedTaskIds.has(event.taskId) && !requestedIds.has(event.eventId)) {
+          throw new Error(`event IDs must include all pending events for selected task: ${event.taskId}`);
+        }
+      }
+    }
+    const currentBlocks = currentProjectionBlocks(config.managementWorktree);
+    for (const event of latestEventsByTask(requestedEvents)) {
+      const taskBlocks = currentBlocks.filter((block) => block.taskId === event.taskId);
+      if (taskBlocks.length !== 1) {
+        throw new Error(`event is not canonically projected; selected task must have exactly one current projection: ${event.taskId}`);
+      }
+      const expected = projectionBlock(event);
+      if (taskBlocks[0].taskLine !== expected.taskLine || taskBlocks[0].projectionLine !== expected.projectionLine) {
+        throw new Error(`event is not canonically projected in STATUS.md or BACKLOG.md: ${event.eventId}`);
+      }
+    }
+    requireToken(root, token);
+    ensureAckIntent(root, owner, eventIds, expectedDocumentHashes);
+    if (_testCrashAfterPhase === "intent") throw new Error("simulated crash after ACK intent");
+    requireToken(root, token);
+    for (const event of sortEventsByCreation(pendingEvents)) {
+      const source = path.join(root, "events", "pending", `${event.eventId}.json`);
+      const destination = path.join(root, "events", "processed", `${event.eventId}.json`);
+      if (existsSync(source)) renameSync(source, destination);
+    }
+    if (_testCrashAfterPhase === "events") throw new Error("simulated crash after ACK event moves");
+    const reconciledState = reconcileProcessedState(root, state).state;
+    reconciledState.documentHashes = currentDocumentHashes;
+    reconciledState.lastSynchronizedAt = new Date().toISOString();
+    _testBeforeStateWrite?.();
+    requireToken(root, token);
+    writeJsonAtomic(stateFile, reconciledState);
+    if (_testCrashAfterPhase === "state") throw new Error("simulated crash after ACK state");
+    unlinkSync(path.join(root, ACK_INTENT_FILE));
+    if (_testCrashAfterPhase === "journal") throw new Error("simulated crash after ACK journal cleanup");
+    removeOwnedLockUnderLifecycle(root, token);
+    return reconciledState;
+  } finally {
+    removeLifecycleIntent(marker);
   }
-  ensureAckIntent(root, owner, eventIds, expectedDocumentHashes);
-  if (_testCrashAfterPhase === "intent") throw new Error("simulated crash after ACK intent");
-  for (const event of sortEventsByCreation(pendingEvents)) {
-    const source = path.join(root, "events", "pending", `${event.eventId}.json`);
-    const destination = path.join(root, "events", "processed", `${event.eventId}.json`);
-    if (existsSync(source)) renameSync(source, destination);
-  }
-  if (_testCrashAfterPhase === "events") throw new Error("simulated crash after ACK event moves");
-  const reconciledState = reconcileProcessedState(root, state).state;
-  reconciledState.documentHashes = currentDocumentHashes;
-  reconciledState.lastSynchronizedAt = new Date().toISOString();
-  writeJsonAtomic(stateFile, reconciledState);
-  if (_testCrashAfterPhase === "state") throw new Error("simulated crash after ACK state");
-  unlinkSync(path.join(root, ACK_INTENT_FILE));
-  if (_testCrashAfterPhase === "journal") throw new Error("simulated crash after ACK journal cleanup");
-  releaseLock({ cwd, token });
-  return reconciledState;
 }
 
 export function adoptDocuments({ cwd, token }) {
