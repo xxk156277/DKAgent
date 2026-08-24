@@ -14,6 +14,7 @@ import {
   initStore,
   lockStatus,
   readSnapshot,
+  recoverAckCleanup,
   recoverLock,
   releaseLock,
   renderEventProjections,
@@ -143,6 +144,34 @@ function runAckProcess({ cwd, token, eventIds, expectedDocumentHashes }) {
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("close", (status, signal) => resolve({ status, signal, stderr }));
   });
+}
+
+function runCrashingAckCleanup({ cwd, signal = "SIGKILL" }) {
+  const source = `
+    import { recoverAckCleanup } from ${JSON.stringify(helperUrl)};
+    recoverAckCleanup({ cwd: process.cwd(), confirm: true, _testTerminateAfterRenameCount: 1, _testTerminationSignal: ${JSON.stringify(signal)} });
+  `;
+  return spawnSync(process.execPath, ["--input-type=module", "--eval", source], {
+    cwd,
+    encoding: "utf8",
+  });
+}
+
+function createTerminalCleanupFixture(taskId) {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const crashed = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
+    phase: "owner",
+  });
+  assert.equal(crashed.status, 86, crashed.stderr);
+  return { cwd, event, root: stateRoot(cwd) };
 }
 
 test("init records the explicit main worktree", () => {
@@ -1130,6 +1159,206 @@ test("a SIGKILL after ACK event moves permits exact-token takeover and state rec
   assert.equal(lockStatus({ cwd }).held, false);
 });
 
+test("a real exit after owner deletion retains the journal and exposes terminal ACK cleanup", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-CLEANUP-OWNER" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const crashed = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
+    phase: "owner",
+  });
+  assert.equal(crashed.status, 86, crashed.stderr);
+
+  const root = stateRoot(cwd);
+  assert.equal(existsSync(path.join(root, "aggregate.lock")), false);
+  assert.equal(existsSync(path.join(root, "ack-intent.json")), true);
+  assert.equal(lockStatus({ cwd }).lifecycleIntents.length, 1);
+  assert.equal(lockStatus({ cwd }).recoveryMode, "ack_cleanup");
+  assert.equal(readSnapshot({ cwd }).target.recoveryMode, "ack_cleanup");
+  assert.throws(() => acquireLock({ cwd }), /ACK intent blocks new lock acquisition/);
+
+  const cleanup = spawnSync(process.execPath, [helperPath, "recover-ack-cleanup", "--confirm"], {
+    cwd,
+    encoding: "utf8",
+  });
+  assert.equal(cleanup.status, 0, cleanup.stderr);
+  assert.equal(existsSync(path.join(root, "ack-intent.json")), false);
+  assert.equal(lockStatus({ cwd }).intentMarkers, undefined);
+  const nextOwner = acquireLock({ cwd });
+  releaseLock({ cwd, token: nextOwner.token });
+});
+
+test("a SIGKILL after owner deletion recovers multiple exact ACK markers", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-CLEANUP-MULTI" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const expectedDocumentHashes = documentHashes(cwd);
+  const firstCrash = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "lifecycle",
+  });
+  assert.equal(firstCrash.status, 86, firstCrash.stderr);
+  const terminalCrash = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "owner",
+    signal: "SIGKILL",
+  });
+  assert.equal(terminalCrash.status, null);
+  assert.equal(terminalCrash.signal, "SIGKILL");
+  assert.equal(lockStatus({ cwd }).lifecycleIntents.length, 2);
+  assert.equal(readSnapshot({ cwd }).target.recoveryMode, "ack_cleanup");
+
+  const cleanup = spawnSync(process.execPath, [helperPath, "recover-ack-cleanup", "--confirm"], {
+    cwd,
+    encoding: "utf8",
+  });
+  assert.equal(cleanup.status, 0, cleanup.stderr);
+  assert.equal(lockStatus({ cwd }).intentMarkers, undefined);
+  assert.equal(existsSync(path.join(stateRoot(cwd), "ack-intent.json")), false);
+});
+
+test("terminal ACK cleanup rejects document drift and preserves its journal", () => {
+  const { cwd, root } = createTerminalCleanupFixture("DKA-ACK-CLEANUP-DRIFT");
+  const markerNames = lockStatus({ cwd }).intentMarkers;
+  assert.throws(
+    () => recoverAckCleanup({ cwd }),
+    /requires explicit confirmation/,
+  );
+  const statusFile = path.join(cwd, "docs", "project", "STATUS.md");
+  writeFileSync(statusFile, `${readFileSync(statusFile, "utf8")}External drift\n`);
+
+  assert.equal(readSnapshot({ cwd }).target.recoveryMode, undefined);
+  assert.throws(
+    () => recoverAckCleanup({ cwd, confirm: true }),
+    /management document hashes differ from ACK intent/,
+  );
+  assert.equal(existsSync(path.join(root, "ack-intent.json")), true);
+  assert.deepEqual(lockStatus({ cwd }).intentMarkers, markerNames);
+});
+
+test("terminal ACK cleanup rejects state missing an intent event ID", () => {
+  const { cwd, root } = createTerminalCleanupFixture("DKA-ACK-CLEANUP-STATE");
+  const stateFile = path.join(root, "state.json");
+  const state = JSON.parse(readFileSync(stateFile, "utf8"));
+  state.processedEventIds = [];
+  writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+
+  assert.equal(lockStatus({ cwd }).recoveryMode, undefined);
+  assert.throws(
+    () => recoverAckCleanup({ cwd, confirm: true }),
+    /persisted state is missing ACK event IDs/,
+  );
+  assert.equal(existsSync(path.join(root, "ack-intent.json")), true);
+});
+
+test("terminal ACK cleanup diagnoses an invalid processed event without consuming its journal", () => {
+  const { cwd, event, root } = createTerminalCleanupFixture("DKA-ACK-CLEANUP-PROCESSED");
+  const processedFile = path.join(root, "events", "processed", `${event.eventId}.json`);
+  const processed = JSON.parse(readFileSync(processedFile, "utf8"));
+  delete processed.evidence;
+  writeFileSync(processedFile, `${JSON.stringify(processed, null, 2)}\n`);
+
+  const snapshot = readSnapshot({ cwd });
+  assert.equal(snapshot.target.safe, false);
+  assert.equal(snapshot.target.recoveryMode, undefined);
+  assert.throws(
+    () => recoverAckCleanup({ cwd, confirm: true }),
+    /processed ACK event is invalid/,
+  );
+  assert.equal(existsSync(path.join(root, "ack-intent.json")), true);
+});
+
+test("terminal ACK cleanup rejects a live related marker", () => {
+  const { cwd, root } = createTerminalCleanupFixture("DKA-ACK-CLEANUP-LIVE");
+  const markerName = lockStatus({ cwd }).intentMarkers[0];
+  const markerFile = path.join(root, markerName);
+  const marker = JSON.parse(readFileSync(markerFile, "utf8"));
+  marker.pid = process.pid;
+  writeFileSync(markerFile, `${JSON.stringify(marker, null, 2)}\n`);
+
+  assert.equal(readSnapshot({ cwd }).target.recoveryMode, undefined);
+  assert.throws(
+    () => recoverAckCleanup({ cwd, confirm: true }),
+    /live lifecycle marker blocks ACK cleanup/,
+  );
+  assert.equal(existsSync(path.join(root, "ack-intent.json")), true);
+  assert.equal(existsSync(markerFile), true);
+});
+
+test("terminal ACK cleanup rejects malformed and different-transaction markers", () => {
+  for (const variant of ["malformed", "different"]) {
+    const { cwd, event, root } = createTerminalCleanupFixture(`DKA-ACK-CLEANUP-${variant.toUpperCase()}`);
+    const related = JSON.parse(readFileSync(path.join(root, lockStatus({ cwd }).intentMarkers[0]), "utf8"));
+    const markerFile = path.join(root, `aggregate.intent-ack-${variant}`);
+    if (variant === "malformed") {
+      writeFileSync(markerFile, "{}\n");
+    } else {
+      writeFileSync(markerFile, `${JSON.stringify({
+        ...related,
+        token: "00000000-0000-4000-8000-000000000002",
+        eventIds: ["00000000-0000-4000-8000-000000000003"],
+      }, null, 2)}\n`);
+    }
+
+    assert.throws(
+      () => recoverAckCleanup({ cwd, confirm: true }),
+      /unrelated or invalid lifecycle marker/,
+    );
+    assert.equal(existsSync(path.join(root, "ack-intent.json")), true);
+    assert.equal(existsSync(markerFile), true);
+    assert.equal(existsSync(path.join(root, "events", "processed", `${event.eventId}.json`)), true);
+  }
+});
+
+test("terminal ACK cleanup resumes after a SIGKILL between marker rename and deletion", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-CLEANUP-TOMBSTONE" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const expectedDocumentHashes = documentHashes(cwd);
+  assert.equal(runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "lifecycle",
+  }).status, 86);
+  assert.equal(runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "owner",
+  }).status, 86);
+
+  const crashedCleanup = runCrashingAckCleanup({ cwd });
+  assert.equal(crashedCleanup.status, null);
+  assert.equal(crashedCleanup.signal, "SIGKILL");
+  const root = stateRoot(cwd);
+  assert.equal(existsSync(path.join(root, "ack-intent.json")), true);
+  assert.equal(lockStatus({ cwd }).ackCleanupTombstones.length, 1);
+  assert.equal(readSnapshot({ cwd }).target.recoveryMode, "ack_cleanup");
+
+  assert.equal(recoverAckCleanup({ cwd, confirm: true }), true);
+  assert.equal(existsSync(path.join(root, "ack-intent.json")), false);
+  assert.equal(lockStatus({ cwd }).ackCleanupTombstones, undefined);
+  assert.equal(lockStatus({ cwd }).intentMarkers, undefined);
+});
+
 test("a real process exit before ACK journal publication permits matching-owner retry", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
@@ -1669,7 +1898,7 @@ test("ACK intent finishes cleanup after state persistence", () => {
   assert.equal(lockStatus({ cwd }).held, false);
 });
 
-test("a crash after journal deletion only requires releasing the committed owner", () => {
+test("an error after journal deletion observes a fully cleaned terminal state", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const event = emitEvent({ cwd, input: started({ taskId: "DKA-INTENT-RELEASE" }) });
@@ -1693,8 +1922,10 @@ test("a crash after journal deletion only requires releasing the committed owner
   assert.equal(snapshot.target.safe, true);
   assert.equal(snapshot.target.recoveryMode, undefined);
   assert.equal(snapshot.ackIntentExists, false);
-  assert.equal(releaseLock({ cwd, token: owner.token }), true);
   assert.equal(lockStatus({ cwd }).held, false);
+  assert.equal(lockStatus({ cwd }).intentMarkers, undefined);
+  const nextOwner = acquireLock({ cwd });
+  releaseLock({ cwd, token: nextOwner.token });
 });
 
 test("ACK intent rejects fields outside its fixed journal schema", () => {
@@ -2442,12 +2673,14 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(skill, /recoveryMode.*ack_intent/);
   assert.match(skill, /do not re-render or adopt/i);
   assert.match(skill, /ACK intent.*release-lock/);
-  assert.match(skill, /ACK lifecycle marker.*owner.*deleted/i);
+  assert.match(skill, /write state.*delete owner.*clean exact markers.*delete journal last/i);
   assert.match(skill, /existing ACK journal.*later pending.*next aggregation/i);
   assert.match(skill, /dead matching ACK marker.*retry.*exact request/i);
   assert.match(skill, /ACK marker.*sorted.*eventIds.*expected.*hash/i);
   assert.match(skill, /wrong.*eventIds.*hashes.*marker.*intact/i);
   assert.match(skill, /only.*successful ACK.*removes.*dead.*marker/i);
+  assert.match(skill, /recoveryMode.*ack_cleanup.*recover-ack-cleanup --confirm/i);
+  assert.match(skill, /ack_cleanup.*do not.*ordinary ACK.*recover-lock/i);
   assert.match(skill, /without an ACK journal.*retry.*original token.*eventIds.*expected hashes/i);
   assert.match(skill, /original ACK parameters.*lost.*manual stop/i);
   assert.match(skill, /owner PID.*never.*lease.*dead/i);
@@ -2476,6 +2709,9 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(contracts, /short-lived lifecycle PID.*dead matching ACK marker/i);
   assert.match(contracts, /dead ACK marker.*left in place.*live retry marker/i);
   assert.match(contracts, /validation failure.*dead marker.*unchanged/i);
+  assert.match(contracts, /state.*owner.*markers.*journal.*last/i);
+  assert.match(contracts, /ownerless terminal.*processed.*projection/i);
+  assert.match(contracts, /cleanup tombstone.*journal.*retry/i);
   assert.match(contracts, /before journal publication.*original token.*eventIds.*expected hashes/i);
   assert.match(contracts, /adopt.*lockToken.*owner token.*state write/i);
   assert.match(contracts, /git diff --check.*cannot/);
@@ -2487,4 +2723,5 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(report, /folded latest projection/);
   assert.match(report, /processed directory.*source of truth/);
   assert.match(report, /two-phase ACK journal/);
+  assert.match(report, /committed-cleanup.*recover-ack-cleanup/i);
 });

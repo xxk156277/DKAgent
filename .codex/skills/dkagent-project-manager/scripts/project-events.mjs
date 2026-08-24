@@ -36,6 +36,7 @@ const LOCK_CREATING_PREFIX = "aggregate.lock.creating-";
 const LOCK_RECOVERY_PREFIX = "aggregate.lock.recovery-";
 const LOCK_INTENT_PREFIX = "aggregate.intent-";
 const LOCK_INTENT_CREATING_PREFIX = "aggregate.intent.creating-";
+const ACK_CLEANUP_TOMBSTONE_PREFIX = "aggregate.ack-cleanup.tombstone-";
 const ACK_INTENT_FILE = "ack-intent.json";
 const ACK_INTENT_FIELDS = new Set(["schemaVersion", "lockOwner", "eventIds", "expectedDocumentHashes", "baselineHashes", "createdAt"]);
 const ACK_LOCK_OWNER_FIELDS = new Set(["token", "pid", "acquiredAt"]);
@@ -632,12 +633,152 @@ function ackIntentRecoveryReasons(root, config, persistedState, intent, owner) {
   return reasons;
 }
 
+function ackMarkerMatchesIntent(marker, intent) {
+  return marker.operation === "ack"
+    && marker.lockToken === intent.lockOwner.token
+    && sameEventIds(marker.eventIds, intent.eventIds)
+    && sameDocumentHashes(marker.expectedDocumentHashes, intent.expectedDocumentHashes);
+}
+
+function ackCleanupEntries(root) {
+  const diagnostics = lockDiagnostics(root);
+  const tombstones = readdirSync(root)
+    .filter((name) => name.startsWith(ACK_CLEANUP_TOMBSTONE_PREFIX))
+    .sort();
+  return [
+    ...diagnostics.intentMarkers.map((name) => ({ name, file: path.join(root, name), tombstone: false })),
+    ...tombstones.map((name) => ({ name, file: path.join(root, name), tombstone: true })),
+  ];
+}
+
+function ackCleanupReasons(root, config, persistedState, intent, { allowedLiveMarker } = {}) {
+  const reasons = [];
+  if (existsSync(path.join(root, LOCK_FILE))) reasons.push("aggregate lock still exists");
+  if (!existsSync(config.managementWorktree)) reasons.push("management worktree is missing");
+  else {
+    const branch = git(config.managementWorktree, ["branch", "--show-current"]);
+    if (branch !== config.managementBranch) reasons.push(`management branch mismatch: ${branch || "detached"}`);
+    if (!sameDocumentHashes(documentHashes(config.managementWorktree), intent.expectedDocumentHashes)) {
+      reasons.push("management document hashes differ from ACK intent");
+    }
+  }
+  if (!sameDocumentHashes(persistedState.documentHashes, intent.expectedDocumentHashes)) {
+    reasons.push("persisted state hashes differ from ACK intent");
+  }
+  if (!Array.isArray(persistedState.processedEventIds)
+    || intent.eventIds.some((eventId) => !persistedState.processedEventIds.includes(eventId))) {
+    reasons.push("persisted state is missing ACK event IDs");
+  }
+  const events = [];
+  for (const eventId of intent.eventIds) {
+    const pending = path.join(root, "events", "pending", `${eventId}.json`);
+    const processed = path.join(root, "events", "processed", `${eventId}.json`);
+    if (existsSync(pending)) reasons.push(`ACK event is still pending: ${eventId}`);
+    if (!existsSync(processed)) {
+      reasons.push(`processed ACK event is missing: ${eventId}`);
+      continue;
+    }
+    try {
+      const event = readJson(processed);
+      if (!isStoredEvent(event, eventId)) reasons.push(`processed ACK event is invalid: ${eventId}`);
+      else {
+        try {
+          projectionBlock(event);
+          events.push(event);
+        } catch {
+          reasons.push(`processed ACK event is invalid: ${eventId}`);
+        }
+      }
+    } catch {
+      reasons.push(`processed ACK event is invalid: ${eventId}`);
+    }
+  }
+  if (existsSync(config.managementWorktree)) {
+    const currentBlocks = currentProjectionBlocks(config.managementWorktree);
+    for (const event of latestEventsByTask(events)) {
+      const taskBlocks = currentBlocks.filter((block) => block.taskId === event.taskId);
+      const expected = projectionBlock(event);
+      if (taskBlocks.length !== 1
+        || taskBlocks[0].taskLine !== expected.taskLine
+        || taskBlocks[0].projectionLine !== expected.projectionLine) {
+        reasons.push(`ACK event projection changed: ${event.taskId}`);
+      }
+    }
+  }
+  for (const entry of ackCleanupEntries(root)) {
+    const marker = readLifecycleIntent(entry.file);
+    if (!marker || !ackMarkerMatchesIntent(marker, intent)) {
+      reasons.push(`unrelated or invalid lifecycle marker blocks ACK cleanup: ${entry.name}`);
+      continue;
+    }
+    if (entry.file !== allowedLiveMarker && isProcessAlive(marker.pid)) {
+      reasons.push(`live lifecycle marker blocks ACK cleanup: ${entry.name}`);
+    }
+  }
+  return reasons;
+}
+
+function completeAckCleanup(root, config, persistedState, intent, {
+  allowedLiveMarker,
+  _testTerminateAfterRenameCount,
+  _testTerminationSignal,
+} = {}) {
+  const initialReasons = ackCleanupReasons(root, config, persistedState, intent, { allowedLiveMarker });
+  if (initialReasons.length) throw new Error(`ACK cleanup is unsafe: ${initialReasons.join("; ")}`);
+  let renameCount = 0;
+  while (true) {
+    const entries = ackCleanupEntries(root);
+    if (!entries.length) break;
+    const entry = entries[0];
+    const marker = readLifecycleIntent(entry.file);
+    if (!marker || !ackMarkerMatchesIntent(marker, intent)) {
+      throw new Error(`ACK cleanup is unsafe: unrelated or invalid lifecycle marker: ${entry.name}`);
+    }
+    if (entry.file !== allowedLiveMarker && isProcessAlive(marker.pid)) {
+      throw new Error(`ACK cleanup is unsafe: live lifecycle marker: ${entry.name}`);
+    }
+    if (entry.tombstone) {
+      rmSync(entry.file, { force: true });
+      continue;
+    }
+    const tombstone = path.join(root, `${ACK_CLEANUP_TOMBSTONE_PREFIX}${randomUUID()}`);
+    try {
+      renameSync(entry.file, tombstone);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    renameCount += 1;
+    if (_testTerminateAfterRenameCount === renameCount) {
+      terminateTestProcess("cleanup-rename", _testTerminationSignal, "cleanup-rename");
+    }
+    rmSync(tombstone, { force: true });
+  }
+  const finalReasons = ackCleanupReasons(root, config, persistedState, intent);
+  if (finalReasons.length) throw new Error(`ACK cleanup is unsafe: ${finalReasons.join("; ")}`);
+  try {
+    unlinkSync(path.join(root, ACK_INTENT_FILE));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return true;
+}
+
 function targetStatus(root, config, state, persistedState, intentRecord) {
   if (intentRecord.exists) {
     if (!intentRecord.intent) {
       return { safe: false, reasons: ["ACK intent is invalid"], managementWorktree: config.managementWorktree };
     }
     const owner = readLockOwner(path.join(root, LOCK_FILE));
+    if (!existsSync(path.join(root, LOCK_FILE))) {
+      const reasons = ackCleanupReasons(root, config, persistedState, intentRecord.intent);
+      return {
+        safe: reasons.length === 0,
+        reasons,
+        managementWorktree: config.managementWorktree,
+        ...(reasons.length === 0 ? { recoveryMode: "ack_cleanup" } : {}),
+      };
+    }
     const reasons = ackIntentRecoveryReasons(root, config, persistedState, intentRecord.intent, owner);
     return {
       safe: reasons.length === 0,
@@ -901,6 +1042,21 @@ export function lockStatus({ cwd }) {
     });
   }
   if (diagnostics.intentCreatingFiles.length) result.intentCreatingFiles = diagnostics.intentCreatingFiles;
+  const cleanupTombstones = readdirSync(root)
+    .filter((name) => name.startsWith(ACK_CLEANUP_TOMBSTONE_PREFIX))
+    .sort();
+  if (cleanupTombstones.length) result.ackCleanupTombstones = cleanupTombstones;
+  const intentRecord = ackIntentRecord(root);
+  if (intentRecord.exists) {
+    result.ackIntentExists = true;
+    if (intentRecord.intent && !existsSync(lock)) {
+      const config = readJson(path.join(root, "config.json"));
+      const persistedState = readJson(path.join(root, "state.json"));
+      const reasons = ackCleanupReasons(root, config, persistedState, intentRecord.intent);
+      result.ackCleanup = { safe: reasons.length === 0, reasons, eventIds: intentRecord.intent.eventIds };
+      if (reasons.length === 0) result.recoveryMode = "ack_cleanup";
+    }
+  }
   return result;
 }
 
@@ -949,6 +1105,25 @@ export function recoverLock({ cwd, confirm = false }) {
   } finally {
     removeLifecycleIntent(marker);
   }
+}
+
+export function recoverAckCleanup({
+  cwd,
+  confirm = false,
+  _testTerminateAfterRenameCount,
+  _testTerminationSignal,
+}) {
+  if (confirm !== true) throw new Error("ACK cleanup recovery requires explicit confirmation");
+  const root = stateRoot(cwd);
+  const intentRecord = ackIntentRecord(root);
+  if (!intentRecord.exists) throw new Error("ACK cleanup journal is missing");
+  if (!intentRecord.intent) throw new Error("ACK cleanup journal is invalid; manual inspection required");
+  const config = readJson(path.join(root, "config.json"));
+  const persistedState = readJson(path.join(root, "state.json"));
+  return completeAckCleanup(root, config, persistedState, intentRecord.intent, {
+    _testTerminateAfterRenameCount,
+    _testTerminationSignal,
+  });
 }
 
 function readPendingEvents(root) {
@@ -1004,9 +1179,8 @@ export function ackEvents({
   const ackRequest = { lockToken: token, eventIds, expectedDocumentHashes };
   const root = stateRoot(cwd);
   const marker = createLifecycleIntent(root, "ack", ackRequest);
-  let deadAckMarkers = [];
   try {
-    deadAckMarkers = assertExclusiveLifecycleIntent(root, marker, { ackRequest });
+    assertExclusiveLifecycleIntent(root, marker, { ackRequest });
     terminateTestProcess(_testTerminateAfterPhase, _testTerminationSignal, "lifecycle");
     _testAfterLifecycleAcquired?.();
     const owner = requireToken(root, token);
@@ -1073,7 +1247,7 @@ export function ackEvents({
       }
     }
     requireToken(root, token);
-    ensureAckIntent(root, owner, eventIds, expectedDocumentHashes);
+    const ackIntent = ensureAckIntent(root, owner, eventIds, expectedDocumentHashes);
     terminateTestProcess(_testTerminateAfterPhase, _testTerminationSignal, "intent");
     if (_testCrashAfterPhase === "intent") throw new Error("simulated crash after ACK intent");
     requireToken(root, token);
@@ -1091,10 +1265,10 @@ export function ackEvents({
     requireToken(root, token);
     writeJsonAtomic(stateFile, reconciledState);
     if (_testCrashAfterPhase === "state") throw new Error("simulated crash after ACK state");
-    unlinkSync(path.join(root, ACK_INTENT_FILE));
-    if (_testCrashAfterPhase === "journal") throw new Error("simulated crash after ACK journal cleanup");
     removeOwnedLockUnderLifecycle(root, token);
-    for (const deadMarker of deadAckMarkers) removeLifecycleIntent(deadMarker);
+    terminateTestProcess(_testTerminateAfterPhase, _testTerminationSignal, "owner");
+    completeAckCleanup(root, config, reconciledState, ackIntent, { allowedLiveMarker: marker });
+    if (_testCrashAfterPhase === "journal") throw new Error("simulated crash after ACK journal cleanup");
     return reconciledState;
   } finally {
     removeLifecycleIntent(marker);
@@ -1166,6 +1340,9 @@ async function main(args) {
   if (command === "release-lock") return { released: releaseLock({ cwd, token: valueAfter(args, "--token") }) };
   if (command === "lock-status") return lockStatus({ cwd });
   if (command === "recover-lock") return { recovered: recoverLock({ cwd, confirm: args.includes("--confirm") }) };
+  if (command === "recover-ack-cleanup") {
+    return { recovered: recoverAckCleanup({ cwd, confirm: args.includes("--confirm") }) };
+  }
   if (command === "project") {
     return renderEventProjections({
       cwd,
