@@ -1281,6 +1281,117 @@ test("terminal ACK cleanup diagnoses an invalid processed event without consumin
   assert.equal(existsSync(path.join(root, "ack-intent.json")), true);
 });
 
+test("terminal ACK cleanup strictly audits the complete processed directory and derived state", () => {
+  const extraId = "00000000-0000-4000-8000-000000000010";
+  const variants = [
+    {
+      name: "extra legal orphan processed event",
+      mutate({ event, root }) {
+        const orphan = { ...event, eventId: extraId, createdAt: "2020-01-01T00:00:00.000Z" };
+        writeFileSync(path.join(root, "events", "processed", `${extraId}.json`), `${JSON.stringify(orphan, null, 2)}\n`);
+      },
+    },
+    {
+      name: "state records a nonexistent event ID",
+      mutate({ root }) {
+        const stateFile = path.join(root, "state.json");
+        const state = JSON.parse(readFileSync(stateFile, "utf8"));
+        state.processedEventIds.push(extraId);
+        writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+      },
+    },
+    {
+      name: "state records valid processed IDs in noncanonical order",
+      mutate({ event, root }) {
+        const orphan = { ...event, eventId: extraId, createdAt: "2020-01-01T00:00:00.000Z" };
+        writeFileSync(path.join(root, "events", "processed", `${extraId}.json`), `${JSON.stringify(orphan, null, 2)}\n`);
+        const stateFile = path.join(root, "state.json");
+        const state = JSON.parse(readFileSync(stateFile, "utf8"));
+        state.processedEventIds = [event.eventId, extraId];
+        writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+      },
+    },
+    {
+      name: "state omits a processed event ID",
+      mutate({ root }) {
+        const stateFile = path.join(root, "state.json");
+        const state = JSON.parse(readFileSync(stateFile, "utf8"));
+        state.processedEventIds = [];
+        writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+      },
+    },
+    {
+      name: "state has a forged active claim",
+      mutate({ root }) {
+        const stateFile = path.join(root, "state.json");
+        const state = JSON.parse(readFileSync(stateFile, "utf8"));
+        state.activeClaims = { "DKA-FORGED-CLAIM": ["/forged/worktree"] };
+        writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+      },
+    },
+    {
+      name: "state omits its active claim",
+      mutate({ root }) {
+        const stateFile = path.join(root, "state.json");
+        const state = JSON.parse(readFileSync(stateFile, "utf8"));
+        state.activeClaims = {};
+        writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+      },
+    },
+    {
+      name: "state schema is invalid",
+      mutate({ root }) {
+        const stateFile = path.join(root, "state.json");
+        const state = JSON.parse(readFileSync(stateFile, "utf8"));
+        state.schemaVersion = 2;
+        writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+      },
+    },
+    {
+      name: "persisted state JSON is malformed",
+      mutate({ root }) {
+        writeFileSync(path.join(root, "state.json"), "{\n");
+      },
+    },
+    {
+      name: "processed directory has an invalid filename",
+      mutate({ root }) {
+        writeFileSync(path.join(root, "events", "processed", "unexpected.txt"), "unexpected\n");
+      },
+    },
+    {
+      name: "processed event JSON is malformed",
+      mutate({ root }) {
+        writeFileSync(path.join(root, "events", "processed", `${extraId}.json`), "{\n");
+      },
+    },
+    {
+      name: "processed filename and event ID differ",
+      mutate({ event, root }) {
+        writeFileSync(path.join(root, "events", "processed", `${extraId}.json`), `${JSON.stringify(event, null, 2)}\n`);
+      },
+    },
+  ];
+
+  for (const variant of variants) {
+    const fixture = createTerminalCleanupFixture(`DKA-ACK-AUDIT-${variants.indexOf(variant) + 1}`);
+    const markerNames = lockStatus({ cwd: fixture.cwd }).intentMarkers;
+    variant.mutate(fixture);
+
+    const snapshot = readSnapshot({ cwd: fixture.cwd });
+    assert.equal(snapshot.target.safe, false, variant.name);
+    assert.equal(snapshot.target.recoveryMode, undefined, variant.name);
+    assert.ok(snapshot.target.reasons.length > 0, variant.name);
+    assert.throws(
+      () => recoverAckCleanup({ cwd: fixture.cwd, confirm: true }),
+      /ACK cleanup is unsafe/,
+      variant.name,
+    );
+    assert.equal(existsSync(path.join(fixture.root, "ack-intent.json")), true, variant.name);
+    assert.deepEqual(lockStatus({ cwd: fixture.cwd }).intentMarkers, markerNames, variant.name);
+  }
+});
+
 test("terminal ACK cleanup rejects a live related marker", () => {
   const { cwd, root } = createTerminalCleanupFixture("DKA-ACK-CLEANUP-LIVE");
   const markerName = lockStatus({ cwd }).intentMarkers[0];
@@ -2681,6 +2792,7 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(skill, /only.*successful ACK.*removes.*dead.*marker/i);
   assert.match(skill, /recoveryMode.*ack_cleanup.*recover-ack-cleanup --confirm/i);
   assert.match(skill, /ack_cleanup.*do not.*ordinary ACK.*recover-lock/i);
+  assert.match(skill, /every processed directory entry.*canonical UUID.*regular file/i);
   assert.match(skill, /without an ACK journal.*retry.*original token.*eventIds.*expected hashes/i);
   assert.match(skill, /original ACK parameters.*lost.*manual stop/i);
   assert.match(skill, /owner PID.*never.*lease.*dead/i);
@@ -2710,8 +2822,9 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(contracts, /dead ACK marker.*left in place.*live retry marker/i);
   assert.match(contracts, /validation failure.*dead marker.*unchanged/i);
   assert.match(contracts, /state.*owner.*markers.*journal.*last/i);
-  assert.match(contracts, /ownerless terminal.*processed.*projection/i);
+  assert.match(contracts, /ownerless terminal.*projection.*processed/i);
   assert.match(contracts, /cleanup tombstone.*journal.*retry/i);
+  assert.match(contracts, /processedEventIds.*activeClaims.*derived.*exact/i);
   assert.match(contracts, /before journal publication.*original token.*eventIds.*expected hashes/i);
   assert.match(contracts, /adopt.*lockToken.*owner token.*state write/i);
   assert.match(contracts, /git diff --check.*cannot/);
@@ -2724,4 +2837,5 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(report, /processed directory.*source of truth/);
   assert.match(report, /two-phase ACK journal/);
   assert.match(report, /committed-cleanup.*recover-ack-cleanup/i);
+  assert.match(report, /full processed audit/i);
 });

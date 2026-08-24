@@ -2,7 +2,7 @@
 
 ## 结论
 
-基于 `53589d6` 完成十轮最终审查修复。改动仅限仓库级项目管家 Skill、helper、契约文档和回归测试；没有进入 DKAgent 业务运行时，没有实现通用文档渲染平台，也没有把虚假真实进度写入 STATUS/BACKLOG。
+基于 `53589d6` 完成十一轮最终审查修复。改动仅限仓库级项目管家 Skill、helper、契约文档和回归测试；没有进入 DKAgent 业务运行时，没有实现通用文档渲染平台，也没有把虚假真实进度写入 STATUS/BACKLOG。
 
 ## 修复
 
@@ -23,15 +23,16 @@
 15. `adopt-documents` 从入口持有 `operation: adopt` marker，拒绝未完成 ACK intent，在 branch/hash/state write 前重验 owner，写 state 后于同一 marker 内删除 owner；ACK/adopt 并发最多一方写入，不再嵌套公开 `release-lock`。
 16. ACK lifecycle marker 在任何 owner/hash/state 读取前绑定 lockToken、sorted unique eventIds 与 expectedDocumentHashes。无论 journal 是否存在，dead marker 只允许 owner、IDs、hashes 全部 exact 的 retry；旧 marker 在验证与事务期间原位保留，由当前 live marker 排斥 contender，任一失败只删除当前 marker，只有 state 与 owner 提交且 journal 仍持久存在时才进入 marker 清理。错误 IDs、错误 hashes、参数丢失、release/adopt/recover 均无法消耗或绕过恢复锚点。
 17. ACK 提交尾段调整为 state → owner → exact markers → journal last，消除 owner/journal 已消失但 marker 残留的不可恢复窗口。ownerless committed-cleanup 由 snapshot/lock-status 暴露 `ack_cleanup`，仅允许 `recover-ack-cleanup --confirm` 在 branch、docs、state、processed、pending、projection 与 marker 事务事实全部精确时逐 marker 原子 tombstone 清理，journal 最后删除；中途 SIGKILL 可重复，漂移/live/malformed/不同事务均保留 journal 硬阻断。
+18. `ack_cleanup` 使用 full processed audit：processed 目录每个 entry 必须是 canonical UUID JSON regular file 且内容与文件 ID 匹配；全部合法事件按 `(createdAt,eventId)` 重放后，persisted state schema、完整有序 `processedEventIds` 与 `activeClaims` 必须和派生事实深度一致。额外 orphan、幽灵/缺失/乱序 ID、伪造/遗漏 claim、非法文件名、损坏 JSON 和 ID mismatch 均让 snapshot 返回 `safe:false` 并保留 journal/markers。
 
 ## TDD 证据
 
-回归测试覆盖合法 lease 的 token 取回、canonical taskId、projection helper/CLI、完整来源与 HEAD 防伪、folded latest projection、部分 ACK 防倒退、唯一 current block、processed 审计历史、orphan state 协调、ACK journal 冻结与真实 process.exit/SIGKILL 窗口、dead marker takeover 正反条件、ACK/adopt 双向互斥与 owner 重验、owner 删除后的单/多 marker terminal cleanup、cleanup tombstone 二次崩溃恢复、文档漂移/state 缺 ID/processed 损坏/live marker 阻断、严格 schema、三 worktree 完整投影、证据降级、自由文本与 canonical path。每类修复均先用失败断言复现，再做最小实现。
+回归测试覆盖合法 lease 的 token 取回、canonical taskId、projection helper/CLI、完整来源与 HEAD 防伪、folded latest projection、部分 ACK 防倒退、唯一 current block、processed 审计历史、orphan state 协调、ACK journal 冻结与真实 process.exit/SIGKILL 窗口、dead marker takeover 正反条件、ACK/adopt 双向互斥与 owner 重验、owner 删除后的单/多 marker terminal cleanup、cleanup tombstone 二次崩溃恢复、严格全目录 processed/state 派生审计、文档漂移/state 缺 ID/processed 损坏/live marker 阻断、严格 schema、三 worktree 完整投影、证据降级、自由文本与 canonical path。每类修复均先用失败断言复现，再做最小实现。
 
 ## 验证
 
-- `npm run test:project-manager`：100/100 PASS。
-- `npm test`：exit 0，包含 Project Manager 100/100 与 Vite build。
+- `npm run test:project-manager`：101/101 PASS。
+- `npm test`：exit 0，包含 Project Manager 101/101 与 Vite build。
 - `npm run typecheck`：exit 0。
 - `python3 /Users/xuxiaokang/.codex/skills/.system/skill-creator/scripts/quick_validate.py .codex/skills/dkagent-project-manager`：`Skill is valid!`。
 - `node --check .codex/skills/dkagent-project-manager/scripts/project-events.mjs`：exit 0。

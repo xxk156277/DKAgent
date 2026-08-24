@@ -4,8 +4,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 const EVENT_FIELDS = new Set(["taskId", "action", "module", "summary", "status", "dependencies", "evidence", "discoveredTodos"]);
+const STORED_EVENT_FIELDS = new Set(["schemaVersion", "eventId", ...EVENT_FIELDS, "worktreePath", "branch", "headSha", "createdAt"]);
+const STATE_FIELDS = new Set(["schemaVersion", "processedEventIds", "activeClaims", "documentHashes", "lastSynchronizedAt"]);
 const ACTIONS = new Set(["started", "finished", "blocked", "discovered"]);
 const STATUSES = new Set(["in_progress", "completed", "needs_verification", "blocked"]);
 const EXECUTION_EVIDENCE = new Set(["test", "typecheck", "build"]);
@@ -29,6 +32,7 @@ const TEST_PATH = /\.test\.[cm]?[jt]s$/;
 const NODE_CHECK_PATH = /\.[cm]?js$/;
 const TASK_ID = /^DKA-[A-Z0-9][A-Z0-9-]{2,63}$/;
 const EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PROCESSED_EVENT_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.json$/;
 const GIT_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const DOCUMENT_HASH = /^[0-9a-f]{64}$/;
 const LOCK_FILE = "aggregate.lock";
@@ -565,11 +569,9 @@ function requireToken(root, token) {
 }
 
 function isStoredEvent(event, eventId) {
-  return event
+  const sourceFactsAreValid = event
     && event.schemaVersion === 1
     && event.eventId === eventId
-    && typeof event.taskId === "string"
-    && Boolean(event.taskId.trim())
     && typeof event.worktreePath === "string"
     && Boolean(event.worktreePath)
     && typeof event.branch === "string"
@@ -578,8 +580,15 @@ function isStoredEvent(event, eventId) {
     && GIT_SHA.test(event.headSha)
     && typeof event.createdAt === "string"
     && !Number.isNaN(Date.parse(event.createdAt))
-    && ACTIONS.has(event.action)
-    && STATUSES.has(event.status);
+    && Object.keys(event).length === STORED_EVENT_FIELDS.size
+    && [...STORED_EVENT_FIELDS].every((field) => Object.hasOwn(event, field));
+  if (!sourceFactsAreValid) return false;
+  try {
+    validateInput(Object.fromEntries([...EVENT_FIELDS].map((field) => [field, event[field]])));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function applyActiveClaim(activeClaims, event) {
@@ -592,21 +601,79 @@ function applyActiveClaim(activeClaims, event) {
 
 function readProcessedEvents(root) {
   const processed = path.join(root, "events", "processed");
-  return readdirSync(processed)
-    .filter((name) => name.endsWith(".json"))
-    .map((name) => ({ eventId: name.slice(0, -".json".length), file: path.join(processed, name) }))
-    .filter(({ eventId }) => EVENT_ID.test(eventId))
-    .map(({ eventId, file }) => ({ eventId, event: readJson(file) }))
-    .filter(({ eventId, event }) => isStoredEvent(event, eventId))
-    .map(({ event }) => event)
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId));
+  const events = [];
+  for (const name of readdirSync(processed).filter((entry) => entry.endsWith(".json")).sort()) {
+    const eventId = name.slice(0, -".json".length);
+    if (!EVENT_ID.test(eventId)) continue;
+    try {
+      const event = readJson(path.join(processed, name));
+      if (isStoredEvent(event, eventId)) events.push(event);
+    } catch {
+      // Ordinary snapshots reconcile valid history; terminal ACK cleanup audits every entry strictly.
+    }
+  }
+  return events.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId));
+}
+
+function validPersistedState(state) {
+  return state
+    && typeof state === "object"
+    && !Array.isArray(state)
+    && Object.keys(state).length === STATE_FIELDS.size
+    && [...STATE_FIELDS].every((field) => Object.hasOwn(state, field))
+    && state.schemaVersion === 1
+    && Array.isArray(state.processedEventIds)
+    && state.processedEventIds.every((eventId) => typeof eventId === "string" && EVENT_ID.test(eventId))
+    && new Set(state.processedEventIds).size === state.processedEventIds.length
+    && state.activeClaims
+    && typeof state.activeClaims === "object"
+    && !Array.isArray(state.activeClaims)
+    && Object.entries(state.activeClaims).every(([taskId, worktrees]) => (
+      TASK_ID.test(taskId)
+      && Array.isArray(worktrees)
+      && worktrees.length > 0
+      && worktrees.every((worktree) => typeof worktree === "string" && Boolean(worktree))
+      && new Set(worktrees).size === worktrees.length
+    ))
+    && validDocumentHashes(state.documentHashes)
+    && (state.lastSynchronizedAt === null
+      || (typeof state.lastSynchronizedAt === "string" && !Number.isNaN(Date.parse(state.lastSynchronizedAt))));
+}
+
+function auditProcessedDirectory(root) {
+  const processed = path.join(root, "events", "processed");
+  const reasons = [];
+  const events = [];
+  for (const entry of readdirSync(processed, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+    const match = PROCESSED_EVENT_FILE.exec(entry.name);
+    if (!match) {
+      reasons.push(`processed directory entry is not a canonical UUID.json file: ${entry.name}`);
+      continue;
+    }
+    if (!entry.isFile()) {
+      reasons.push(`processed directory entry is not a regular file: ${entry.name}`);
+      continue;
+    }
+    const eventId = match[1];
+    try {
+      const event = readJson(path.join(processed, entry.name));
+      if (!isStoredEvent(event, eventId)) reasons.push(`processed event is invalid or mismatched: ${entry.name}`);
+      else events.push(event);
+    } catch {
+      reasons.push(`processed event JSON is malformed: ${entry.name}`);
+    }
+  }
+  events.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId));
+  const activeClaims = {};
+  for (const event of events) applyActiveClaim(activeClaims, event);
+  return { reasons, events, processedEventIds: events.map((event) => event.eventId), activeClaims };
 }
 
 function reconcileProcessedState(root, state) {
   const events = readProcessedEvents(root);
   const activeClaims = {};
   for (const event of events) applyActiveClaim(activeClaims, event);
-  const recordedIds = new Set(state.processedEventIds);
+  const recordedIds = new Set(Array.isArray(state.processedEventIds) ? state.processedEventIds : []);
   return {
     state: { ...state, processedEventIds: events.map((event) => event.eventId), activeClaims },
     recoveryEvents: events.filter((event) => !recordedIds.has(event.eventId)),
@@ -662,36 +729,32 @@ function ackCleanupReasons(root, config, persistedState, intent, { allowedLiveMa
       reasons.push("management document hashes differ from ACK intent");
     }
   }
-  if (!sameDocumentHashes(persistedState.documentHashes, intent.expectedDocumentHashes)) {
+  if (!sameDocumentHashes(persistedState?.documentHashes, intent.expectedDocumentHashes)) {
     reasons.push("persisted state hashes differ from ACK intent");
   }
-  if (!Array.isArray(persistedState.processedEventIds)
+  const audit = auditProcessedDirectory(root);
+  reasons.push(...audit.reasons);
+  if (!validPersistedState(persistedState)) {
+    reasons.push("persisted state schema is invalid");
+  }
+  if (!isDeepStrictEqual(persistedState?.processedEventIds, audit.processedEventIds)) {
+    reasons.push("persisted processedEventIds differ from canonical processed audit");
+  }
+  if (!isDeepStrictEqual(persistedState?.activeClaims, audit.activeClaims)) {
+    reasons.push("persisted activeClaims differ from canonical processed audit");
+  }
+  if (!Array.isArray(persistedState?.processedEventIds)
     || intent.eventIds.some((eventId) => !persistedState.processedEventIds.includes(eventId))) {
     reasons.push("persisted state is missing ACK event IDs");
   }
+  const eventsById = new Map(audit.events.map((event) => [event.eventId, event]));
   const events = [];
   for (const eventId of intent.eventIds) {
     const pending = path.join(root, "events", "pending", `${eventId}.json`);
-    const processed = path.join(root, "events", "processed", `${eventId}.json`);
     if (existsSync(pending)) reasons.push(`ACK event is still pending: ${eventId}`);
-    if (!existsSync(processed)) {
-      reasons.push(`processed ACK event is missing: ${eventId}`);
-      continue;
-    }
-    try {
-      const event = readJson(processed);
-      if (!isStoredEvent(event, eventId)) reasons.push(`processed ACK event is invalid: ${eventId}`);
-      else {
-        try {
-          projectionBlock(event);
-          events.push(event);
-        } catch {
-          reasons.push(`processed ACK event is invalid: ${eventId}`);
-        }
-      }
-    } catch {
-      reasons.push(`processed ACK event is invalid: ${eventId}`);
-    }
+    const event = eventsById.get(eventId);
+    if (!event) reasons.push(`processed ACK event is invalid or missing: ${eventId}`);
+    else events.push(event);
   }
   if (existsSync(config.managementWorktree)) {
     const currentBlocks = currentProjectionBlocks(config.managementWorktree);
@@ -1051,7 +1114,12 @@ export function lockStatus({ cwd }) {
     result.ackIntentExists = true;
     if (intentRecord.intent && !existsSync(lock)) {
       const config = readJson(path.join(root, "config.json"));
-      const persistedState = readJson(path.join(root, "state.json"));
+      let persistedState = null;
+      try {
+        persistedState = readJson(path.join(root, "state.json"));
+      } catch {
+        // The strict cleanup reasons report an invalid persisted state without hiding the journal.
+      }
       const reasons = ackCleanupReasons(root, config, persistedState, intentRecord.intent);
       result.ackCleanup = { safe: reasons.length === 0, reasons, eventIds: intentRecord.intent.eventIds };
       if (reasons.length === 0) result.recoveryMode = "ack_cleanup";
@@ -1119,7 +1187,12 @@ export function recoverAckCleanup({
   if (!intentRecord.exists) throw new Error("ACK cleanup journal is missing");
   if (!intentRecord.intent) throw new Error("ACK cleanup journal is invalid; manual inspection required");
   const config = readJson(path.join(root, "config.json"));
-  const persistedState = readJson(path.join(root, "state.json"));
+  let persistedState = null;
+  try {
+    persistedState = readJson(path.join(root, "state.json"));
+  } catch {
+    // completeAckCleanup reports the invalid state and keeps the durable journal.
+  }
   return completeAckCleanup(root, config, persistedState, intentRecord.intent, {
     _testTerminateAfterRenameCount,
     _testTerminationSignal,
@@ -1139,9 +1212,17 @@ export function readSnapshot({ cwd, token } = {}) {
   if (token) requireToken(root, token);
   const events = readPendingEvents(root);
   const config = readJson(path.join(root, "config.json"));
-  const persistedState = readJson(path.join(root, "state.json"));
-  const { state, recoveryEvents } = reconcileProcessedState(root, persistedState);
   const intentRecord = ackIntentRecord(root);
+  let persistedState;
+  try {
+    persistedState = readJson(path.join(root, "state.json"));
+  } catch (error) {
+    if (!intentRecord.intent || existsSync(path.join(root, LOCK_FILE))) throw error;
+    persistedState = null;
+  }
+  const { state, recoveryEvents } = persistedState
+    ? reconcileProcessedState(root, persistedState)
+    : { state: null, recoveryEvents: [] };
   return {
     config,
     state,
@@ -1150,7 +1231,7 @@ export function readSnapshot({ cwd, token } = {}) {
     ackIntentExists: intentRecord.exists,
     ackIntent: intentRecord.intent,
     ackRecoveryEventIds: intentRecord.intent?.eventIds ?? [],
-    conflicts: activeClaimConflicts(state, events),
+    conflicts: state ? activeClaimConflicts(state, events) : [],
     target: targetStatus(root, config, state, persistedState, intentRecord),
   };
 }
