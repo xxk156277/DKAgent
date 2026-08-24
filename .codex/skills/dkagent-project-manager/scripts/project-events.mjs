@@ -30,6 +30,7 @@ const LOCK_FILE = "aggregate.lock";
 const LOCK_CREATING_PREFIX = "aggregate.lock.creating-";
 const LOCK_RECOVERY_PREFIX = "aggregate.lock.recovery-";
 const LOCK_INTENT_PREFIX = "aggregate.intent-";
+const LOCK_INTENT_CREATING_PREFIX = "aggregate.intent.creating-";
 
 function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -89,6 +90,38 @@ function readLockOwner(lock) {
   }
 }
 
+function validLifecycleIntent(intent) {
+  return intent
+    && typeof intent === "object"
+    && !Array.isArray(intent)
+    && new Set(["release", "recover"]).has(intent.operation)
+    && EVENT_ID.test(intent.token)
+    && Number.isInteger(intent.pid)
+    && intent.pid > 0
+    && typeof intent.createdAt === "string"
+    && !Number.isNaN(Date.parse(intent.createdAt));
+}
+
+function readLifecycleIntent(marker) {
+  try {
+    const intent = readJson(marker);
+    return validLifecycleIntent(intent) ? intent : null;
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") return false;
+    if (error.code === "EPERM") return true;
+    throw error;
+  }
+}
+
 function lockDiagnostics(root) {
   const entries = existsSync(root) ? readdirSync(root) : [];
   const recoveryTombstones = entries.filter((name) => name.startsWith(LOCK_RECOVERY_PREFIX)).sort();
@@ -99,13 +132,23 @@ function lockDiagnostics(root) {
     recoveryTombstones,
     blockingTombstones,
     creatingFiles: entries.filter((name) => name.startsWith(LOCK_CREATING_PREFIX)).sort(),
-    intentMarkers: entries.filter((name) => name.startsWith(LOCK_INTENT_PREFIX)).sort(),
+    intentMarkers: entries
+      .filter((name) => name.startsWith(LOCK_INTENT_PREFIX) && !name.startsWith(LOCK_INTENT_CREATING_PREFIX))
+      .sort(),
+    intentCreatingFiles: entries.filter((name) => name.startsWith(LOCK_INTENT_CREATING_PREFIX)).sort(),
   };
 }
 
 function createLifecycleIntent(root, operation) {
-  const marker = path.join(root, `${LOCK_INTENT_PREFIX}${operation}-${randomUUID()}`);
-  mkdirSync(marker);
+  const intent = { operation, token: randomUUID(), pid: process.pid, createdAt: new Date().toISOString() };
+  const marker = path.join(root, `${LOCK_INTENT_PREFIX}${operation}-${intent.token}`);
+  const creating = path.join(root, `${LOCK_INTENT_CREATING_PREFIX}${randomUUID()}`);
+  writeFileSync(creating, `${JSON.stringify(intent, null, 2)}\n`, { flag: "wx" });
+  try {
+    linkSync(creating, marker);
+  } finally {
+    if (existsSync(creating)) unlinkSync(creating);
+  }
   return marker;
 }
 
@@ -440,6 +483,7 @@ export function lockStatus({ cwd }) {
   if (diagnostics.blockingTombstones.length) result.blockingTombstones = diagnostics.blockingTombstones;
   if (diagnostics.creatingFiles.length) result.creatingFiles = diagnostics.creatingFiles;
   if (diagnostics.intentMarkers.length) result.intentMarkers = diagnostics.intentMarkers;
+  if (diagnostics.intentCreatingFiles.length) result.intentCreatingFiles = diagnostics.intentCreatingFiles;
   return result;
 }
 
@@ -449,24 +493,32 @@ export function recoverLock({ cwd, confirm = false }) {
   const marker = createLifecycleIntent(root, "recover");
   try {
     let diagnostics = lockDiagnostics(root);
-    let cleanedLifecycleIntents = false;
+    let cleanedStaleIntents = false;
+    const currentOwner = readLockOwner(lock);
+    if (currentOwner) throw new Error("aggregate lock owner exists; release requires token");
     if (diagnostics.blockingTombstones.length) {
       throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
     }
     if (hasOtherLifecycleIntent(diagnostics, marker)) {
-      if (existsSync(lock)) throw new Error("aggregate lifecycle operation is in progress");
+      const otherIntents = diagnostics.intentMarkers.filter((name) => name !== path.basename(marker));
+      if (otherIntents.some((name) => {
+        const intent = readLifecycleIntent(path.join(root, name));
+        return intent && isProcessAlive(intent.pid);
+      })) {
+        throw new Error("aggregate lifecycle operation is in progress");
+      }
       if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
-      for (const name of diagnostics.intentMarkers) {
+      for (const name of otherIntents) {
         if (name !== path.basename(marker)) {
           removeLifecycleIntent(path.join(root, name));
-          cleanedLifecycleIntents = true;
+          cleanedStaleIntents = true;
         }
       }
       diagnostics = lockDiagnostics(root);
     }
     if (!existsSync(lock)) {
       if (!diagnostics.creatingFiles.length) {
-        if (cleanedLifecycleIntents) return true;
+        if (cleanedStaleIntents) return true;
         throw new Error("aggregate lock is not held");
       }
       if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
@@ -483,7 +535,6 @@ export function recoverLock({ cwd, confirm = false }) {
       }
       return true;
     }
-    if (readLockOwner(lock)) throw new Error("aggregate lock owner exists; release requires token");
     if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
     const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
     try {

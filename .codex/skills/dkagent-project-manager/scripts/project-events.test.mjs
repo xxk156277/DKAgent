@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -63,6 +63,13 @@ function writePendingEvent(cwd, event, createdAt) {
   writeFileSync(
     path.join(root, "events", "pending", `${event.eventId}.json`),
     `${JSON.stringify({ ...event, createdAt }, null, 2)}\n`,
+  );
+}
+
+function writeLifecycleIntent(cwd, name, pid) {
+  writeFileSync(
+    path.join(stateRoot(cwd), name),
+    `${JSON.stringify({ operation: "recover", token: "00000000-0000-4000-8000-000000000000", pid, createdAt: "2026-08-24T00:00:00.000Z" })}\n`,
   );
 }
 
@@ -479,16 +486,36 @@ test("release intent blocks acquires before and after the current lock is remove
   assert.ok(acquireLock({ cwd }).token);
 });
 
-test("legacy recovery preserves the lock while another lifecycle intent exists", () => {
+test("dead recovery intent and a legacy lock converge on explicit recovery", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const root = stateRoot(cwd);
   const lock = path.join(root, "aggregate.lock");
-  const intent = path.join(root, "aggregate.intent-release-test");
   mkdirSync(lock);
-  mkdirSync(intent);
+  writeLifecycleIntent(cwd, "aggregate.intent-recover-dead", 999999999);
+  assert.equal(recoverLock({ cwd, confirm: true }), true);
+  assert.equal(existsSync(lock), false);
+  assert.equal(lockStatus({ cwd }).intentMarkers, undefined);
+});
+
+test("live lifecycle intent blocks recovery of an invalid lock", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const root = stateRoot(cwd);
+  const lock = path.join(root, "aggregate.lock");
+  mkdirSync(lock);
+  writeLifecycleIntent(cwd, "aggregate.intent-recover-live", process.pid);
   assert.throws(() => recoverLock({ cwd, confirm: true }), /lifecycle operation is in progress/);
   assert.ok(existsSync(lock));
-  rmSync(intent, { recursive: true });
-  assert.equal(recoverLock({ cwd, confirm: true }), true);
+});
+
+test("a normal owner prevents stale intent cleanup", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const owner = acquireLock({ cwd });
+  const intent = "aggregate.intent-recover-dead";
+  writeLifecycleIntent(cwd, intent, 999999999);
+  assert.throws(() => recoverLock({ cwd, confirm: true }), /release requires token/);
+  assert.ok(lockStatus({ cwd }).intentMarkers.includes(intent));
+  assert.equal(releaseLock({ cwd, token: owner.token }), true);
 });
