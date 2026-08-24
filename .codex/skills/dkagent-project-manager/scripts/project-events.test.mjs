@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,6 +75,7 @@ function writeLifecycleIntent(cwd, name, pid) {
 }
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const helperPath = path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/scripts/project-events.mjs");
 
 test("init records the explicit main worktree", () => {
   const cwd = createRepo();
@@ -564,10 +565,58 @@ test("three worktrees render the management documents before ACKing exact hashes
   assert.deepEqual(acknowledged.state.documentHashes, documentHashes(cwd));
 });
 
+test("a pending worker event survives removal of its worktree", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const worker = `${cwd}-removed-worker`;
+  git(cwd, "worktree", "add", "-b", "removed-worker", worker);
+  const event = emitEvent({ cwd: worker, input: started({ taskId: "DKA-SMOKE-removed" }) });
+
+  git(cwd, "worktree", "remove", "--force", worker);
+
+  const snapshot = readSnapshot({ cwd });
+  assert.equal(snapshot.events.length, 1);
+  assert.equal(snapshot.events[0].eventId, event.eventId);
+  assert.equal(snapshot.events[0].worktreePath, worker);
+});
+
+test("CLI ACK accepts rendered hashes from the invoking worktree and clears pending events", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started() });
+  const token = acquireLock({ cwd }).token;
+  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
+  writeFileSync(path.join(cwd, "AGENTS.md"), "# Rendered rules\n");
+  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "# Rendered status\n");
+  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Rendered backlog\n");
+  const expectedDocumentHashes = documentHashes(cwd);
+  const hashesFile = path.join(cwd, "expected-hashes.json");
+  writeFileSync(hashesFile, `${JSON.stringify(expectedDocumentHashes)}\n`);
+
+  let result;
+  try {
+    result = spawnSync(
+      process.execPath,
+      [helperPath, "ack", "--token", token, "--event-ids", event.eventId, "--expected-hashes-file", hashesFile],
+      { cwd, encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).documentHashes, expectedDocumentHashes);
+  } finally {
+    if (existsSync(hashesFile)) unlinkSync(hashesFile);
+  }
+
+  assert.equal(existsSync(hashesFile), false);
+  const snapshot = readSnapshot({ cwd });
+  assert.equal(snapshot.events.length, 0);
+  assert.deepEqual(snapshot.state.documentHashes, expectedDocumentHashes);
+});
+
 test("activated project-management documents and Skill describe the hash-checked ACK workflow", () => {
   for (const relative of ["AGENTS.md", "docs/project/STATUS.md", "docs/project/BACKLOG.md"]) {
     assert.equal(existsSync(path.join(repositoryRoot, relative)), true, `${relative} must be activated`);
   }
   const skill = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/SKILL.md"), "utf8");
   assert.match(skill, /--expected-hashes-file/);
+  assert.match(skill, /`snapshot` 的 `target\.managementWorktree`/);
 });

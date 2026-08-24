@@ -626,8 +626,8 @@ function valueAfter(args, flag) {
 
 function readExpectedDocumentHashes(cwd, file) {
   const root = realpathSync(cwd);
-  const candidate = path.resolve(root, file);
-  if (path.extname(candidate) !== ".json" || path.relative(root, candidate).startsWith(`..${path.sep}`) || path.isAbsolute(path.relative(root, candidate))) {
+  const candidate = path.resolve(cwd, file);
+  if (path.extname(candidate) !== ".json") {
     throw new Error("expected hashes file must be a JSON file inside cwd");
   }
   const resolved = realpathSync(candidate);
