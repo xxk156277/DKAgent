@@ -36,7 +36,6 @@ const LOCK_CREATING_PREFIX = "aggregate.lock.creating-";
 const LOCK_RECOVERY_PREFIX = "aggregate.lock.recovery-";
 const LOCK_INTENT_PREFIX = "aggregate.intent-";
 const LOCK_INTENT_CREATING_PREFIX = "aggregate.intent.creating-";
-const LOCK_INTENT_TOMBSTONE_PREFIX = "aggregate.intent.tombstone-";
 const ACK_INTENT_FILE = "ack-intent.json";
 const ACK_INTENT_FIELDS = new Set(["schemaVersion", "lockOwner", "eventIds", "expectedDocumentHashes", "baselineHashes", "createdAt"]);
 const ACK_LOCK_OWNER_FIELDS = new Set(["token", "pid", "acquiredAt"]);
@@ -204,10 +203,11 @@ function readLockOwner(lock) {
 
 function validLifecycleIntent(intent) {
   if (!intent || typeof intent !== "object" || Array.isArray(intent)) return false;
-  const requiresLockToken = intent.operation === "ack" || intent.operation === "adopt";
-  const fields = requiresLockToken
-    ? ["operation", "token", "pid", "createdAt", "lockToken"]
-    : ["operation", "token", "pid", "createdAt"];
+  const fields = intent.operation === "ack"
+    ? ["operation", "token", "pid", "createdAt", "lockToken", "eventIds", "expectedDocumentHashes"]
+    : intent.operation === "adopt"
+      ? ["operation", "token", "pid", "createdAt", "lockToken"]
+      : ["operation", "token", "pid", "createdAt"];
   return new Set(["ack", "adopt", "release", "recover"]).has(intent.operation)
     && Object.keys(intent).length === fields.length
     && Object.keys(intent).every((key) => fields.includes(key))
@@ -217,7 +217,15 @@ function validLifecycleIntent(intent) {
     && intent.pid <= 2147483647
     && typeof intent.createdAt === "string"
     && !Number.isNaN(Date.parse(intent.createdAt))
-    && (!requiresLockToken || (typeof intent.lockToken === "string" && EVENT_ID.test(intent.lockToken)));
+    && ((intent.operation !== "ack" && intent.operation !== "adopt")
+      || (typeof intent.lockToken === "string" && EVENT_ID.test(intent.lockToken)))
+    && (intent.operation !== "ack"
+      || (Array.isArray(intent.eventIds)
+        && intent.eventIds.length > 0
+        && intent.eventIds.every((eventId) => typeof eventId === "string" && EVENT_ID.test(eventId))
+        && new Set(intent.eventIds).size === intent.eventIds.length
+        && intent.eventIds.every((eventId, index) => index === 0 || intent.eventIds[index - 1].localeCompare(eventId) < 0)
+        && validDocumentHashes(intent.expectedDocumentHashes)));
 }
 
 function readLifecycleIntent(marker) {
@@ -257,10 +265,19 @@ function lockDiagnostics(root) {
   };
 }
 
-function createLifecycleIntent(root, operation, lockToken) {
+function createLifecycleIntent(root, operation, { lockToken, eventIds, expectedDocumentHashes } = {}) {
   const requiresLockToken = operation === "ack" || operation === "adopt";
   if (requiresLockToken && (typeof lockToken !== "string" || !EVENT_ID.test(lockToken))) {
     throw new Error("invalid lifecycle lock token");
+  }
+  if (operation === "ack"
+    && (!Array.isArray(eventIds)
+      || eventIds.length === 0
+      || new Set(eventIds).size !== eventIds.length
+      || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))
+      || eventIds.some((eventId, index) => index > 0 && eventIds[index - 1].localeCompare(eventId) >= 0)
+      || !validDocumentHashes(expectedDocumentHashes))) {
+    throw new Error("invalid ACK lifecycle request");
   }
   const intent = {
     operation,
@@ -268,6 +285,7 @@ function createLifecycleIntent(root, operation, lockToken) {
     pid: process.pid,
     createdAt: new Date().toISOString(),
     ...(requiresLockToken ? { lockToken } : {}),
+    ...(operation === "ack" ? { eventIds, expectedDocumentHashes } : {}),
   };
   const marker = path.join(root, `${LOCK_INTENT_PREFIX}${operation}-${intent.token}`);
   const creating = path.join(root, `${LOCK_INTENT_CREATING_PREFIX}${randomUUID()}`);
@@ -289,51 +307,40 @@ function hasOtherLifecycleIntent(diagnostics, marker) {
   return diagnostics.intentMarkers.some((name) => name !== ownName);
 }
 
-function deadAckTakeoverEligible(root, intent, owner, requestToken, processAlive = isProcessAlive(intent.pid)) {
+function sameAckLifecycleRequest(intent, request) {
+  return intent.lockToken === request.lockToken
+    && sameEventIds(intent.eventIds, request.eventIds)
+    && sameDocumentHashes(intent.expectedDocumentHashes, request.expectedDocumentHashes);
+}
+
+function deadAckTakeoverEligible(root, intent, owner, request, processAlive = isProcessAlive(intent.pid)) {
   if (intent.operation !== "ack"
-    || intent.lockToken !== requestToken
-    || owner?.token !== requestToken
+    || owner?.token !== request.lockToken
+    || !sameAckLifecycleRequest(intent, request)
     || processAlive) {
     return false;
   }
   const ackRecord = ackIntentRecord(root);
   return !ackRecord.exists
     || (ackRecord.intent
-      && ackRecord.intent.lockOwner.token === requestToken
-      && sameLockOwnerIdentity(ackRecord.intent.lockOwner, owner));
+      && ackRecord.intent.lockOwner.token === request.lockToken
+      && sameLockOwnerIdentity(ackRecord.intent.lockOwner, owner)
+      && sameEventIds(ackRecord.intent.eventIds, request.eventIds)
+      && sameDocumentHashes(ackRecord.intent.expectedDocumentHashes, request.expectedDocumentHashes));
 }
 
-function assertExclusiveLifecycleIntent(root, marker, { deadAckToken } = {}) {
+function assertExclusiveLifecycleIntent(root, marker, { ackRequest } = {}) {
   const diagnostics = lockDiagnostics(root);
-  if (!hasOtherLifecycleIntent(diagnostics, marker)) return;
+  if (!hasOtherLifecycleIntent(diagnostics, marker)) return [];
   const otherNames = diagnostics.intentMarkers.filter((name) => name !== path.basename(marker));
-  if (!deadAckToken) throw new Error("aggregate lifecycle operation is in progress");
+  if (!ackRequest) throw new Error("aggregate lifecycle operation is in progress");
   const owner = readLockOwner(path.join(root, LOCK_FILE));
   const mayTakeOver = otherNames.every((name) => {
     const intent = readLifecycleIntent(path.join(root, name));
-    return intent && deadAckTakeoverEligible(root, intent, owner, deadAckToken);
+    return intent && deadAckTakeoverEligible(root, intent, owner, ackRequest);
   });
   if (!mayTakeOver) throw new Error("aggregate lifecycle operation is in progress");
-
-  const tombstones = [];
-  try {
-    for (const name of otherNames) {
-      const source = path.join(root, name);
-      const tombstone = path.join(root, `${LOCK_INTENT_TOMBSTONE_PREFIX}${randomUUID()}`);
-      try {
-        renameSync(source, tombstone);
-      } catch (error) {
-        if (error.code === "ENOENT") throw new Error("aggregate lifecycle operation is in progress");
-        throw error;
-      }
-      tombstones.push(tombstone);
-    }
-    if (hasOtherLifecycleIntent(lockDiagnostics(root), marker)) {
-      throw new Error("aggregate lifecycle operation is in progress");
-    }
-  } finally {
-    for (const tombstone of tombstones) removeLifecycleIntent(tombstone);
-  }
+  return otherNames.map((name) => path.join(root, name));
 }
 
 function terminateTestProcess(requestedPhase, signal, phase) {
@@ -889,7 +896,7 @@ export function lockStatus({ cwd }) {
         valid: true,
         ...intent,
         processAlive,
-        takeoverEligible: deadAckTakeoverEligible(root, intent, status.owner, intent.lockToken, processAlive),
+        takeoverEligible: deadAckTakeoverEligible(root, intent, status.owner, intent, processAlive),
       };
     });
   }
@@ -984,10 +991,22 @@ export function ackEvents({
   _testAfterLifecycleAcquired,
   _testBeforeStateWrite,
 }) {
+  if (typeof token !== "string" || !EVENT_ID.test(token)) throw new Error("invalid lifecycle lock token");
+  if (!Array.isArray(eventIds)
+    || eventIds.length === 0
+    || new Set(eventIds).size !== eventIds.length
+    || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
+    throw new Error("invalid event ID");
+  }
+  if (!validDocumentHashes(expectedDocumentHashes)) throw new Error("invalid expected document hashes");
+  eventIds = [...eventIds].sort();
+  expectedDocumentHashes = Object.fromEntries(DOCUMENTS.map((relative) => [relative, expectedDocumentHashes[relative]]));
+  const ackRequest = { lockToken: token, eventIds, expectedDocumentHashes };
   const root = stateRoot(cwd);
-  const marker = createLifecycleIntent(root, "ack", token);
+  const marker = createLifecycleIntent(root, "ack", ackRequest);
+  let deadAckMarkers = [];
   try {
-    assertExclusiveLifecycleIntent(root, marker, { deadAckToken: token });
+    deadAckMarkers = assertExclusiveLifecycleIntent(root, marker, { ackRequest });
     terminateTestProcess(_testTerminateAfterPhase, _testTerminationSignal, "lifecycle");
     _testAfterLifecycleAcquired?.();
     const owner = requireToken(root, token);
@@ -998,16 +1017,9 @@ export function ackEvents({
     if (!existsSync(config.managementWorktree)) throw new Error("management worktree is missing");
     const branch = git(config.managementWorktree, ["branch", "--show-current"]);
     if (branch !== config.managementBranch) throw new Error(`management branch mismatch: ${branch || "detached"}`);
-    if (!validDocumentHashes(expectedDocumentHashes)) throw new Error("invalid expected document hashes");
     const currentDocumentHashes = documentHashes(config.managementWorktree);
     if (!sameDocumentHashes(currentDocumentHashes, expectedDocumentHashes)) {
       throw new Error("management document hashes do not match expected results");
-    }
-    if (!Array.isArray(eventIds)
-      || eventIds.length === 0
-      || new Set(eventIds).size !== eventIds.length
-      || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
-      throw new Error("invalid event ID");
     }
     const existingIntent = ackIntentRecord(root);
     if (existingIntent.exists) {
@@ -1082,6 +1094,7 @@ export function ackEvents({
     unlinkSync(path.join(root, ACK_INTENT_FILE));
     if (_testCrashAfterPhase === "journal") throw new Error("simulated crash after ACK journal cleanup");
     removeOwnedLockUnderLifecycle(root, token);
+    for (const deadMarker of deadAckMarkers) removeLifecycleIntent(deadMarker);
     return reconciledState;
   } finally {
     removeLifecycleIntent(marker);
@@ -1090,7 +1103,7 @@ export function ackEvents({
 
 export function adoptDocuments({ cwd, token, _testAfterLifecycleAcquired, _testBeforeStateWrite }) {
   const root = stateRoot(cwd);
-  const marker = createLifecycleIntent(root, "adopt", token);
+  const marker = createLifecycleIntent(root, "adopt", { lockToken: token });
   try {
     assertExclusiveLifecycleIntent(root, marker);
     _testAfterLifecycleAcquired?.();

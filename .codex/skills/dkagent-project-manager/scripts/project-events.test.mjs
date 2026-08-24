@@ -82,7 +82,14 @@ function writeLifecycleIntent(cwd, name, pid) {
   );
 }
 
-function writeAckLifecycleIntent(cwd, name, { pid, lockToken, operation = "ack", includeLockToken = true }) {
+function writeAckLifecycleIntent(cwd, name, {
+  pid,
+  lockToken,
+  eventIds,
+  expectedDocumentHashes,
+  operation = "ack",
+  includeLockToken = true,
+}) {
   writeFileSync(
     path.join(stateRoot(cwd), name),
     `${JSON.stringify({
@@ -91,6 +98,7 @@ function writeAckLifecycleIntent(cwd, name, { pid, lockToken, operation = "ack",
       pid,
       createdAt: "2026-08-24T00:00:00.000Z",
       ...(includeLockToken ? { lockToken } : {}),
+      ...(operation === "ack" ? { eventIds: [...eventIds].sort(), expectedDocumentHashes } : {}),
     })}\n`,
   );
 }
@@ -1141,7 +1149,14 @@ test("a real process exit before ACK journal publication permits matching-owner 
   const root = stateRoot(cwd);
   assert.equal(existsSync(path.join(root, "ack-intent.json")), false);
   assert.equal(existsSync(path.join(root, "events", "pending", `${event.eventId}.json`)), true);
-  assert.equal(lockStatus({ cwd }).lifecycleIntents[0].processAlive, false);
+  assert.deepEqual(
+    {
+      eventIds: lockStatus({ cwd }).lifecycleIntents[0].eventIds,
+      expectedDocumentHashes: lockStatus({ cwd }).lifecycleIntents[0].expectedDocumentHashes,
+      processAlive: lockStatus({ cwd }).lifecycleIntents[0].processAlive,
+    },
+    { eventIds: [event.eventId], expectedDocumentHashes, processAlive: false },
+  );
 
   ackEvents({
     cwd,
@@ -1150,6 +1165,120 @@ test("a real process exit before ACK journal publication permits matching-owner 
     expectedDocumentHashes,
   });
   assert.equal(lockStatus({ cwd }).held, false);
+  assert.equal(lockStatus({ cwd }).intentMarkers, undefined);
+});
+
+test("wrong event IDs cannot consume a dead pre-journal ACK marker", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const original = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-REQUEST-IDS" }) });
+  const different = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-OTHER-IDS" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [original]);
+  const expectedDocumentHashes = documentHashes(cwd);
+  const boundEventIds = [original.eventId, different.eventId].sort().reverse();
+  const crashed = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: boundEventIds,
+    expectedDocumentHashes,
+    phase: "lifecycle",
+  });
+  assert.equal(crashed.status, 86, crashed.stderr);
+  const root = stateRoot(cwd);
+  const markerName = lockStatus({ cwd }).intentMarkers[0];
+  const markerFile = path.join(root, markerName);
+  const markerBefore = readFileSync(markerFile, "utf8");
+  assert.deepEqual(JSON.parse(markerBefore).eventIds, [...boundEventIds].sort());
+  assert.deepEqual(JSON.parse(markerBefore).expectedDocumentHashes, expectedDocumentHashes);
+
+  assert.throws(
+    () => ackEvents({
+      cwd,
+      token: owner.token,
+      eventIds: [different.eventId],
+      expectedDocumentHashes,
+    }),
+    /lifecycle operation is in progress/,
+  );
+  assert.deepEqual(lockStatus({ cwd }).intentMarkers, [markerName]);
+  assert.equal(readFileSync(markerFile, "utf8"), markerBefore);
+  assert.equal(lockStatus({ cwd }).owner.token, owner.token);
+  assert.throws(() => releaseLock({ cwd, token: owner.token }), /lifecycle operation is in progress/);
+});
+
+test("wrong expected hashes cannot consume a dead pre-journal ACK marker", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-REQUEST-HASH" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const expectedDocumentHashes = documentHashes(cwd);
+  const crashed = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "lifecycle",
+  });
+  assert.equal(crashed.status, 86, crashed.stderr);
+  const root = stateRoot(cwd);
+  const markerName = lockStatus({ cwd }).intentMarkers[0];
+  const markerFile = path.join(root, markerName);
+  const markerBefore = readFileSync(markerFile, "utf8");
+  const wrongHashes = { ...expectedDocumentHashes, "AGENTS.md": "0".repeat(64) };
+
+  assert.throws(
+    () => ackEvents({
+      cwd,
+      token: owner.token,
+      eventIds: [event.eventId],
+      expectedDocumentHashes: wrongHashes,
+    }),
+    /lifecycle operation is in progress/,
+  );
+  assert.deepEqual(lockStatus({ cwd }).intentMarkers, [markerName]);
+  assert.equal(readFileSync(markerFile, "utf8"), markerBefore);
+  assert.equal(lockStatus({ cwd }).owner.token, owner.token);
+});
+
+test("a failed exact retry keeps the dead ACK marker until a later success", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-RETRY-ANCHOR" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const expectedDocumentHashes = documentHashes(cwd);
+  const crashed = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "lifecycle",
+  });
+  assert.equal(crashed.status, 86, crashed.stderr);
+  const deadMarker = lockStatus({ cwd }).intentMarkers[0];
+
+  assert.throws(
+    () => ackEvents({
+      cwd,
+      token: owner.token,
+      eventIds: [event.eventId],
+      expectedDocumentHashes,
+      _testAfterLifecycleAcquired() {
+        const markers = lockStatus({ cwd }).intentMarkers;
+        assert.equal(markers.length, 2);
+        assert.ok(markers.includes(deadMarker));
+        throw new Error("stop exact retry after exclusivity");
+      },
+    }),
+    /stop exact retry after exclusivity/,
+  );
+  assert.deepEqual(lockStatus({ cwd }).intentMarkers, [deadMarker]);
+
+  ackEvents({ cwd, token: owner.token, eventIds: [event.eventId], expectedDocumentHashes });
+  assert.equal(lockStatus({ cwd }).held, false);
+  assert.equal(lockStatus({ cwd }).intentMarkers, undefined);
 });
 
 test("concurrent exact retries never both take over one dead ACK marker", async () => {
@@ -1175,6 +1304,7 @@ test("concurrent exact retries never both take over one dead ACK marker", async 
   const successes = retries.filter((result) => result.status === 0);
   assert.ok(successes.length <= 1, JSON.stringify(retries));
   if (successes.length === 0) {
+    assert.ok(lockStatus({ cwd }).intentMarkers.length >= 1);
     ackEvents({ cwd, token: owner.token, eventIds: [event.eventId], expectedDocumentHashes });
   }
   assert.equal(lockStatus({ cwd }).held, false);
@@ -1190,6 +1320,8 @@ test("ACK takeover rejects a live matching marker", () => {
   writeAckLifecycleIntent(cwd, "aggregate.intent-ack-live", {
     pid: process.pid,
     lockToken: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
   });
 
   assert.throws(
@@ -1208,6 +1340,8 @@ test("ACK takeover rejects a dead marker for a different request token", () => {
   writeAckLifecycleIntent(cwd, "aggregate.intent-ack-dead", {
     pid: 999999999,
     lockToken: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
   });
 
   assert.throws(
@@ -1237,6 +1371,8 @@ test("ACK takeover rejects malformed and non-ACK lifecycle markers", () => {
       lockToken: owner.token,
       operation: variant.operation,
       includeLockToken: variant.includeLockToken,
+      eventIds: [event.eventId],
+      expectedDocumentHashes: documentHashes(cwd),
     });
 
     assert.throws(
@@ -1256,6 +1392,8 @@ test("lock status reports an out-of-range lifecycle PID as invalid and non-takeo
   writeAckLifecycleIntent(cwd, "aggregate.intent-ack-invalid-pid", {
     pid: Number.MAX_SAFE_INTEGER,
     lockToken: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
   });
 
   assert.deepEqual(lockStatus({ cwd }).lifecycleIntents, [{
@@ -2306,11 +2444,14 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(skill, /ACK intent.*release-lock/);
   assert.match(skill, /ACK lifecycle marker.*owner.*deleted/i);
   assert.match(skill, /existing ACK journal.*later pending.*next aggregation/i);
-  assert.match(skill, /dead matching ACK marker.*same owner token.*retry ACK/i);
+  assert.match(skill, /dead matching ACK marker.*retry.*exact request/i);
+  assert.match(skill, /ACK marker.*sorted.*eventIds.*expected.*hash/i);
+  assert.match(skill, /wrong.*eventIds.*hashes.*marker.*intact/i);
+  assert.match(skill, /only.*successful ACK.*removes.*dead.*marker/i);
   assert.match(skill, /without an ACK journal.*retry.*original token.*eventIds.*expected hashes/i);
   assert.match(skill, /original ACK parameters.*lost.*manual stop/i);
   assert.match(skill, /owner PID.*never.*lease.*dead/i);
-  assert.match(skill, /nonmatching lifecycle marker.*hard stop/i);
+  assert.match(skill, /different-token.*different-operation.*hard stop/i);
   assert.match(skill, /adopt.*lifecycle marker.*reject.*ACK intent/i);
   const contracts = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/references/document-contracts.md"), "utf8");
   assert.match(contracts, /- \[project-task\]/);
@@ -2333,6 +2474,8 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(contracts, /ACK lifecycle marker.*release.*recover.*acquire/i);
   assert.match(contracts, /journal freezes.*eventIds.*expectedDocumentHashes/i);
   assert.match(contracts, /short-lived lifecycle PID.*dead matching ACK marker/i);
+  assert.match(contracts, /dead ACK marker.*left in place.*live retry marker/i);
+  assert.match(contracts, /validation failure.*dead marker.*unchanged/i);
   assert.match(contracts, /before journal publication.*original token.*eventIds.*expected hashes/i);
   assert.match(contracts, /adopt.*lockToken.*owner token.*state write/i);
   assert.match(contracts, /git diff --check.*cannot/);
