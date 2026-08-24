@@ -36,7 +36,7 @@ For code work, `completed` needs successful behavior-relevant test, typecheck, b
 3. If `target.safe` is false, edit nothing; release the lock and report the reason.
 4. Duplicate active claims become P0 conflicts; do not choose a winner.
 5. Patch only the three management documents in `target.managementWorktree`.
-6. Run it with `ack --token <token> --event-ids <comma-separated-ids>`.
+6. Create a temporary JSON file inside the current worktree containing the exact SHA-256 hash (or `null` when absent) for every management document after the patch: `AGENTS.md`, `docs/project/STATUS.md`, and `docs/project/BACKLOG.md`. Run `ack --token <token> --event-ids <comma-separated-ids> --expected-hashes-file <absolute-json-path>`, then delete only that temporary hashes file. The ACK must use the rendered hashes; otherwise it is rejected and events remain pending.
 7. Report facts, downgraded statuses, priority changes, and unresolved conflicts.
 
 After a failed patch, run `release-lock`. Lock contention leaves events pending and is reported as `待汇总`, not as a development failure.

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   acquireLock,
@@ -72,6 +73,8 @@ function writeLifecycleIntent(cwd, name, pid) {
     `${JSON.stringify({ operation: "recover", token: "00000000-0000-4000-8000-000000000000", pid, createdAt: "2026-08-24T00:00:00.000Z" })}\n`,
   );
 }
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 test("init records the explicit main worktree", () => {
   const cwd = createRepo();
@@ -518,4 +521,53 @@ test("a normal owner prevents stale intent cleanup", () => {
   assert.throws(() => recoverLock({ cwd, confirm: true }), /release requires token/);
   assert.ok(lockStatus({ cwd }).intentMarkers.includes(intent));
   assert.equal(releaseLock({ cwd, token: owner.token }), true);
+});
+
+test("three worktrees render the management documents before ACKing exact hashes", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const worktrees = [
+    ["agent", "agent"],
+    ["trace", "trace"],
+    ["web", "web-tap"],
+  ].map(([name, module]) => {
+    const worker = `${cwd}-${name}`;
+    git(cwd, "worktree", "add", "-b", `${name}-task`, worker);
+    return { worker, module };
+  });
+  for (const { worker, module } of worktrees) {
+    emitEvent({
+      cwd: worker,
+      input: started({ taskId: `DKA-SMOKE-${module}`, module, summary: `Start ${module} smoke task` }),
+    });
+  }
+
+  const token = acquireLock({ cwd }).token;
+  const snapshot = readSnapshot({ cwd, token });
+  assert.equal(snapshot.events.length, 3);
+  assert.equal(new Set(snapshot.events.map((event) => event.worktreePath)).size, 3);
+  assert.deepEqual(snapshot.conflicts, []);
+
+  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
+  writeFileSync(path.join(cwd, "AGENTS.md"), "# DKAgent Agent Instructions\n");
+  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "# DKAgent 项目状态\n");
+  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# DKAgent 待办\n");
+  ackEvents({
+    cwd,
+    token,
+    eventIds: snapshot.events.map((event) => event.eventId),
+    expectedDocumentHashes: documentHashes(cwd),
+  });
+
+  const acknowledged = readSnapshot({ cwd });
+  assert.equal(acknowledged.events.length, 0);
+  assert.deepEqual(acknowledged.state.documentHashes, documentHashes(cwd));
+});
+
+test("activated project-management documents and Skill describe the hash-checked ACK workflow", () => {
+  for (const relative of ["AGENTS.md", "docs/project/STATUS.md", "docs/project/BACKLOG.md"]) {
+    assert.equal(existsSync(path.join(repositoryRoot, relative)), true, `${relative} must be activated`);
+  }
+  const skill = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/SKILL.md"), "utf8");
+  assert.match(skill, /--expected-hashes-file/);
 });
