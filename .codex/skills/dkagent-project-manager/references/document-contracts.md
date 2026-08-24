@@ -94,6 +94,8 @@ Code work needs behavior-relevant verification. `test` only accepts a test comma
 
 If a Worker submits `finished/completed` without successful behavior evidence or user confirmation, including failed execution evidence or commit-only provenance, `emit` preserves `finished` and deterministically downgrades it to `needs_verification`.
 
+A stored event must satisfy the same canonical status rule and is invalid when it claims `completed` without matching successful test/typecheck/build evidence or explicit user confirmation. Empty, failed, commit-only, or command-kind-mismatched evidence cannot support completion; an already canonical `needs_verification` event is never upgraded automatically. Strict processed audit reports this mismatch and preserves terminal ACK recovery facts.
+
 ## Lock recovery
 
 Use `lock-status` first. A valid owner is a durable Agent lease even when its CLI PID has exited, and `recover-lock` never removes it. If the local token was lost, retrieve `owner.token` from status and release it only when the remaining owner facts match the current aggregation; otherwise stop for human confirmation. Confirmed recovery is limited to invalid/legacy ownerless locks and stale creating files when no lifecycle marker exists. `recover-lock` never removes lifecycle markers; only an exact ACK retry may proceed beside its eligible dead matching marker, which remains authoritative until successful cleanup. All other markers and any owned recovery tombstone hard-block recovery. After valid ownerless recovery, check status and acquire a new token.

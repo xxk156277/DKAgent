@@ -428,8 +428,17 @@ function validateStoredText(value, field, maximumLength, { singleLine = true, co
 
 function hasSuccessfulBehaviorEvidence(evidence) {
   return evidence.some(
-    (item) => item.kind === "user_confirmation" || (EXECUTION_EVIDENCE.has(item.kind) && item.exitCode === 0),
+    (item) => item.kind === "user_confirmation"
+      || (EXECUTION_EVIDENCE.has(item.kind)
+        && item.exitCode === 0
+        && typeof item.command === "string"
+        && evidenceCommandKind(item.command.trim().split(/\s+/)) === item.kind),
   );
+}
+
+function canonicalStatus(input) {
+  if (input.status !== "completed") return input.status;
+  return hasSuccessfulBehaviorEvidence(input.evidence) ? "completed" : "needs_verification";
 }
 
 export function stateRoot(cwd) {
@@ -543,13 +552,11 @@ export function emitEvent({ cwd, input }) {
   const root = stateRoot(cwd);
   if (!existsSync(path.join(root, "config.json"))) throw new Error("project manager store is not initialized");
 
-  const normalizedInput = input.status === "completed" && !hasSuccessfulBehaviorEvidence(input.evidence)
-    ? { ...input, status: "needs_verification" }
-    : input;
   const event = {
     schemaVersion: 1,
     eventId: randomUUID(),
-    ...normalizedInput,
+    ...input,
+    status: canonicalStatus(input),
     worktreePath: canonicalExistingPath(cwd),
     branch: git(cwd, ["branch", "--show-current"]) || "detached",
     headSha: git(cwd, ["rev-parse", "HEAD"]),
@@ -585,7 +592,7 @@ function isStoredEvent(event, eventId) {
   if (!sourceFactsAreValid) return false;
   try {
     validateInput(Object.fromEntries([...EVENT_FIELDS].map((field) => [field, event[field]])));
-    return true;
+    return event.status === canonicalStatus(event);
   } catch {
     return false;
   }

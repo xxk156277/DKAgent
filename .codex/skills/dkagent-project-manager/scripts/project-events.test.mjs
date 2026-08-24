@@ -157,10 +157,10 @@ function runCrashingAckCleanup({ cwd, signal = "SIGKILL" }) {
   });
 }
 
-function createTerminalCleanupFixture(taskId) {
+function createTerminalCleanupFixture(taskId, input = started({ taskId })) {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
-  const event = emitEvent({ cwd, input: started({ taskId }) });
+  const event = emitEvent({ cwd, input });
   const owner = acquireLock({ cwd });
   renderTaskDocuments(cwd, owner.token, [event]);
   const crashed = runCrashingAck({
@@ -1389,6 +1389,76 @@ test("terminal ACK cleanup strictly audits the complete processed directory and 
     );
     assert.equal(existsSync(path.join(fixture.root, "ack-intent.json")), true, variant.name);
     assert.deepEqual(lockStatus({ cwd: fixture.cwd }).intentMarkers, markerNames, variant.name);
+  }
+});
+
+test("terminal ACK cleanup rejects stored completed events without canonical completion evidence", () => {
+  const variants = [
+    { name: "empty evidence", evidence: [] },
+    { name: "failed evidence", evidence: [{ kind: "test", summary: "failed", command: "npm test", exitCode: 1 }] },
+    { name: "git diff disguised as test", evidence: [{ kind: "test", summary: "diff clean", command: "git diff --check", exitCode: 0 }] },
+    { name: "commit only", evidence: [{ kind: "commit", summary: "commit abc123" }] },
+  ];
+
+  for (const [index, variant] of variants.entries()) {
+    const fixture = createTerminalCleanupFixture(`DKA-ACK-STATUS-${index + 1}`);
+    const processedFile = path.join(fixture.root, "events", "processed", `${fixture.event.eventId}.json`);
+    const forged = {
+      ...JSON.parse(readFileSync(processedFile, "utf8")),
+      action: "finished",
+      status: "completed",
+      evidence: variant.evidence,
+    };
+    writeFileSync(processedFile, `${JSON.stringify(forged, null, 2)}\n`);
+    const stateFile = path.join(fixture.root, "state.json");
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    state.activeClaims = {};
+    writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+    const markers = lockStatus({ cwd: fixture.cwd }).intentMarkers;
+
+    const snapshot = readSnapshot({ cwd: fixture.cwd });
+    assert.equal(snapshot.target.safe, false, variant.name);
+    assert.match(snapshot.target.reasons.join("; "), /processed event is invalid or mismatched/, variant.name);
+    assert.throws(
+      () => recoverAckCleanup({ cwd: fixture.cwd, confirm: true }),
+      /processed event is invalid or mismatched/,
+      variant.name,
+    );
+    assert.equal(existsSync(path.join(fixture.root, "ack-intent.json")), true, variant.name);
+    assert.deepEqual(lockStatus({ cwd: fixture.cwd }).intentMarkers, markers, variant.name);
+  }
+});
+
+test("terminal ACK cleanup accepts canonical completed and downgraded needs-verification events", () => {
+  const successfulEvidence = [
+    { kind: "test", summary: "passed", command: "npm test", exitCode: 0 },
+    { kind: "typecheck", summary: "passed", command: "npm run typecheck", exitCode: 0 },
+    { kind: "build", summary: "passed", command: "npm run build", exitCode: 0 },
+    { kind: "user_confirmation", summary: "accepted" },
+  ];
+  const cases = [
+    ...successfulEvidence.map((evidence, index) => {
+      const taskId = `DKA-ACK-STATUS-SUCCESS-${index + 1}`;
+      return {
+        taskId,
+        input: started({ taskId, action: "finished", status: "completed", evidence: [evidence] }),
+        expectedStatus: "completed",
+      };
+    }),
+    {
+      taskId: "DKA-ACK-STATUS-DOWNGRADED",
+      input: started({ taskId: "DKA-ACK-STATUS-DOWNGRADED", action: "finished", status: "completed" }),
+      expectedStatus: "needs_verification",
+    },
+  ];
+
+  for (const item of cases) {
+    const fixture = createTerminalCleanupFixture(item.taskId, item.input);
+    assert.equal(fixture.event.status, item.expectedStatus);
+    assert.equal(readSnapshot({ cwd: fixture.cwd }).target.recoveryMode, "ack_cleanup");
+    assert.equal(recoverAckCleanup({ cwd: fixture.cwd, confirm: true }), true);
+    const owner = acquireLock({ cwd: fixture.cwd });
+    releaseLock({ cwd: fixture.cwd, token: owner.token });
   }
 });
 
@@ -2829,6 +2899,7 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(contracts, /adopt.*lockToken.*owner token.*state write/i);
   assert.match(contracts, /git diff --check.*cannot/);
   assert.match(contracts, /deterministically downgrades.*`needs_verification`/);
+  assert.match(contracts, /stored event.*canonical status.*invalid/i);
   const report = readFileSync(path.join(repositoryRoot, ".superpowers/sdd/final-fix-report.md"), "utf8");
   assert.doesNotMatch(report, /owner PID.*ESRCH/);
   assert.match(report, /canonical event projection/);
@@ -2838,4 +2909,5 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(report, /two-phase ACK journal/);
   assert.match(report, /committed-cleanup.*recover-ack-cleanup/i);
   assert.match(report, /full processed audit/i);
+  assert.match(report, /canonical status/i);
 });
