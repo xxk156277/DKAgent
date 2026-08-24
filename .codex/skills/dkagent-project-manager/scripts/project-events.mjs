@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -215,18 +215,123 @@ export function emitEvent({ cwd, input }) {
   return event;
 }
 
-export function readSnapshot({ cwd }) {
+function requireToken(root, token) {
+  const ownerFile = path.join(root, "aggregate.lock", "owner.json");
+  if (!existsSync(ownerFile)) throw new Error("aggregate lock is not held");
+  const owner = readJson(ownerFile);
+  if (owner.token !== token) throw new Error("aggregate lock token mismatch");
+  return owner;
+}
+
+function targetStatus(config, state) {
+  const reasons = [];
+  if (!existsSync(config.managementWorktree)) reasons.push("management worktree is missing");
+  else {
+    const branch = git(config.managementWorktree, ["branch", "--show-current"]);
+    if (branch !== config.managementBranch) reasons.push(`management branch mismatch: ${branch || "detached"}`);
+    const actual = documentHashes(config.managementWorktree);
+    for (const relative of DOCUMENTS) {
+      if (actual[relative] !== state.documentHashes[relative]) reasons.push(`${relative} hash changed`);
+    }
+  }
+  return { safe: reasons.length === 0, reasons, managementWorktree: config.managementWorktree };
+}
+
+function activeClaimConflicts(state, events) {
+  const byTask = new Map(
+    Object.entries(state.activeClaims).map(([taskId, worktrees]) => [taskId, new Set(worktrees)]),
+  );
+  for (const event of [...events].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId))) {
+    const worktrees = byTask.get(event.taskId) ?? new Set();
+    if (event.action === "started" && event.status === "in_progress") worktrees.add(event.worktreePath);
+    if (event.action === "finished" || event.action === "blocked") worktrees.delete(event.worktreePath);
+    if (worktrees.size) byTask.set(event.taskId, worktrees);
+    else byTask.delete(event.taskId);
+  }
+  return [...byTask]
+    .filter(([, worktrees]) => worktrees.size > 1)
+    .map(([taskId, worktrees]) => ({ taskId, worktrees: [...worktrees].sort() }));
+}
+
+export function acquireLock({ cwd }) {
   const root = stateRoot(cwd);
+  const lock = path.join(root, "aggregate.lock");
+  try {
+    mkdirSync(lock);
+  } catch (error) {
+    if (error.code === "EEXIST") throw new Error("aggregate lock is held");
+    throw error;
+  }
+  const owner = {
+    token: randomUUID(),
+    pid: process.pid,
+    acquiredAt: new Date().toISOString(),
+    baselineHashes: documentHashes(readJson(path.join(root, "config.json")).managementWorktree),
+  };
+  writeJsonAtomic(path.join(lock, "owner.json"), owner);
+  return owner;
+}
+
+export function releaseLock({ cwd, token }) {
+  const root = stateRoot(cwd);
+  requireToken(root, token);
+  rmSync(path.join(root, "aggregate.lock"), { recursive: true });
+  return true;
+}
+
+export function readSnapshot({ cwd, token } = {}) {
+  const root = stateRoot(cwd);
+  if (token) requireToken(root, token);
   const pending = path.join(root, "events", "pending");
   const events = readdirSync(pending)
     .filter((name) => name.endsWith(".json"))
     .sort()
     .map((name) => readJson(path.join(pending, name)));
-  return {
-    config: readJson(path.join(root, "config.json")),
-    state: readJson(path.join(root, "state.json")),
-    events,
-  };
+  const config = readJson(path.join(root, "config.json"));
+  const state = readJson(path.join(root, "state.json"));
+  return { config, state, events, conflicts: activeClaimConflicts(state, events), target: targetStatus(config, state) };
+}
+
+export function ackEvents({ cwd, token, eventIds }) {
+  const root = stateRoot(cwd);
+  const owner = requireToken(root, token);
+  const config = readJson(path.join(root, "config.json"));
+  const stateFile = path.join(root, "state.json");
+  const state = readJson(stateFile);
+  if (JSON.stringify(owner.baselineHashes) !== JSON.stringify(state.documentHashes)) {
+    throw new Error("document baseline changed after lock acquisition");
+  }
+  for (const eventId of eventIds) {
+    if (state.processedEventIds.includes(eventId)) continue;
+    const source = path.join(root, "events", "pending", `${eventId}.json`);
+    const destination = path.join(root, "events", "processed", `${eventId}.json`);
+    if (!existsSync(source) && !existsSync(destination)) throw new Error(`event not found: ${eventId}`);
+    const event = readJson(existsSync(source) ? source : destination);
+    const claims = new Set(state.activeClaims[event.taskId] ?? []);
+    if (event.action === "started" && event.status === "in_progress") claims.add(event.worktreePath);
+    if (event.action === "finished" || event.action === "blocked") claims.delete(event.worktreePath);
+    if (claims.size) state.activeClaims[event.taskId] = [...claims].sort();
+    else delete state.activeClaims[event.taskId];
+    if (existsSync(source)) renameSync(source, destination);
+    state.processedEventIds.push(eventId);
+  }
+  state.documentHashes = documentHashes(config.managementWorktree);
+  state.lastSynchronizedAt = new Date().toISOString();
+  writeJsonAtomic(stateFile, state);
+  releaseLock({ cwd, token });
+  return state;
+}
+
+export function adoptDocuments({ cwd, token }) {
+  const root = stateRoot(cwd);
+  requireToken(root, token);
+  const config = readJson(path.join(root, "config.json"));
+  const stateFile = path.join(root, "state.json");
+  const state = readJson(stateFile);
+  state.documentHashes = documentHashes(config.managementWorktree);
+  writeJsonAtomic(stateFile, state);
+  releaseLock({ cwd, token });
+  return state;
 }
 
 function valueAfter(args, flag) {
@@ -246,7 +351,11 @@ async function main(args) {
     });
   }
   if (command === "emit") return emitEvent({ cwd, input: readJson(path.resolve(valueAfter(args, "--file"))) });
-  if (command === "snapshot") return readSnapshot({ cwd });
+  if (command === "acquire-lock") return acquireLock({ cwd });
+  if (command === "release-lock") return { released: releaseLock({ cwd, token: valueAfter(args, "--token") }) };
+  if (command === "adopt-documents") return adoptDocuments({ cwd, token: valueAfter(args, "--token") });
+  if (command === "ack") return ackEvents({ cwd, token: valueAfter(args, "--token"), eventIds: valueAfter(args, "--event-ids").split(",").filter(Boolean) });
+  if (command === "snapshot") return readSnapshot({ cwd, token: args.includes("--token") ? valueAfter(args, "--token") : undefined });
   throw new Error(`unknown command: ${command || "<empty>"}`);
 }
 

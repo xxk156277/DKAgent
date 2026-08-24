@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { emitEvent, initStore, readSnapshot } from "./project-events.mjs";
+import {
+  acquireLock,
+  ackEvents,
+  adoptDocuments,
+  emitEvent,
+  initStore,
+  readSnapshot,
+  releaseLock,
+  stateRoot,
+} from "./project-events.mjs";
 
 function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -237,4 +246,89 @@ test("emit rejects high-confidence credentials in persisted free text", () => {
     () => emitEvent({ cwd, input: started({ discoveredTodos: [{ summary: "Follow up", module: "agent", reason: "Authorization: Bearer example-value" }] }) }),
     /unsafe text content/,
   );
+});
+
+test("only one aggregator holds the lock", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const first = acquireLock({ cwd });
+  assert.throws(() => acquireLock({ cwd }), /aggregate lock is held/);
+  assert.equal(releaseLock({ cwd, token: first.token }), true);
+  assert.ok(acquireLock({ cwd }).token);
+});
+
+test("snapshot reports one task claimed by two worktrees", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const second = `${cwd}-second`;
+  git(cwd, "worktree", "add", "-b", "second", second);
+  emitEvent({ cwd, input: started() });
+  emitEvent({ cwd: second, input: started() });
+  const token = acquireLock({ cwd }).token;
+  const snapshot = readSnapshot({ cwd, token });
+  assert.equal(snapshot.conflicts[0].taskId, "DKA-20260824-a1b2");
+  assert.equal(snapshot.conflicts[0].worktrees.length, 2);
+});
+
+test("processed active claim still conflicts with a later worktree", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const first = emitEvent({ cwd, input: started() });
+  const firstToken = acquireLock({ cwd }).token;
+  ackEvents({ cwd, token: firstToken, eventIds: [first.eventId] });
+  const second = `${cwd}-later`;
+  git(cwd, "worktree", "add", "-b", "later", second);
+  emitEvent({ cwd: second, input: started() });
+  const token = acquireLock({ cwd }).token;
+  assert.equal(readSnapshot({ cwd, token }).conflicts[0].worktrees.length, 2);
+});
+
+test("external document edit requires explicit adoption", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  writeFileSync(path.join(cwd, "AGENTS.md"), "# Human edit\n");
+  const token = acquireLock({ cwd }).token;
+  assert.equal(readSnapshot({ cwd, token }).target.safe, false);
+  adoptDocuments({ cwd, token });
+  const next = acquireLock({ cwd }).token;
+  assert.equal(readSnapshot({ cwd, token: next }).target.safe, true);
+});
+
+test("management branch drift blocks aggregation", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  git(cwd, "switch", "-c", "feature");
+  const token = acquireLock({ cwd }).token;
+  const target = readSnapshot({ cwd, token }).target;
+  assert.equal(target.safe, false);
+  assert.match(target.reasons.join(" "), /management branch mismatch/);
+});
+
+test("ack accepts the locked writer changes and is idempotent", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started() });
+  const token = acquireLock({ cwd }).token;
+  assert.equal(readSnapshot({ cwd, token }).target.safe, true);
+  writeFileSync(path.join(cwd, "AGENTS.md"), "# Aggregated rules\n");
+  ackEvents({ cwd, token, eventIds: [event.eventId] });
+  const repeatedToken = acquireLock({ cwd }).token;
+  ackEvents({ cwd, token: repeatedToken, eventIds: [event.eventId] });
+  const snapshot = readSnapshot({ cwd });
+  assert.equal(snapshot.events.length, 0);
+  assert.ok(snapshot.state.processedEventIds.includes(event.eventId));
+});
+
+test("ack repairs an event moved before state persistence", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started() });
+  const root = stateRoot(cwd);
+  renameSync(
+    path.join(root, "events", "pending", `${event.eventId}.json`),
+    path.join(root, "events", "processed", `${event.eventId}.json`),
+  );
+  const token = acquireLock({ cwd }).token;
+  ackEvents({ cwd, token, eventIds: [event.eventId] });
+  assert.ok(readSnapshot({ cwd }).state.processedEventIds.includes(event.eventId));
 });
