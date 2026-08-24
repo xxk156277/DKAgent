@@ -559,19 +559,13 @@ test("projection helper emits canonical human and complete event records", () =>
     status: event.status,
     module: event.module,
     summary: event.summary,
+    worktreePath: event.worktreePath,
+    branch: event.branch,
+    headSha: event.headSha,
+    createdAt: event.createdAt,
   })}`);
   const record = JSON.parse(block.projectionLine.slice("- [project-event] ".length));
-  assert.deepEqual(record.payload, {
-    eventId: event.eventId,
-    taskId: event.taskId,
-    action: event.action,
-    status: event.status,
-    module: event.module,
-    summary: event.summary,
-    dependencies: event.dependencies,
-    evidence: event.evidence,
-    discoveredTodos: event.discoveredTodos,
-  });
+  assert.deepEqual(record.payload, event);
   assert.equal(record.digest, createHash("sha256").update(JSON.stringify(record.payload)).digest("hex"));
   assert.equal(block.block, `${block.taskLine}\n${block.projectionLine}`);
   releaseLock({ cwd, token });
@@ -590,6 +584,80 @@ test("CLI project emits the same canonical projection block", () => {
   );
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), expected);
+  releaseLock({ cwd, token });
+});
+
+test("ack rejects projections with missing source facts or a forged HEAD", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-SOURCE-BOUND" }) });
+  const token = acquireLock({ cwd }).token;
+  const [valid] = renderEventProjections({ cwd, token, eventIds: [event.eventId] }).blocks;
+  const human = JSON.parse(valid.taskLine.slice(PROJECT_TASK_PREFIX_FOR_TEST.length));
+  const record = JSON.parse(valid.projectionLine.slice("- [project-event] ".length));
+  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
+  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Backlog\n");
+
+  for (const field of ["schemaVersion", "worktreePath", "branch", "headSha", "createdAt"]) {
+    const payload = structuredClone(record.payload);
+    delete payload[field];
+    const projectionLine = `- [project-event] ${JSON.stringify({
+      digest: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
+      payload,
+    })}`;
+    writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${valid.taskLine}\n${projectionLine}\n`);
+    assert.throws(
+      () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+      /event is not canonically projected/,
+    );
+  }
+
+  for (const field of ["worktreePath", "branch", "headSha", "createdAt"]) {
+    const incompleteHuman = structuredClone(human);
+    delete incompleteHuman[field];
+    writeFileSync(
+      path.join(cwd, "docs", "project", "STATUS.md"),
+      `# Status\n\n${PROJECT_TASK_PREFIX_FOR_TEST}${JSON.stringify(incompleteHuman)}\n${valid.projectionLine}\n`,
+    );
+    assert.throws(
+      () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+      /event is not canonically projected/,
+    );
+  }
+
+  const forgedHuman = { ...human, headSha: "0".repeat(40) };
+  const forgedPayload = { ...record.payload, headSha: forgedHuman.headSha };
+  const forgedProjectionLine = `- [project-event] ${JSON.stringify({
+    digest: createHash("sha256").update(JSON.stringify(forgedPayload)).digest("hex"),
+    payload: forgedPayload,
+  })}`;
+  writeFileSync(
+    path.join(cwd, "docs", "project", "STATUS.md"),
+    `# Status\n\n${PROJECT_TASK_PREFIX_FOR_TEST}${JSON.stringify(forgedHuman)}\n${forgedProjectionLine}\n`,
+  );
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /event is not canonically projected/,
+  );
+  assert.equal(readSnapshot({ cwd, token }).events.length, 1);
+  releaseLock({ cwd, token });
+});
+
+test("projection helper rejects stored events with incomplete source facts", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-STORED-SOURCE" }) });
+  const token = acquireLock({ cwd }).token;
+  const eventFile = path.join(stateRoot(cwd), "events", "pending", `${event.eventId}.json`);
+  for (const field of ["schemaVersion", "worktreePath", "branch", "headSha", "createdAt"]) {
+    const incomplete = structuredClone(event);
+    delete incomplete[field];
+    writeFileSync(eventFile, `${JSON.stringify(incomplete)}\n`);
+    assert.throws(
+      () => renderEventProjections({ cwd, token, eventIds: [event.eventId] }),
+      /invalid stored event/,
+    );
+  }
   releaseLock({ cwd, token });
 });
 
@@ -686,6 +754,55 @@ test("ack rejects a finished event when documents retain only its started projec
   );
   assert.equal(readSnapshot({ cwd, token }).events.length, 2);
   releaseLock({ cwd, token });
+});
+
+test("finished ACK replaces the started current projection while processed events retain both facts", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const startedEvent = emitEvent({ cwd, input: started({ taskId: "DKA-STATE-EVOLUTION" }) });
+  const startedToken = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, startedToken, [startedEvent]);
+  ackEvents({
+    cwd,
+    token: startedToken,
+    eventIds: [startedEvent.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
+  });
+
+  const finishedEvent = emitEvent({
+    cwd,
+    input: started({
+      taskId: startedEvent.taskId,
+      action: "finished",
+      status: "needs_verification",
+      summary: "Implementation finished and awaits verification",
+    }),
+  });
+  const finishedToken = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, finishedToken, [finishedEvent]);
+  ackEvents({
+    cwd,
+    token: finishedToken,
+    eventIds: [finishedEvent.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
+  });
+
+  const currentStatus = readFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "utf8");
+  assert.doesNotMatch(currentStatus, new RegExp(startedEvent.eventId));
+  assert.doesNotMatch(currentStatus, /"status":"in_progress"/);
+  assert.match(currentStatus, new RegExp(finishedEvent.eventId));
+  assert.match(currentStatus, /"status":"needs_verification"/);
+
+  const root = stateRoot(cwd);
+  assert.deepEqual(
+    JSON.parse(readFileSync(path.join(root, "events", "processed", `${startedEvent.eventId}.json`), "utf8")),
+    startedEvent,
+  );
+  assert.deepEqual(
+    JSON.parse(readFileSync(path.join(root, "events", "processed", `${finishedEvent.eventId}.json`), "utf8")),
+    finishedEvent,
+  );
+  assert.deepEqual(readSnapshot({ cwd }).state.processedEventIds.sort(), [startedEvent.eventId, finishedEvent.eventId].sort());
 });
 
 test("ack rejects mismatched human facts and incomplete canonical payloads", () => {
@@ -994,17 +1111,7 @@ test("three worktrees render the management documents before ACKing exact hashes
     .filter((line) => line.startsWith("- [project-event] "))
     .map((line) => JSON.parse(line.slice("- [project-event] ".length)).payload);
   for (const event of snapshot.events) {
-    assert.deepEqual(retainedRecords.find((payload) => payload.eventId === event.eventId), {
-      eventId: event.eventId,
-      taskId: event.taskId,
-      action: event.action,
-      status: event.status,
-      module: event.module,
-      summary: event.summary,
-      dependencies: event.dependencies,
-      evidence: event.evidence,
-      discoveredTodos: event.discoveredTodos,
-    });
+    assert.deepEqual(retainedRecords.find((payload) => payload.eventId === event.eventId), event);
   }
 });
 
@@ -1089,16 +1196,22 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(skill, /`conflicts` 非空/);
   assert.match(skill, /owner\.token/);
   assert.match(skill, /project --token/);
+  assert.match(skill, /replace that task's previous block with the latest block/);
+  assert.match(skill, /schema version.*canonical worktree.*branch.*HEAD.*creation time/);
   const contracts = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/references/document-contracts.md"), "utf8");
   assert.match(contracts, /- \[project-task\]/);
   assert.match(contracts, /- \[project-event\]/);
   assert.match(contracts, /eventId.*dependencies.*evidence.*discoveredTodos/);
+  assert.match(contracts, /schemaVersion.*worktreePath.*branch.*headSha.*createdAt/);
   assert.match(contracts, /worktree_claims_multiple_tasks/);
   assert.match(contracts, /ACK independently recomputes both conflict kinds/);
   assert.match(contracts, /\^DKA-\[A-Z0-9\]/);
+  assert.match(contracts, /current projection.*latest event/);
+  assert.match(contracts, /processed event JSON.*audit history/);
   assert.match(contracts, /git diff --check.*cannot/);
   assert.match(contracts, /deterministically downgrades.*`needs_verification`/);
   const report = readFileSync(path.join(repositoryRoot, ".superpowers/sdd/final-fix-report.md"), "utf8");
   assert.doesNotMatch(report, /owner PID.*ESRCH/);
   assert.match(report, /canonical event projection/);
+  assert.match(report, /latest current projection/);
 });

@@ -29,6 +29,7 @@ const TEST_PATH = /\.test\.[cm]?[jt]s$/;
 const NODE_CHECK_PATH = /\.[cm]?js$/;
 const TASK_ID = /^DKA-[A-Z0-9][A-Z0-9-]{2,63}$/;
 const EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const GIT_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const DOCUMENT_HASH = /^[0-9a-f]{64}$/;
 const LOCK_FILE = "aggregate.lock";
 const LOCK_CREATING_PREFIX = "aggregate.lock.creating-";
@@ -386,11 +387,16 @@ function requireToken(root, token) {
 
 function isStoredEvent(event, eventId) {
   return event
+    && event.schemaVersion === 1
     && event.eventId === eventId
     && typeof event.taskId === "string"
     && Boolean(event.taskId.trim())
     && typeof event.worktreePath === "string"
     && Boolean(event.worktreePath)
+    && typeof event.branch === "string"
+    && Boolean(event.branch)
+    && typeof event.headSha === "string"
+    && GIT_SHA.test(event.headSha)
     && typeof event.createdAt === "string"
     && !Number.isNaN(Date.parse(event.createdAt))
     && ACTIONS.has(event.action)
@@ -474,6 +480,7 @@ function activeClaimConflicts(state, events) {
 
 function canonicalEventPayload(event) {
   return {
+    schemaVersion: event.schemaVersion,
     eventId: event.eventId,
     taskId: event.taskId,
     action: event.action,
@@ -492,6 +499,10 @@ function canonicalEventPayload(event) {
       module: item.module,
       reason: item.reason,
     })),
+    worktreePath: event.worktreePath,
+    branch: event.branch,
+    headSha: event.headSha,
+    createdAt: event.createdAt,
   };
 }
 
@@ -501,6 +512,10 @@ function projectionBlock(event) {
     status: event.status,
     module: event.module,
     summary: event.summary,
+    worktreePath: event.worktreePath,
+    branch: event.branch,
+    headSha: event.headSha,
+    createdAt: event.createdAt,
   })}`;
   const payload = canonicalEventPayload(event);
   const projectionLine = `${PROJECT_EVENT_PREFIX}${JSON.stringify({

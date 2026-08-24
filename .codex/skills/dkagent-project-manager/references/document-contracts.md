@@ -23,17 +23,19 @@ Sections: `当前里程碑`、`活跃 Worktree`、`待验证`、`阻塞与风险
 Every event selected for ACK must have one complete two-line projection block in either STATUS or BACKLOG. Generate it only with `project --token <token> --event-ids <ids>` and copy the returned `block` verbatim:
 
 ```text
-- [project-task] {"taskId":"DKA-EXAMPLE","status":"in_progress","module":"agent","summary":"Implement example"}
-- [project-event] {"digest":"<sha256>","payload":{"eventId":"<uuid>","taskId":"DKA-EXAMPLE","action":"started","status":"in_progress","module":"agent","summary":"Implement example","dependencies":[],"evidence":[],"discoveredTodos":[]}}
+- [project-task] {"taskId":"DKA-EXAMPLE","status":"in_progress","module":"agent","summary":"Implement example","worktreePath":"/canonical/repo","branch":"feature/example","headSha":"<40-hex-head>","createdAt":"<iso-time>"}
+- [project-event] {"digest":"<sha256>","payload":{"schemaVersion":1,"eventId":"<uuid>","taskId":"DKA-EXAMPLE","action":"started","status":"in_progress","module":"agent","summary":"Implement example","dependencies":[],"evidence":[],"discoveredTodos":[],"worktreePath":"/canonical/repo","branch":"feature/example","headSha":"<40-hex-head>","createdAt":"<iso-time>"}}
 ```
 
-The human line must exactly match event `taskId`, `status`, `module`, and `summary`. The canonical payload field order is `eventId`, `taskId`, `action`, `status`, `module`, `summary`, `dependencies`, `evidence`, `discoveredTodos`; evidence canonicalizes `kind`, `summary`, optional `command`, optional `exitCode`, and todos canonicalize `summary`, `module`, `reason`. `digest` is SHA-256 of the compact canonical payload JSON. Both exact lines must occur in the same document and remain after ACK. HTML comments, prose, headings, stale status, recomputed partial payloads, and hand-written equivalents do not count.
+The human line must exactly match event `taskId`, `status`, `module`, `summary`, `worktreePath`, `branch`, `headSha`, and `createdAt`. The canonical payload field order is `schemaVersion`, `eventId`, `taskId`, `action`, `status`, `module`, `summary`, `dependencies`, `evidence`, `discoveredTodos`, `worktreePath`, `branch`, `headSha`, `createdAt`; evidence canonicalizes `kind`, `summary`, optional `command`, optional `exitCode`, and todos canonicalize `summary`, `module`, `reason`. `digest` is SHA-256 of the compact canonical payload JSON and therefore binds the complete stored event. Missing source fields, an old or forged HEAD, HTML comments, prose, headings, stale status, recomputed partial payloads, and hand-written equivalents do not count.
+
+STATUS/BACKLOG hold one current projection per `taskId`: the current projection is always the latest event. When a later event arrives, replace the previous two-line block rather than displaying both `in_progress` and the later status. The exact latest block is sufficient for its ACK; old blocks do not remain in the documents. Every processed event JSON remains unchanged under `events/processed/` as the complete audit history.
 
 ## BACKLOG.md
 
 Columns: `ID | Priority | Module | Status | Dependencies | Ordering reason | Source | Updated`. Status is `ready|in_progress|needs_verification|blocked|completed`. V1 never deletes or archives automatically.
 
-The eight-column BACKLOG row remains the human priority view but does not satisfy ACK by itself. Append the exact helper-generated two-line event block in STATUS or BACKLOG for every ACKed event.
+The eight-column BACKLOG row remains the human priority view but does not satisfy ACK by itself. Store the exact helper-generated current block in STATUS or BACKLOG, replacing the prior block when the same task advances.
 
 ## Conflicts
 
