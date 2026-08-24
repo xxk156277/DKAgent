@@ -39,6 +39,16 @@ ACK requires all recoveryEvents IDs in `eventIds`; they participate in the same 
 
 ACK scans canonical projection blocks in both documents. Each selected task must have exactly one current block across STATUS and BACKLOG, and that block must equal the folded latest event. It rejects only-old projection, old+new coexistence, repeated blocks in one file, and duplicates split across both files.
 
+## Two-phase ACK journal
+
+After every hash, branch, WIP, event-set, and projection check succeeds but before moving an event, ACK exclusively publishes common-root `ack-intent.json`. Its fixed schema contains only `schemaVersion`, `lockOwner` (`token`, `pid`, `acquiredAt`), sorted `eventIds`, `expectedDocumentHashes`, `baselineHashes`, and `createdAt`; commands, logs, secrets, and extra fields are forbidden. An existing journal permits only the same token, owner identity, eventIds, and hashes. Any invalid or different journal hard-blocks without overwrite.
+
+The commit order is intent → move events → write reconciled state → delete intent → release owner. A retry with the exact recorded inputs is idempotent before moves, after partial/all moves, and after state persistence. While the journal exists, ordinary `release-lock` and replacement lock acquisition are blocked, and `recover-lock` still cannot remove the valid owner.
+
+If a crash occurs after journal deletion but before owner release, state and events are already committed: snapshot returns the ordinary safe view with no ACK intent, and the remaining recovery action is token-authenticated `release-lock`.
+
+Snapshot exposes `ackIntentExists`, a valid `ackIntent` when safe to parse, and `ackRecoveryEventIds`. It returns `target.recoveryMode: "ack_intent"` only when the current lock owner identity matches, the management branch is correct, current document hashes equal intent expected hashes, intent baseline equals the lock baseline, and persisted state is either still at that baseline or already committed to expected hashes with every intent event recorded. A second document drift, owner/token change, invalid journal, or unrelated state phase remains `target.safe:false`; it is never adopted as normal progress.
+
 ## BACKLOG.md
 
 Columns: `ID | Priority | Module | Status | Dependencies | Ordering reason | Source | Updated`. Status is `ready|in_progress|needs_verification|blocked|completed`. V1 never deletes or archives automatically.

@@ -36,6 +36,9 @@ const LOCK_CREATING_PREFIX = "aggregate.lock.creating-";
 const LOCK_RECOVERY_PREFIX = "aggregate.lock.recovery-";
 const LOCK_INTENT_PREFIX = "aggregate.intent-";
 const LOCK_INTENT_CREATING_PREFIX = "aggregate.intent.creating-";
+const ACK_INTENT_FILE = "ack-intent.json";
+const ACK_INTENT_FIELDS = new Set(["schemaVersion", "lockOwner", "eventIds", "expectedDocumentHashes", "baselineHashes", "createdAt"]);
+const ACK_LOCK_OWNER_FIELDS = new Set(["token", "pid", "acquiredAt"]);
 
 function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -54,6 +57,17 @@ function writeJsonAtomic(file, value) {
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
   renameSync(temporary, file);
+}
+
+function writeJsonExclusiveAtomic(file, value) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
+  try {
+    linkSync(temporary, file);
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
 }
 
 function hashFile(file) {
@@ -88,6 +102,93 @@ function validLockOwner(owner) {
     && typeof owner.acquiredAt === "string"
     && !Number.isNaN(Date.parse(owner.acquiredAt))
     && validDocumentHashes(owner.baselineHashes);
+}
+
+function validAckIntent(intent) {
+  return intent
+    && typeof intent === "object"
+    && !Array.isArray(intent)
+    && Object.keys(intent).length === ACK_INTENT_FIELDS.size
+    && Object.keys(intent).every((key) => ACK_INTENT_FIELDS.has(key))
+    && intent.schemaVersion === 1
+    && intent.lockOwner
+    && typeof intent.lockOwner === "object"
+    && !Array.isArray(intent.lockOwner)
+    && Object.keys(intent.lockOwner).length === ACK_LOCK_OWNER_FIELDS.size
+    && Object.keys(intent.lockOwner).every((key) => ACK_LOCK_OWNER_FIELDS.has(key))
+    && EVENT_ID.test(intent.lockOwner.token)
+    && Number.isInteger(intent.lockOwner.pid)
+    && intent.lockOwner.pid > 0
+    && typeof intent.lockOwner.acquiredAt === "string"
+    && !Number.isNaN(Date.parse(intent.lockOwner.acquiredAt))
+    && Array.isArray(intent.eventIds)
+    && intent.eventIds.length > 0
+    && intent.eventIds.every((eventId) => typeof eventId === "string" && EVENT_ID.test(eventId))
+    && new Set(intent.eventIds).size === intent.eventIds.length
+    && intent.eventIds.every((eventId, index) => index === 0 || intent.eventIds[index - 1].localeCompare(eventId) < 0)
+    && validDocumentHashes(intent.expectedDocumentHashes)
+    && validDocumentHashes(intent.baselineHashes)
+    && typeof intent.createdAt === "string"
+    && !Number.isNaN(Date.parse(intent.createdAt));
+}
+
+function ackIntentRecord(root) {
+  const file = path.join(root, ACK_INTENT_FILE);
+  if (!existsSync(file)) return { exists: false, intent: null };
+  try {
+    const intent = readJson(file);
+    return { exists: true, intent: validAckIntent(intent) ? intent : null };
+  } catch {
+    return { exists: true, intent: null };
+  }
+}
+
+function sameLockOwnerIdentity(identity, owner) {
+  return Boolean(owner)
+    && identity.token === owner.token
+    && identity.pid === owner.pid
+    && identity.acquiredAt === owner.acquiredAt;
+}
+
+function sameEventIds(left, right) {
+  return left.length === right.length && left.every((eventId, index) => eventId === right[index]);
+}
+
+function ackIntentMatchesRequest(intent, owner, eventIds, expectedDocumentHashes) {
+  return sameLockOwnerIdentity(intent.lockOwner, owner)
+    && sameEventIds(intent.eventIds, [...eventIds].sort())
+    && sameDocumentHashes(intent.expectedDocumentHashes, expectedDocumentHashes)
+    && sameDocumentHashes(intent.baselineHashes, owner.baselineHashes);
+}
+
+function ensureAckIntent(root, owner, eventIds, expectedDocumentHashes) {
+  const existing = ackIntentRecord(root);
+  if (existing.exists) {
+    if (!existing.intent) throw new Error("ACK intent is invalid; manual inspection required");
+    if (!ackIntentMatchesRequest(existing.intent, owner, eventIds, expectedDocumentHashes)) {
+      throw new Error("ACK intent does not match lock owner, event IDs, or document hashes");
+    }
+    return existing.intent;
+  }
+  const intent = {
+    schemaVersion: 1,
+    lockOwner: { token: owner.token, pid: owner.pid, acquiredAt: owner.acquiredAt },
+    eventIds: [...eventIds].sort(),
+    expectedDocumentHashes,
+    baselineHashes: owner.baselineHashes,
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    writeJsonExclusiveAtomic(path.join(root, ACK_INTENT_FILE), intent);
+    return intent;
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    const raced = ackIntentRecord(root);
+    if (!raced.intent || !ackIntentMatchesRequest(raced.intent, owner, eventIds, expectedDocumentHashes)) {
+      throw new Error("ACK intent does not match lock owner, event IDs, or document hashes");
+    }
+    return raced.intent;
+  }
 }
 
 function readLockOwner(lock) {
@@ -434,7 +535,40 @@ function reconcileProcessedState(root, state) {
   };
 }
 
-function targetStatus(config, state) {
+function ackIntentRecoveryReasons(root, config, persistedState, intent, owner) {
+  const reasons = [];
+  if (!sameLockOwnerIdentity(intent.lockOwner, owner)) reasons.push("ACK intent lock owner changed");
+  if (!owner || !sameDocumentHashes(intent.baselineHashes, owner.baselineHashes)) reasons.push("ACK intent baseline differs from lock owner");
+  if (!existsSync(config.managementWorktree)) reasons.push("management worktree is missing");
+  else {
+    const branch = git(config.managementWorktree, ["branch", "--show-current"]);
+    if (branch !== config.managementBranch) reasons.push(`management branch mismatch: ${branch || "detached"}`);
+    if (!sameDocumentHashes(documentHashes(config.managementWorktree), intent.expectedDocumentHashes)) {
+      reasons.push("management document hashes differ from ACK intent");
+    }
+  }
+  const baselineState = sameDocumentHashes(persistedState.documentHashes, intent.baselineHashes);
+  const committedState = sameDocumentHashes(persistedState.documentHashes, intent.expectedDocumentHashes)
+    && Array.isArray(persistedState.processedEventIds)
+    && intent.eventIds.every((eventId) => persistedState.processedEventIds.includes(eventId));
+  if (!baselineState && !committedState) reasons.push("persisted state does not match ACK intent phase");
+  return reasons;
+}
+
+function targetStatus(root, config, state, persistedState, intentRecord) {
+  if (intentRecord.exists) {
+    if (!intentRecord.intent) {
+      return { safe: false, reasons: ["ACK intent is invalid"], managementWorktree: config.managementWorktree };
+    }
+    const owner = readLockOwner(path.join(root, LOCK_FILE));
+    const reasons = ackIntentRecoveryReasons(root, config, persistedState, intentRecord.intent, owner);
+    return {
+      safe: reasons.length === 0,
+      reasons,
+      managementWorktree: config.managementWorktree,
+      ...(reasons.length === 0 ? { recoveryMode: "ack_intent" } : {}),
+    };
+  }
   const reasons = [];
   if (!existsSync(config.managementWorktree)) reasons.push("management worktree is missing");
   else {
@@ -585,6 +719,9 @@ function latestEventsByTask(events) {
 
 export function acquireLock({ cwd }) {
   const root = stateRoot(cwd);
+  if (existsSync(path.join(root, ACK_INTENT_FILE))) {
+    throw new Error("ACK intent blocks new lock acquisition");
+  }
   const diagnostics = lockDiagnostics(root);
   if (diagnostics.blockingTombstones.length) {
     throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
@@ -632,6 +769,9 @@ export function releaseLock({ cwd, token }) {
   const marker = createLifecycleIntent(root, "release");
   try {
     requireToken(root, token);
+    if (existsSync(path.join(root, ACK_INTENT_FILE))) {
+      throw new Error("ACK intent must be completed before releasing its owner");
+    }
     const lock = path.join(root, LOCK_FILE);
     try {
       if (statSync(lock).isDirectory()) {
@@ -748,19 +888,27 @@ export function readSnapshot({ cwd, token } = {}) {
   const config = readJson(path.join(root, "config.json"));
   const persistedState = readJson(path.join(root, "state.json"));
   const { state, recoveryEvents } = reconcileProcessedState(root, persistedState);
-  return { config, state, events, recoveryEvents, conflicts: activeClaimConflicts(state, events), target: targetStatus(config, state) };
+  const intentRecord = ackIntentRecord(root);
+  return {
+    config,
+    state,
+    events,
+    recoveryEvents,
+    ackIntentExists: intentRecord.exists,
+    ackIntent: intentRecord.intent,
+    ackRecoveryEventIds: intentRecord.intent?.eventIds ?? [],
+    conflicts: activeClaimConflicts(state, events),
+    target: targetStatus(root, config, state, persistedState, intentRecord),
+  };
 }
 
-export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
+export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes, _testCrashAfterPhase }) {
   const root = stateRoot(cwd);
   const owner = requireToken(root, token);
   const config = readJson(path.join(root, "config.json"));
   const stateFile = path.join(root, "state.json");
   const persistedState = readJson(stateFile);
   const { state, recoveryEvents } = reconcileProcessedState(root, persistedState);
-  if (!sameDocumentHashes(owner.baselineHashes, state.documentHashes)) {
-    throw new Error("document baseline changed after lock acquisition");
-  }
   if (!existsSync(config.managementWorktree)) throw new Error("management worktree is missing");
   const branch = git(config.managementWorktree, ["branch", "--show-current"]);
   if (branch !== config.managementBranch) throw new Error(`management branch mismatch: ${branch || "detached"}`);
@@ -774,6 +922,17 @@ export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
     || new Set(eventIds).size !== eventIds.length
     || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
     throw new Error("invalid event ID");
+  }
+  const existingIntent = ackIntentRecord(root);
+  if (existingIntent.exists) {
+    if (!existingIntent.intent) throw new Error("ACK intent is invalid; manual inspection required");
+    if (!ackIntentMatchesRequest(existingIntent.intent, owner, eventIds, expectedDocumentHashes)) {
+      throw new Error("ACK intent does not match lock owner, event IDs, or document hashes");
+    }
+    const recoveryReasons = ackIntentRecoveryReasons(root, config, persistedState, existingIntent.intent, owner);
+    if (recoveryReasons.length) throw new Error(`ACK intent recovery is unsafe: ${recoveryReasons.join("; ")}`);
+  } else if (!sameDocumentHashes(owner.baselineHashes, state.documentHashes)) {
+    throw new Error("document baseline changed after lock acquisition");
   }
   const allPendingEvents = readPendingEvents(root);
   const conflicts = activeClaimConflicts(state, allPendingEvents);
@@ -810,15 +969,21 @@ export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
       throw new Error(`event is not canonically projected in STATUS.md or BACKLOG.md: ${event.eventId}`);
     }
   }
+  ensureAckIntent(root, owner, eventIds, expectedDocumentHashes);
+  if (_testCrashAfterPhase === "intent") throw new Error("simulated crash after ACK intent");
   for (const event of sortEventsByCreation(pendingEvents)) {
     const source = path.join(root, "events", "pending", `${event.eventId}.json`);
     const destination = path.join(root, "events", "processed", `${event.eventId}.json`);
     if (existsSync(source)) renameSync(source, destination);
   }
+  if (_testCrashAfterPhase === "events") throw new Error("simulated crash after ACK event moves");
   const reconciledState = reconcileProcessedState(root, state).state;
   reconciledState.documentHashes = currentDocumentHashes;
   reconciledState.lastSynchronizedAt = new Date().toISOString();
   writeJsonAtomic(stateFile, reconciledState);
+  if (_testCrashAfterPhase === "state") throw new Error("simulated crash after ACK state");
+  unlinkSync(path.join(root, ACK_INTENT_FILE));
+  if (_testCrashAfterPhase === "journal") throw new Error("simulated crash after ACK journal cleanup");
   releaseLock({ cwd, token });
   return reconciledState;
 }

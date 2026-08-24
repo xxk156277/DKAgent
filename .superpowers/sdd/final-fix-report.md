@@ -2,7 +2,7 @@
 
 ## 结论
 
-基于 `53589d6` 完成五轮最终审查修复。改动仅限仓库级项目管家 Skill、helper、契约文档和回归测试；没有进入 DKAgent 业务运行时，没有实现通用文档渲染平台，也没有把虚假真实进度写入 STATUS/BACKLOG。
+基于 `53589d6` 完成六轮最终审查修复。改动仅限仓库级项目管家 Skill、helper、契约文档和回归测试；没有进入 DKAgent 业务运行时，没有实现通用文档渲染平台，也没有把虚假真实进度写入 STATUS/BACKLOG。
 
 ## 修复
 
@@ -16,15 +16,16 @@
 8. 所有持久化自由文本拒绝 CR/LF 和 Markdown heading 注入；已存在 repo/worktree/common-dir 使用 canonical realpath，兼容 macOS `/var` 与 `/private/var`，同时保留路径 containment 和 symlink escape 防护。
 9. `project` 与 ACK 按 `(createdAt,eventId)` 排序并按 taskId 折叠，只要求 folded latest projection；成功后仍逐事件写入 processed，保留完整审计。ACK 要求 selected task 覆盖全部 pending，并扫描 STATUS+BACKLOG，拒绝旧新并存、同文件重复、跨文件重复和 only-old current block。
 10. processed directory 是派生 state 的 source of truth。Snapshot 无锁只读协调全部合法 processed 事件并返回 `recoveryEvents`；ACK 先用协调后的 claims 与全部 pending 检查 WIP，要求 recovery IDs 全部进入投影与 ACK，成功后再从目录持久化完整 sorted IDs 与 active claims。
+11. 增加 common-root two-phase ACK journal：全部校验通过后原子发布固定 schema intent，再依次移动 events、写协调 state、删除 intent、释放 owner。Snapshot 仅在 owner、branch、expected hashes 与合法 state phase 全匹配时暴露 `ack_intent` 恢复；intent 前、move 后、state 后崩溃均可用原参数幂等恢复，漂移和参数不匹配硬阻断。
 
 ## TDD 证据
 
-回归测试覆盖合法 lease 的 token 取回、canonical taskId、projection helper/CLI、完整来源与 HEAD 防伪、folded latest projection、部分 ACK 防倒退、唯一 current block、processed 审计历史、重启 recovery view、orphan WIP、恢复事件投影与 state 协调、三 worktree 完整投影、证据降级、自由文本与 canonical path。每类修复均先用失败断言复现，再做最小实现。
+回归测试覆盖合法 lease 的 token 取回、canonical taskId、projection helper/CLI、完整来源与 HEAD 防伪、folded latest projection、部分 ACK 防倒退、唯一 current block、processed 审计历史、orphan state 协调、ACK journal 四个崩溃窗口、严格 schema、漂移/身份/参数阻断、owner 保留、三 worktree 完整投影、证据降级、自由文本与 canonical path。每类修复均先用失败断言复现，再做最小实现。
 
 ## 验证
 
-- `npm run test:project-manager`：64/64 PASS。
-- `npm test`：exit 0，包含 Project Manager 64/64 与 Vite build。
+- `npm run test:project-manager`：73/73 PASS。
+- `npm test`：exit 0，包含 Project Manager 73/73 与 Vite build。
 - `npm run typecheck`：exit 0。
 - `python3 /Users/xuxiaokang/.codex/skills/.system/skill-creator/scripts/quick_validate.py .codex/skills/dkagent-project-manager`：`Skill is valid!`。
 - `node --check .codex/skills/dkagent-project-manager/scripts/project-events.mjs`：exit 0。
