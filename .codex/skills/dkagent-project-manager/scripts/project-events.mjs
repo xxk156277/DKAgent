@@ -14,7 +14,7 @@ const EVIDENCE_FIELDS = new Set(["kind", "summary", "command", "exitCode"]);
 const DISCOVERED_FIELDS = new Set(["summary", "module", "reason"]);
 const DOCUMENTS = ["AGENTS.md", "docs/project/STATUS.md", "docs/project/BACKLOG.md"];
 const PROJECT_TASK_PREFIX = "- [project-task] ";
-const BACKLOG_STATUSES = new Set(["ready", "in_progress", "needs_verification", "blocked", "completed"]);
+const PROJECT_EVENT_PREFIX = "- [project-event] ";
 const SECRET_ASSIGNMENT = /\b[A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|AUTHORIZATION)[A-Z0-9_]*\s*=\s*\S+/i;
 const BEARER_TOKEN = /\bBearer\s+\S+/i;
 const SK_TOKEN = /\bsk-[A-Za-z0-9_-]+\b/i;
@@ -27,6 +27,7 @@ const ENVIRONMENT_ASSIGNMENT_TOKEN = /[A-Za-z_][A-Za-z0-9_]*=/;
 const PATH_TOKEN = /^(?:\/|\.{1,2}\/)?[A-Za-z0-9_./*-]+$/;
 const TEST_PATH = /\.test\.[cm]?[jt]s$/;
 const NODE_CHECK_PATH = /\.[cm]?js$/;
+const TASK_ID = /^DKA-[A-Z0-9][A-Z0-9-]{2,63}$/;
 const EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DOCUMENT_HASH = /^[0-9a-f]{64}$/;
 const LOCK_FILE = "aggregate.lock";
@@ -287,6 +288,7 @@ function validateInput(input) {
     if (typeof input[key] !== "string" || !input[key].trim()) throw new Error(`${key} is required`);
   }
   validateStoredText(input.taskId, "taskId", 128);
+  if (!TASK_ID.test(input.taskId)) throw new Error("taskId must use canonical format");
   validateStoredText(input.module, "module", 120);
   validateStoredText(input.summary, "summary", 500);
   if (!ACTIONS.has(input.action)) throw new Error("invalid action");
@@ -297,7 +299,10 @@ function validateInput(input) {
   if (input.dependencies.some((item) => typeof item !== "string" || !item.trim())) {
     throw new Error("dependencies must contain non-empty task IDs");
   }
-  for (const dependency of input.dependencies) validateStoredText(dependency, "dependency", 128);
+  for (const dependency of input.dependencies) {
+    validateStoredText(dependency, "dependency", 128);
+    if (!TASK_ID.test(dependency)) throw new Error("dependency must use canonical format");
+  }
   for (const evidence of input.evidence) {
     for (const key of Object.keys(evidence)) {
       if (!EVIDENCE_FIELDS.has(key)) throw new Error(`unknown evidence field: ${key}`);
@@ -467,38 +472,70 @@ function activeClaimConflicts(state, events) {
   return [...taskConflicts, ...worktreeConflicts];
 }
 
-function projectedTaskIds(managementWorktree) {
-  const taskIds = new Set();
-  const statusFile = path.join(managementWorktree, "docs/project/STATUS.md");
-  if (existsSync(statusFile)) {
-    for (const line of readFileSync(statusFile, "utf8").split(/\r?\n/)) {
-      if (!line.startsWith(PROJECT_TASK_PREFIX)) continue;
-      let task;
-      try {
-        task = JSON.parse(line.slice(PROJECT_TASK_PREFIX.length));
-      } catch {
-        throw new Error("invalid project task marker in STATUS.md");
-      }
-      if (!task || typeof task !== "object" || Array.isArray(task) || typeof task.taskId !== "string" || !task.taskId.trim()) {
-        throw new Error("invalid project task marker in STATUS.md");
-      }
-      if (!STATUSES.has(task.status)) throw new Error("invalid project task status in STATUS.md");
-      if (typeof task.title !== "string" || !task.title.trim()) throw new Error("project task title is required in STATUS.md");
-      if (!Array.isArray(task.evidence)) throw new Error("project task evidence must be an array in STATUS.md");
-      taskIds.add(task.taskId);
-    }
+function canonicalEventPayload(event) {
+  return {
+    eventId: event.eventId,
+    taskId: event.taskId,
+    action: event.action,
+    status: event.status,
+    module: event.module,
+    summary: event.summary,
+    dependencies: [...event.dependencies],
+    evidence: event.evidence.map((item) => {
+      const evidence = { kind: item.kind, summary: item.summary };
+      if (item.command !== undefined) evidence.command = item.command;
+      if (item.exitCode !== undefined) evidence.exitCode = item.exitCode;
+      return evidence;
+    }),
+    discoveredTodos: event.discoveredTodos.map((item) => ({
+      summary: item.summary,
+      module: item.module,
+      reason: item.reason,
+    })),
+  };
+}
+
+function projectionBlock(event) {
+  const taskLine = `${PROJECT_TASK_PREFIX}${JSON.stringify({
+    taskId: event.taskId,
+    status: event.status,
+    module: event.module,
+    summary: event.summary,
+  })}`;
+  const payload = canonicalEventPayload(event);
+  const projectionLine = `${PROJECT_EVENT_PREFIX}${JSON.stringify({
+    digest: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
+    payload,
+  })}`;
+  return { eventId: event.eventId, taskLine, projectionLine, block: `${taskLine}\n${projectionLine}` };
+}
+
+function readStoredEvent(root, eventId) {
+  const pending = path.join(root, "events", "pending", `${eventId}.json`);
+  const processed = path.join(root, "events", "processed", `${eventId}.json`);
+  if (!existsSync(pending) && !existsSync(processed)) throw new Error(`event not found: ${eventId}`);
+  const event = readJson(existsSync(pending) ? pending : processed);
+  if (!isStoredEvent(event, eventId)) throw new Error(`invalid stored event: ${eventId}`);
+  return event;
+}
+
+export function renderEventProjections({ cwd, token, eventIds }) {
+  const root = stateRoot(cwd);
+  requireToken(root, token);
+  if (!Array.isArray(eventIds) || eventIds.length === 0 || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
+    throw new Error("invalid event ID");
   }
-  const backlogFile = path.join(managementWorktree, "docs/project/BACKLOG.md");
-  if (existsSync(backlogFile)) {
-    for (const line of readFileSync(backlogFile, "utf8").split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) continue;
-      const cells = trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
-      if (cells.length !== 8 || !/^P[0-3]$/.test(cells[1] || "") || !BACKLOG_STATUSES.has(cells[3])) continue;
-      if (cells[0] && cells[2]) taskIds.add(cells[0]);
-    }
-  }
-  return taskIds;
+  return { schemaVersion: 1, blocks: eventIds.map((eventId) => projectionBlock(readStoredEvent(root, eventId))) };
+}
+
+function isCanonicallyProjected(managementWorktree, event) {
+  const expected = projectionBlock(event);
+  return ["docs/project/STATUS.md", "docs/project/BACKLOG.md"].some((relative) => {
+    const file = path.join(managementWorktree, relative);
+    if (!existsSync(file)) return false;
+    const lines = readFileSync(file, "utf8").split(/\r?\n/);
+    return lines.some((line, index) => line === expected.taskLine && lines[index + 1] === expected.projectionLine);
+  });
 }
 
 export function acquireLock({ cwd }) {
@@ -575,7 +612,7 @@ export function lockStatus({ cwd }) {
   const status = existsSync(lock)
     ? (() => {
       const owner = readLockOwner(lock);
-      return { held: true, recoverable: !owner || !isProcessAlive(owner.pid), owner };
+      return { held: true, recoverable: !owner, owner };
     })()
     : { held: false, recoverable: false, owner: null };
   const result = { ...status, recoveryTombstones: diagnostics.recoveryTombstones };
@@ -594,9 +631,7 @@ export function recoverLock({ cwd, confirm = false }) {
     let diagnostics = lockDiagnostics(root);
     let cleanedStaleIntents = false;
     const currentOwner = readLockOwner(lock);
-    if (currentOwner && isProcessAlive(currentOwner.pid)) {
-      throw new Error("aggregate lock owner exists or PID was reused; release requires token");
-    }
+    if (currentOwner) throw new Error("aggregate lock owner exists; release requires token");
     if (diagnostics.blockingTombstones.length) {
       throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
     }
@@ -645,14 +680,7 @@ export function recoverLock({ cwd, confirm = false }) {
       throw error;
     }
     const tombstoneOwner = readLockOwner(tombstone);
-    if (tombstoneOwner && (
-      !currentOwner
-      || tombstoneOwner.token !== currentOwner.token
-      || tombstoneOwner.pid !== currentOwner.pid
-      || isProcessAlive(tombstoneOwner.pid)
-    )) {
-      throw new Error("lock recovery found a live, reused, or changed owner; tombstone retained");
-    }
+    if (tombstoneOwner) throw new Error("lock recovery found an owner; tombstone retained");
     rmSync(tombstone, { recursive: true });
     return true;
   } finally {
@@ -660,14 +688,18 @@ export function recoverLock({ cwd, confirm = false }) {
   }
 }
 
-export function readSnapshot({ cwd, token } = {}) {
-  const root = stateRoot(cwd);
-  if (token) requireToken(root, token);
+function readPendingEvents(root) {
   const pending = path.join(root, "events", "pending");
-  const events = readdirSync(pending)
+  return readdirSync(pending)
     .filter((name) => name.endsWith(".json"))
     .sort()
     .map((name) => readJson(path.join(pending, name)));
+}
+
+export function readSnapshot({ cwd, token } = {}) {
+  const root = stateRoot(cwd);
+  if (token) requireToken(root, token);
+  const events = readPendingEvents(root);
   const config = readJson(path.join(root, "config.json"));
   const state = readJson(path.join(root, "state.json"));
   return { config, state, events, conflicts: activeClaimConflicts(state, events), target: targetStatus(config, state) };
@@ -693,6 +725,8 @@ export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
   if (!Array.isArray(eventIds) || eventIds.length === 0 || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
     throw new Error("invalid event ID");
   }
+  const conflicts = activeClaimConflicts(state, readPendingEvents(root));
+  if (conflicts.length) throw new Error(`active claim conflicts block ACK: ${JSON.stringify(conflicts)}`);
   const pendingEvents = [];
   for (const eventId of eventIds) {
     if (state.processedEventIds.includes(eventId)) continue;
@@ -703,10 +737,9 @@ export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
     if (!isStoredEvent(event, eventId)) throw new Error(`invalid stored event: ${eventId}`);
     pendingEvents.push(event);
   }
-  const projected = projectedTaskIds(config.managementWorktree);
   for (const event of pendingEvents) {
-    if (!projected.has(event.taskId)) {
-      throw new Error(`task is not projected in STATUS.md or BACKLOG.md: ${event.taskId}`);
+    if (!isCanonicallyProjected(config.managementWorktree, event)) {
+      throw new Error(`event is not canonically projected in STATUS.md or BACKLOG.md: ${event.eventId}`);
     }
   }
   for (const eventId of eventIds) {
@@ -775,6 +808,13 @@ async function main(args) {
   if (command === "release-lock") return { released: releaseLock({ cwd, token: valueAfter(args, "--token") }) };
   if (command === "lock-status") return lockStatus({ cwd });
   if (command === "recover-lock") return { recovered: recoverLock({ cwd, confirm: args.includes("--confirm") }) };
+  if (command === "project") {
+    return renderEventProjections({
+      cwd,
+      token: valueAfter(args, "--token"),
+      eventIds: valueAfter(args, "--event-ids").split(",").filter(Boolean),
+    });
+  }
   if (command === "adopt-documents") return adoptDocuments({ cwd, token: valueAfter(args, "--token") });
   if (command === "ack") {
     return ackEvents({

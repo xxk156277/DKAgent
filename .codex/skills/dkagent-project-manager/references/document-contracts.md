@@ -14,23 +14,26 @@ Discovered todos use `{ "summary": "...", "module": "...", "reason": "..." }`.
 
 All persisted free text (`taskId`, module, summary, dependency, evidence summary, and every discovered-todo field) must be non-empty, single-line text and must not start a Markdown heading. CR/LF and heading injection are rejected.
 
+`taskId` and every dependency use canonical uppercase format `^DKA-[A-Z0-9][A-Z0-9-]{2,63}$`. Leading/trailing whitespace, lowercase, invalid characters, and noncanonical length are rejected; inputs are never silently normalized.
+
 ## STATUS.md
 
 Sections: `当前里程碑`、`活跃 Worktree`、`待验证`、`阻塞与风险`、`最近完成`、`最后同步`. Worktree presence alone is not an active task. Do not report percentages without a verifiable denominator.
 
-Every event selected for ACK must have a visible structured task line in STATUS or a valid BACKLOG row. STATUS uses exactly one JSON object per Markdown list line:
+Every event selected for ACK must have one complete two-line projection block in either STATUS or BACKLOG. Generate it only with `project --token <token> --event-ids <ids>` and copy the returned `block` verbatim:
 
 ```text
-- [project-task] {"taskId":"DKA-...","status":"in_progress","title":"non-empty title","evidence":[]}
+- [project-task] {"taskId":"DKA-EXAMPLE","status":"in_progress","module":"agent","summary":"Implement example"}
+- [project-event] {"digest":"<sha256>","payload":{"eventId":"<uuid>","taskId":"DKA-EXAMPLE","action":"started","status":"in_progress","module":"agent","summary":"Implement example","dependencies":[],"evidence":[],"discoveredTodos":[]}}
 ```
 
-`status` uses the event status set, `title` is non-empty, and `evidence` is an array of concise evidence summaries. HTML comments, ordinary prose, headings, and malformed/empty-title markers do not count.
+The human line must exactly match event `taskId`, `status`, `module`, and `summary`. The canonical payload field order is `eventId`, `taskId`, `action`, `status`, `module`, `summary`, `dependencies`, `evidence`, `discoveredTodos`; evidence canonicalizes `kind`, `summary`, optional `command`, optional `exitCode`, and todos canonicalize `summary`, `module`, `reason`. `digest` is SHA-256 of the compact canonical payload JSON. Both exact lines must occur in the same document and remain after ACK. HTML comments, prose, headings, stale status, recomputed partial payloads, and hand-written equivalents do not count.
 
 ## BACKLOG.md
 
 Columns: `ID | Priority | Module | Status | Dependencies | Ordering reason | Source | Updated`. Status is `ready|in_progress|needs_verification|blocked|completed`. V1 never deletes or archives automatically.
 
-For ACK projection, a BACKLOG row must have all eight cells, a non-empty ID and module, priority `P0`-`P3`, and one allowed status. A task ID appearing elsewhere in the document does not count.
+The eight-column BACKLOG row remains the human priority view but does not satisfy ACK by itself. Append the exact helper-generated two-line event block in STATUS or BACKLOG for every ACKed event.
 
 ## Conflicts
 
@@ -38,10 +41,10 @@ Snapshot conflicts are a stable discriminated union:
 
 ```json
 {"kind":"task_claimed_by_multiple_worktrees","taskId":"DKA-...","worktrees":["/canonical/a","/canonical/b"]}
-{"kind":"worktree_claims_multiple_tasks","worktreePath":"/canonical/a","taskIds":["DKA-a","DKA-b"]}
+{"kind":"worktree_claims_multiple_tasks","worktreePath":"/canonical/a","taskIds":["DKA-AAA","DKA-BBB"]}
 ```
 
-Arrays and conflict groups are sorted. Any conflict stops aggregation before document edits or ACK.
+Arrays and conflict groups are sorted. Any snapshot conflict stops document edits. ACK independently recomputes both conflict kinds from current processed state plus every pending event immediately before moving files; any conflict preserves the lock and all events.
 
 ## Priority
 
@@ -55,4 +58,4 @@ If a Worker submits `finished/completed` without successful behavior evidence or
 
 ## Lock recovery
 
-Use `lock-status` first. Release a known owner token with `release-lock --token`; never recover it. `recover-lock --confirm` may remove an ownerless lock or a lock whose owner PID is explicitly dead. Live/`EPERM` PIDs, possible PID reuse, live lifecycle intents, and owned recovery tombstones hard-block recovery. After recovery, check status and acquire a new token.
+Use `lock-status` first. A valid owner is a durable Agent lease even when its CLI PID has exited, and `recover-lock` never removes it. If the local token was lost, retrieve `owner.token` from status and release it only when the remaining owner facts match the current aggregation; otherwise stop for human confirmation. Confirmed recovery is limited to invalid/legacy ownerless locks, stale creating files, and stale lifecycle intents. Live intents and owned recovery tombstones hard-block recovery. After recovery, check status and acquire a new token.

@@ -16,6 +16,7 @@ import {
   readSnapshot,
   recoverLock,
   releaseLock,
+  renderEventProjections,
   stateRoot,
 } from "./project-events.mjs";
 
@@ -36,7 +37,7 @@ function createRepo() {
 
 function started(overrides = {}) {
   return {
-    taskId: "DKA-20260824-a1b2",
+    taskId: "DKA-20260824-A1B2",
     action: "started",
     module: "agent",
     summary: "Implement event inbox",
@@ -59,17 +60,11 @@ function documentHashes(cwd) {
   }));
 }
 
-function renderTaskDocuments(cwd, events) {
+function renderTaskDocuments(cwd, token, events) {
   mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
-  const markers = events.map((event) => `${PROJECT_TASK_PREFIX_FOR_TEST}${JSON.stringify({
-    taskId: event.taskId,
-    status: event.status,
-    title: event.summary,
-    evidence: event.evidence.map((item) => item.summary),
-  })}`);
-  const rows = events.map((event) => `| ${event.taskId} | P1 | ${event.module} | ${event.status} | - | fixture projection | test fixture | 2026-08-25 |`);
-  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${markers.join("\n")}\n`);
-  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), `# Backlog\n\n| ID | Priority | Module | Status | Dependencies | Ordering reason | Source | Updated |\n|---|---|---|---|---|---|---|---|\n${rows.join("\n")}\n`);
+  const projections = renderEventProjections({ cwd, token, eventIds: events.map((event) => event.eventId) });
+  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${projections.blocks.map((item) => item.block).join("\n")}\n`);
+  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Backlog\n");
 }
 
 function writePendingEvent(cwd, event, createdAt) {
@@ -141,6 +136,22 @@ test("emit rejects extra fields", () => {
     () => emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", exitCode: 0, rawLog: "secret" }] }) }),
     /unknown evidence field: rawLog/,
   );
+});
+
+test("emit requires canonical uppercase task IDs without surrounding whitespace", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  for (const taskId of [" DKA-ABC", "DKA-ABC ", "dka-ABC", "DKA-abc", "DKA-AB", "DKA-AB_C"]) {
+    assert.throws(
+      () => emitEvent({ cwd, input: started({ taskId }) }),
+      /taskId must use canonical format/,
+    );
+  }
+  assert.throws(
+    () => emitEvent({ cwd, input: started({ dependencies: ["DKA-invalid"] }) }),
+    /dependency must use canonical format/,
+  );
+  assert.equal(emitEvent({ cwd, input: started({ taskId: "DKA-ABC", dependencies: ["DKA-DEPENDENCY"] }) }).taskId, "DKA-ABC");
 });
 
 test("emit downgrades unproved or failed completed events without losing finished action", () => {
@@ -413,7 +424,7 @@ test("snapshot reports one task claimed by two worktrees", () => {
   const snapshot = readSnapshot({ cwd, token });
   assert.deepEqual(snapshot.conflicts, [{
     kind: "task_claimed_by_multiple_worktrees",
-    taskId: "DKA-20260824-a1b2",
+    taskId: "DKA-20260824-A1B2",
     worktrees: [cwd, second].sort(),
   }]);
 });
@@ -421,13 +432,13 @@ test("snapshot reports one task claimed by two worktrees", () => {
 test("snapshot reports one worktree claiming two pending tasks", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
-  emitEvent({ cwd, input: started({ taskId: "DKA-WIP-first" }) });
-  emitEvent({ cwd, input: started({ taskId: "DKA-WIP-second" }) });
+  emitEvent({ cwd, input: started({ taskId: "DKA-WIP-FIRST" }) });
+  emitEvent({ cwd, input: started({ taskId: "DKA-WIP-SECOND" }) });
   const token = acquireLock({ cwd }).token;
   assert.deepEqual(readSnapshot({ cwd, token }).conflicts, [{
     kind: "worktree_claims_multiple_tasks",
     worktreePath: cwd,
-    taskIds: ["DKA-WIP-first", "DKA-WIP-second"],
+    taskIds: ["DKA-WIP-FIRST", "DKA-WIP-SECOND"],
   }]);
 });
 
@@ -436,7 +447,7 @@ test("processed active claim still conflicts with a later worktree", () => {
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const first = emitEvent({ cwd, input: started() });
   const firstToken = acquireLock({ cwd }).token;
-  renderTaskDocuments(cwd, [first]);
+  renderTaskDocuments(cwd, firstToken, [first]);
   ackEvents({ cwd, token: firstToken, eventIds: [first.eventId], expectedDocumentHashes: documentHashes(cwd) });
   const second = `${cwd}-later`;
   git(cwd, "worktree", "add", "-b", "later", second);
@@ -448,17 +459,51 @@ test("processed active claim still conflicts with a later worktree", () => {
 test("processed active task conflicts with a second pending task in the same worktree", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
-  const first = emitEvent({ cwd, input: started({ taskId: "DKA-WIP-processed" }) });
+  const first = emitEvent({ cwd, input: started({ taskId: "DKA-WIP-PROCESSED" }) });
   const firstToken = acquireLock({ cwd }).token;
-  renderTaskDocuments(cwd, [first]);
+  renderTaskDocuments(cwd, firstToken, [first]);
   ackEvents({ cwd, token: firstToken, eventIds: [first.eventId], expectedDocumentHashes: documentHashes(cwd) });
-  emitEvent({ cwd, input: started({ taskId: "DKA-WIP-pending" }) });
+  emitEvent({ cwd, input: started({ taskId: "DKA-WIP-PENDING" }) });
   const token = acquireLock({ cwd }).token;
   assert.deepEqual(readSnapshot({ cwd, token }).conflicts, [{
     kind: "worktree_claims_multiple_tasks",
     worktreePath: cwd,
-    taskIds: ["DKA-WIP-pending", "DKA-WIP-processed"],
+    taskIds: ["DKA-WIP-PENDING", "DKA-WIP-PROCESSED"],
   }]);
+});
+
+test("ack rejects two active tasks in one worktree and retains lock and events", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const first = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-FIRST" }) });
+  const second = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-SECOND" }) });
+  const token = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, token, [first, second]);
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [first.eventId, second.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /active claim conflicts block ACK/,
+  );
+  assert.equal(readSnapshot({ cwd, token }).events.length, 2);
+  assert.equal(lockStatus({ cwd }).owner.token, token);
+  releaseLock({ cwd, token });
+});
+
+test("ack rejects one task active in two worktrees and retains lock and events", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const secondWorktree = `${cwd}-ack-second`;
+  git(cwd, "worktree", "add", "-b", "ack-second", secondWorktree);
+  const first = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-SHARED" }) });
+  const second = emitEvent({ cwd: secondWorktree, input: started({ taskId: first.taskId }) });
+  const token = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, token, [first, second]);
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [first.eventId, second.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /task_claimed_by_multiple_worktrees/,
+  );
+  assert.equal(readSnapshot({ cwd, token }).events.length, 2);
+  assert.equal(lockStatus({ cwd }).owner.token, token);
+  releaseLock({ cwd, token });
 });
 
 test("external document edit requires explicit adoption", () => {
@@ -492,6 +537,62 @@ test("management branch drift blocks aggregation", () => {
   assert.match(target.reasons.join(" "), /management branch mismatch/);
 });
 
+test("projection helper emits canonical human and complete event records", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({
+    cwd,
+    input: started({
+      taskId: "DKA-PROJECTION",
+      summary: "Render complete facts",
+      dependencies: ["DKA-DEPENDENCY"],
+      evidence: [{ kind: "commit", summary: "commit abc123" }],
+      discoveredTodos: [{ summary: "Follow up", module: "trace", reason: "Coverage gap" }],
+    }),
+  });
+  const token = acquireLock({ cwd }).token;
+  const result = renderEventProjections({ cwd, token, eventIds: [event.eventId] });
+  assert.equal(result.blocks.length, 1);
+  const [block] = result.blocks;
+  assert.equal(block.taskLine, `- [project-task] ${JSON.stringify({
+    taskId: event.taskId,
+    status: event.status,
+    module: event.module,
+    summary: event.summary,
+  })}`);
+  const record = JSON.parse(block.projectionLine.slice("- [project-event] ".length));
+  assert.deepEqual(record.payload, {
+    eventId: event.eventId,
+    taskId: event.taskId,
+    action: event.action,
+    status: event.status,
+    module: event.module,
+    summary: event.summary,
+    dependencies: event.dependencies,
+    evidence: event.evidence,
+    discoveredTodos: event.discoveredTodos,
+  });
+  assert.equal(record.digest, createHash("sha256").update(JSON.stringify(record.payload)).digest("hex"));
+  assert.equal(block.block, `${block.taskLine}\n${block.projectionLine}`);
+  releaseLock({ cwd, token });
+});
+
+test("CLI project emits the same canonical projection block", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-CLI-PROJECTION" }) });
+  const token = acquireLock({ cwd }).token;
+  const expected = renderEventProjections({ cwd, token, eventIds: [event.eventId] });
+  const result = spawnSync(
+    process.execPath,
+    [helperPath, "project", "--token", token, "--event-ids", event.eventId],
+    { cwd, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), expected);
+  releaseLock({ cwd, token });
+});
+
 test("ack accepts the locked writer changes and is idempotent", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
@@ -499,7 +600,7 @@ test("ack accepts the locked writer changes and is idempotent", () => {
   const token = acquireLock({ cwd }).token;
   assert.equal(readSnapshot({ cwd, token }).target.safe, true);
   writeFileSync(path.join(cwd, "AGENTS.md"), "# Aggregated rules\n");
-  renderTaskDocuments(cwd, [event]);
+  renderTaskDocuments(cwd, token, [event]);
   ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) });
   const repeatedToken = acquireLock({ cwd }).token;
   ackEvents({ cwd, token: repeatedToken, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) });
@@ -518,7 +619,7 @@ test("ack repairs an event moved before state persistence", () => {
     path.join(root, "events", "processed", `${event.eventId}.json`),
   );
   const token = acquireLock({ cwd }).token;
-  renderTaskDocuments(cwd, [event]);
+  renderTaskDocuments(cwd, token, [event]);
   ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) });
   assert.ok(readSnapshot({ cwd }).state.processedEventIds.includes(event.eventId));
 });
@@ -533,7 +634,7 @@ test("ack replays processed events in creation order instead of input order", ()
   writePendingEvent(cwd, finished, "2026-08-24T00:00:01.000Z");
   writePendingEvent(cwd, last, "2026-08-24T00:00:02.000Z");
   const token = acquireLock({ cwd }).token;
-  renderTaskDocuments(cwd, [first, finished, last]);
+  renderTaskDocuments(cwd, token, [first, finished, last]);
   ackEvents({
     cwd,
     token,
@@ -561,6 +662,91 @@ test("ack rejects external document drift that differs from rendered hashes", ()
   releaseLock({ cwd, token });
 });
 
+test("ack rejects a finished event when documents retain only its started projection", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const first = emitEvent({ cwd, input: started({ taskId: "DKA-STALE-STATUS" }) });
+  const finished = emitEvent({
+    cwd,
+    input: started({
+      taskId: first.taskId,
+      action: "finished",
+      status: "needs_verification",
+      summary: "Implementation finished but needs verification",
+    }),
+  });
+  const token = acquireLock({ cwd }).token;
+  const projection = renderEventProjections({ cwd, token, eventIds: [first.eventId] });
+  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
+  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${projection.blocks[0].block}\n`);
+  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Backlog\n");
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [finished.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /event is not canonically projected/,
+  );
+  assert.equal(readSnapshot({ cwd, token }).events.length, 2);
+  releaseLock({ cwd, token });
+});
+
+test("ack rejects mismatched human facts and incomplete canonical payloads", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({
+    cwd,
+    input: started({
+      taskId: "DKA-ACK-COMPLETE",
+      summary: "Preserve complete event facts",
+      dependencies: ["DKA-DEPENDENCY"],
+      evidence: [{ kind: "commit", summary: "commit abc123" }],
+      discoveredTodos: [{ summary: "Follow up", module: "trace", reason: "Coverage gap" }],
+    }),
+  });
+  const token = acquireLock({ cwd }).token;
+  const [valid] = renderEventProjections({ cwd, token, eventIds: [event.eventId] }).blocks;
+  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
+  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Backlog\n");
+  const human = JSON.parse(valid.taskLine.slice(PROJECT_TASK_PREFIX_FOR_TEST.length));
+  for (const patch of [
+    { status: "needs_verification" },
+    { module: "trace" },
+    { summary: "Stale summary" },
+  ]) {
+    const taskLine = `${PROJECT_TASK_PREFIX_FOR_TEST}${JSON.stringify({ ...human, ...patch })}`;
+    writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${taskLine}\n${valid.projectionLine}\n`);
+    assert.throws(
+      () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+      /event is not canonically projected/,
+    );
+  }
+  const record = JSON.parse(valid.projectionLine.slice("- [project-event] ".length));
+  for (const payload of [
+    { ...record.payload, action: "discovered" },
+    { ...record.payload, dependencies: [] },
+    { ...record.payload, evidence: [] },
+    { ...record.payload, discoveredTodos: [] },
+  ]) {
+    const projectionLine = `- [project-event] ${JSON.stringify({
+      digest: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
+      payload,
+    })}`;
+    writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${valid.taskLine}\n${projectionLine}\n`);
+    assert.throws(
+      () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+      /event is not canonically projected/,
+    );
+  }
+  writeFileSync(
+    path.join(cwd, "docs", "project", "STATUS.md"),
+    `# Status\n\n${valid.taskLine}\nintervening prose\n${valid.projectionLine}\n`,
+  );
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /event is not canonically projected/,
+  );
+  assert.equal(readSnapshot({ cwd, token }).events.length, 1);
+  releaseLock({ cwd, token });
+});
+
 test("ack rejects task IDs mentioned only in comments or prose", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
@@ -571,7 +757,7 @@ test("ack rejects task IDs mentioned only in comments or prose", () => {
   writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Backlog\n");
   assert.throws(
     () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
-    /task is not projected in STATUS.md or BACKLOG.md/,
+    /event is not canonically projected/,
   );
   assert.equal(readSnapshot({ cwd, token }).events.length, 1);
   releaseLock({ cwd, token });
@@ -587,24 +773,30 @@ test("ack rejects title-only management documents", () => {
   writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Rendered backlog\n");
   assert.throws(
     () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
-    /task is not projected/,
+    /event is not canonically projected/,
   );
   assert.equal(readSnapshot({ cwd, token }).events.length, 1);
   releaseLock({ cwd, token });
 });
 
-test("ack rejects a structured STATUS task with an empty title", () => {
+test("ack rejects a structured STATUS task with an empty human summary", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const event = emitEvent({ cwd, input: started() });
   const token = acquireLock({ cwd }).token;
   mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
-  const marker = `${PROJECT_TASK_PREFIX_FOR_TEST}${JSON.stringify({ taskId: event.taskId, status: event.status, title: "", evidence: [] })}`;
-  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${marker}\n`);
+  const [valid] = renderEventProjections({ cwd, token, eventIds: [event.eventId] }).blocks;
+  const marker = `${PROJECT_TASK_PREFIX_FOR_TEST}${JSON.stringify({
+    taskId: event.taskId,
+    status: event.status,
+    module: event.module,
+    summary: "",
+  })}`;
+  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${marker}\n${valid.projectionLine}\n`);
   writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Backlog\n");
   assert.throws(
     () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
-    /project task title is required/,
+    /event is not canonically projected/,
   );
   assert.equal(readSnapshot({ cwd, token }).events.length, 1);
   releaseLock({ cwd, token });
@@ -683,36 +875,19 @@ test("published lock files expose a complete owner and require token release", (
   assert.equal(releaseLock({ cwd, token: owner.token }), true);
 });
 
-test("CLI owner can be recovered only after its process exits", () => {
+test("CLI owner token is recovered from lock status after its process exits", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const acquired = spawnSync(process.execPath, [helperPath, "acquire-lock"], { cwd, encoding: "utf8" });
   assert.equal(acquired.status, 0, acquired.stderr);
   const owner = JSON.parse(acquired.stdout);
   assert.notEqual(owner.pid, process.pid);
-  assert.equal(lockStatus({ cwd }).recoverable, true);
-  assert.throws(() => recoverLock({ cwd }), /lock recovery requires explicit confirmation/);
-  assert.equal(recoverLock({ cwd, confirm: true }), true);
+  const status = lockStatus({ cwd });
+  assert.equal(status.recoverable, false);
+  assert.equal(status.owner.token, owner.token);
+  assert.throws(() => recoverLock({ cwd, confirm: true }), /owner exists; release requires token/);
+  assert.equal(releaseLock({ cwd, token: status.owner.token }), true);
   assert.equal(lockStatus({ cwd }).held, false);
-});
-
-test("EPERM and PID reuse conservatively block owner recovery", () => {
-  const cwd = createRepo();
-  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
-  const owner = acquireLock({ cwd });
-  const originalKill = process.kill;
-  process.kill = () => {
-    const error = new Error("operation not permitted");
-    error.code = "EPERM";
-    throw error;
-  };
-  try {
-    assert.equal(lockStatus({ cwd }).recoverable, false);
-    assert.throws(() => recoverLock({ cwd, confirm: true }), /PID was reused|release requires token/);
-  } finally {
-    process.kill = originalKill;
-  }
-  assert.equal(releaseLock({ cwd, token: owner.token }), true);
 });
 
 test("release intent blocks acquires before and after the current lock is removed", () => {
@@ -779,7 +954,14 @@ test("three worktrees render the management documents before ACKing exact hashes
   for (const { worker, module } of worktrees) {
     emitEvent({
       cwd: worker,
-      input: started({ taskId: `DKA-SMOKE-${module}`, module, summary: `Start ${module} smoke task` }),
+      input: started({
+        taskId: `DKA-SMOKE-${module.toUpperCase()}`,
+        module,
+        summary: `Start ${module} smoke task`,
+        dependencies: [`DKA-DEPENDENCY-${module.toUpperCase()}`],
+        evidence: [{ kind: "commit", summary: `${module} fixture commit` }],
+        discoveredTodos: [{ summary: `${module} follow up`, module, reason: "Fixture coverage" }],
+      }),
     });
   }
 
@@ -790,7 +972,7 @@ test("three worktrees render the management documents before ACKing exact hashes
   assert.deepEqual(snapshot.conflicts, []);
 
   writeFileSync(path.join(cwd, "AGENTS.md"), "# DKAgent Agent Instructions\n");
-  renderTaskDocuments(cwd, snapshot.events);
+  renderTaskDocuments(cwd, token, snapshot.events);
   const renderedStatus = readFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "utf8");
   for (const event of snapshot.events) {
     assert.match(renderedStatus, new RegExp(event.taskId));
@@ -807,6 +989,23 @@ test("three worktrees render the management documents before ACKing exact hashes
   const acknowledged = readSnapshot({ cwd });
   assert.equal(acknowledged.events.length, 0);
   assert.deepEqual(acknowledged.state.documentHashes, documentHashes(cwd));
+  const retainedRecords = readFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("- [project-event] "))
+    .map((line) => JSON.parse(line.slice("- [project-event] ".length)).payload);
+  for (const event of snapshot.events) {
+    assert.deepEqual(retainedRecords.find((payload) => payload.eventId === event.eventId), {
+      eventId: event.eventId,
+      taskId: event.taskId,
+      action: event.action,
+      status: event.status,
+      module: event.module,
+      summary: event.summary,
+      dependencies: event.dependencies,
+      evidence: event.evidence,
+      discoveredTodos: event.discoveredTodos,
+    });
+  }
 });
 
 test("a pending worker event survives removal of its worktree", () => {
@@ -814,7 +1013,7 @@ test("a pending worker event survives removal of its worktree", () => {
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const worker = `${cwd}-removed-worker`;
   git(cwd, "worktree", "add", "-b", "removed-worker", worker);
-  const event = emitEvent({ cwd: worker, input: started({ taskId: "DKA-SMOKE-removed" }) });
+  const event = emitEvent({ cwd: worker, input: started({ taskId: "DKA-SMOKE-REMOVED" }) });
 
   git(cwd, "worktree", "remove", "--force", worker);
 
@@ -830,7 +1029,7 @@ test("CLI ACK accepts rendered hashes from the invoking worktree and clears pend
   const event = emitEvent({ cwd, input: started() });
   const token = acquireLock({ cwd }).token;
   writeFileSync(path.join(cwd, "AGENTS.md"), "# Rendered rules\n");
-  renderTaskDocuments(cwd, [event]);
+  renderTaskDocuments(cwd, token, [event]);
   const expectedDocumentHashes = documentHashes(cwd);
   const hashesFile = path.join(cwd, "expected-hashes.json");
   writeFileSync(hashesFile, `${JSON.stringify(expectedDocumentHashes)}\n`);
@@ -859,7 +1058,7 @@ test("CLI ACK rejects expected-hash files outside cwd, including symlink escapes
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const event = emitEvent({ cwd, input: started() });
   const token = acquireLock({ cwd }).token;
-  renderTaskDocuments(cwd, [event]);
+  renderTaskDocuments(cwd, token, [event]);
   const outsideDirectory = mkdtempSync(path.join(tmpdir(), "dkagent-pm-hashes-"));
   const outsideFile = path.join(outsideDirectory, "expected-hashes.json");
   writeFileSync(outsideFile, `${JSON.stringify(documentHashes(cwd))}\n`);
@@ -888,9 +1087,18 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(skill, /lock-status/);
   assert.match(skill, /recover-lock --confirm/);
   assert.match(skill, /`conflicts` 非空/);
+  assert.match(skill, /owner\.token/);
+  assert.match(skill, /project --token/);
   const contracts = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/references/document-contracts.md"), "utf8");
   assert.match(contracts, /- \[project-task\]/);
+  assert.match(contracts, /- \[project-event\]/);
+  assert.match(contracts, /eventId.*dependencies.*evidence.*discoveredTodos/);
   assert.match(contracts, /worktree_claims_multiple_tasks/);
+  assert.match(contracts, /ACK independently recomputes both conflict kinds/);
+  assert.match(contracts, /\^DKA-\[A-Z0-9\]/);
   assert.match(contracts, /git diff --check.*cannot/);
   assert.match(contracts, /deterministically downgrades.*`needs_verification`/);
+  const report = readFileSync(path.join(repositoryRoot, ".superpowers/sdd/final-fix-report.md"), "utf8");
+  assert.doesNotMatch(report, /owner PID.*ESRCH/);
+  assert.match(report, /canonical event projection/);
 });
