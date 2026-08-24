@@ -221,3 +221,20 @@ test("emit rejects environment assignments hidden in allowed command arguments",
     );
   }
 });
+
+test("emit rejects high-confidence credentials in persisted free text", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  assert.throws(
+    () => emitEvent({ cwd, input: started({ summary: "verified https://example-token@example.test" }) }),
+    /unsafe text content/,
+  );
+  assert.throws(
+    () => emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "x-api-key: example-value", command: "npm test", exitCode: 0 }] }) }),
+    /unsafe text content/,
+  );
+  assert.throws(
+    () => emitEvent({ cwd, input: started({ discoveredTodos: [{ summary: "Follow up", module: "agent", reason: "Authorization: Bearer example-value" }] }) }),
+    /unsafe text content/,
+  );
+});

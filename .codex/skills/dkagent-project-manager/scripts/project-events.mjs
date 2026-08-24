@@ -49,6 +49,14 @@ function documentHashes(root) {
   return Object.fromEntries(DOCUMENTS.map((relative) => [relative, hashFile(path.join(root, relative))]));
 }
 
+function containsHighConfidenceCredential(value) {
+  return SECRET_ASSIGNMENT.test(value)
+    || BEARER_TOKEN.test(value)
+    || SK_TOKEN.test(value)
+    || SENSITIVE_HEADER.test(value)
+    || URL_USERINFO.test(value);
+}
+
 function areTestPaths(tokens) {
   return tokens.every((token) => PATH_TOKEN.test(token) && TEST_PATH.test(token));
 }
@@ -75,7 +83,7 @@ function isAllowedValidationCommand(tokens) {
 }
 
 function isUnsafeSimpleCommand(command) {
-  if (SHELL_CONSTRUCT.test(command) || SENSITIVE_HEADER.test(command) || SENSITIVE_FLAG.test(command) || URL_USERINFO.test(command)) {
+  if (SHELL_CONSTRUCT.test(command) || SENSITIVE_FLAG.test(command)) {
     return true;
   }
   const tokens = command.trim().split(/\s+/);
@@ -86,12 +94,7 @@ function validateStoredText(value, field, maximumLength, { singleLine = false, c
   if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
   if (value.length > maximumLength) throw new Error(`${field} text is too long`);
   if (singleLine && /[\r\n]/.test(value)) throw new Error(`${field} must be a single line`);
-  if (
-    SECRET_ASSIGNMENT.test(value)
-    || BEARER_TOKEN.test(value)
-    || SK_TOKEN.test(value)
-    || (command && isUnsafeSimpleCommand(value))
-  ) {
+  if (containsHighConfidenceCredential(value) || (command && isUnsafeSimpleCommand(value))) {
     throw new Error("unsafe text content");
   }
 }
