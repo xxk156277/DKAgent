@@ -16,6 +16,7 @@
 - 编码前使用 `$dkagent-project-manager` 的 `worker-start`；实现和验证后使用 `worker-finish`。
 - 优先复用 `docs/project/BACKLOG.md` 的任务 ID；计划外工作必须先生成事件 ID。
 - WIP=1 适用于每个 Agent/Worktree；独立模块可以并行。
+- 同一 taskId 多 Worktree 或同一 Worktree 多活跃 taskId 都是硬冲突；项目管家停止汇总，不自动选赢家。
 - Worker Worktree 不直接修改 `AGENTS.md`、`docs/project/STATUS.md`、`docs/project/BACKLOG.md`；只有项目管家向配置的管理 Worktree 汇总。
 - 没有行为相关验证时不得把代码任务标为完成；失败或跳过验证使用 `needs_verification`。
 - 删除、延期或改变待办目标前必须询问用户。

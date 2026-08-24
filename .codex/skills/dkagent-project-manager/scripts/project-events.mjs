@@ -13,6 +13,8 @@ const EVIDENCE_KINDS = new Set(["test", "typecheck", "build", "commit", "user_co
 const EVIDENCE_FIELDS = new Set(["kind", "summary", "command", "exitCode"]);
 const DISCOVERED_FIELDS = new Set(["summary", "module", "reason"]);
 const DOCUMENTS = ["AGENTS.md", "docs/project/STATUS.md", "docs/project/BACKLOG.md"];
+const PROJECT_TASK_PREFIX = "- [project-task] ";
+const BACKLOG_STATUSES = new Set(["ready", "in_progress", "needs_verification", "blocked", "completed"]);
 const SECRET_ASSIGNMENT = /\b[A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|AUTHORIZATION)[A-Z0-9_]*\s*=\s*\S+/i;
 const BEARER_TOKEN = /\bBearer\s+\S+/i;
 const SK_TOKEN = /\bsk-[A-Za-z0-9_-]+\b/i;
@@ -20,6 +22,7 @@ const SHELL_CONSTRUCT = /[;|&()`<>'"\\]/;
 const SENSITIVE_HEADER = /\b(?:x-)?api-key\s*:\s*\S+|\bauthorization\s*:\s*\S+/i;
 const SENSITIVE_FLAG = /(?:^|\s)--[a-z0-9-]*(?:api-key|apikey|token|secret|password|passphrase|authorization|auth|credential|private-key)[a-z0-9-]*(?:\s+\S+|=\S+|$)/i;
 const URL_USERINFO = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s]*@/i;
+const MARKDOWN_HEADING = /^\s{0,3}#{1,6}(?:\s|$)/;
 const ENVIRONMENT_ASSIGNMENT_TOKEN = /[A-Za-z_][A-Za-z0-9_]*=/;
 const PATH_TOKEN = /^(?:\/|\.{1,2}\/)?[A-Za-z0-9_./*-]+$/;
 const TEST_PATH = /\.test\.[cm]?[jt]s$/;
@@ -34,6 +37,10 @@ const LOCK_INTENT_CREATING_PREFIX = "aggregate.intent.creating-";
 
 function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+function canonicalExistingPath(value) {
+  return realpathSync(path.resolve(value));
 }
 
 function readJson(file) {
@@ -75,6 +82,7 @@ function validLockOwner(owner) {
     && !Array.isArray(owner)
     && EVENT_ID.test(owner.token)
     && Number.isInteger(owner.pid)
+    && owner.pid > 0
     && typeof owner.acquiredAt === "string"
     && !Number.isNaN(Date.parse(owner.acquiredAt))
     && validDocumentHashes(owner.baselineHashes);
@@ -194,6 +202,27 @@ function isAllowedValidationCommand(tokens) {
   return false;
 }
 
+function evidenceCommandKind(tokens) {
+  const [executable, subcommand] = tokens;
+  if (executable === "npm") {
+    if (tokens.length === 2 && subcommand === "test") return "test";
+    if (tokens.length === 3 && subcommand === "run") {
+      const script = tokens[2];
+      if (script === "test" || script.startsWith("test:")) return "test";
+      if (script === "typecheck" || script.startsWith("typecheck:")) return "typecheck";
+      if (script === "build" || script.startsWith("build:")) return "build";
+    }
+  }
+  if (executable === "node" && subcommand === "--test" && areTestPaths(tokens.slice(2))) return "test";
+  if (executable === "tsx" && subcommand === "--test" && areTestPaths(tokens.slice(2))) return "test";
+  if (executable === "npx") {
+    if (subcommand === "tsx" && tokens[2] === "--test" && areTestPaths(tokens.slice(3))) return "test";
+    if (tokens.length === 3 && subcommand === "tsc" && tokens[2] === "--noEmit") return "typecheck";
+    if (tokens.length === 3 && subcommand === "vitest" && tokens[2] === "--run") return "test";
+  }
+  return null;
+}
+
 function isUnsafeSimpleCommand(command) {
   if (SHELL_CONSTRUCT.test(command) || SENSITIVE_FLAG.test(command)) {
     return true;
@@ -202,24 +231,33 @@ function isUnsafeSimpleCommand(command) {
   return tokens.some((token) => ENVIRONMENT_ASSIGNMENT_TOKEN.test(token)) || !isAllowedValidationCommand(tokens);
 }
 
-function validateStoredText(value, field, maximumLength, { singleLine = false, command = false } = {}) {
+function validateStoredText(value, field, maximumLength, { singleLine = true, command = false } = {}) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
   if (value.length > maximumLength) throw new Error(`${field} text is too long`);
   if (singleLine && /[\r\n]/.test(value)) throw new Error(`${field} must be a single line`);
+  if (MARKDOWN_HEADING.test(value)) throw new Error(`${field} must not be a Markdown heading`);
   if (containsHighConfidenceCredential(value) || (command && isUnsafeSimpleCommand(value))) {
     throw new Error("unsafe text content");
   }
 }
 
+function hasSuccessfulBehaviorEvidence(evidence) {
+  return evidence.some(
+    (item) => item.kind === "user_confirmation" || (EXECUTION_EVIDENCE.has(item.kind) && item.exitCode === 0),
+  );
+}
+
 export function stateRoot(cwd) {
-  return path.join(path.resolve(cwd, git(cwd, ["rev-parse", "--git-common-dir"])), "dkagent-project-manager");
+  const worktree = canonicalExistingPath(cwd);
+  const commonDirectory = canonicalExistingPath(path.resolve(worktree, git(worktree, ["rev-parse", "--git-common-dir"])));
+  return path.join(commonDirectory, "dkagent-project-manager");
 }
 
 export function initStore({ cwd, managementWorktree, managementBranch = "main" }) {
   const root = stateRoot(cwd);
   if (existsSync(path.join(root, "config.json"))) throw new Error("project manager store already initialized");
 
-  const resolved = path.resolve(managementWorktree);
+  const resolved = canonicalExistingPath(managementWorktree);
   if (stateRoot(resolved) !== root) throw new Error("management worktree does not share the Git common directory");
 
   const branch = git(resolved, ["branch", "--show-current"]);
@@ -268,10 +306,18 @@ function validateInput(input) {
       throw new Error("invalid evidence item");
     }
     validateStoredText(evidence.summary, "evidence summary", 500);
+    if (!EXECUTION_EVIDENCE.has(evidence.kind) && (evidence.command !== undefined || evidence.exitCode !== undefined)) {
+      throw new Error("non-execution evidence cannot contain command or exitCode");
+    }
     if (EXECUTION_EVIDENCE.has(evidence.kind) && evidence.command === undefined) {
       throw new Error("evidence command is required");
     }
-    if (evidence.command !== undefined) validateStoredText(evidence.command, "command", 1000, { singleLine: true, command: true });
+    if (evidence.command !== undefined) {
+      validateStoredText(evidence.command, "command", 1000, { singleLine: true, command: true });
+      if (evidenceCommandKind(evidence.command.trim().split(/\s+/)) !== evidence.kind) {
+        throw new Error("evidence kind does not match command");
+      }
+    }
     if (EXECUTION_EVIDENCE.has(evidence.kind) && evidence.exitCode === undefined) {
       throw new Error("evidence exitCode is required");
     }
@@ -301,12 +347,6 @@ function validateInput(input) {
   if (input.action === "finished" && !new Set(["completed", "needs_verification"]).has(input.status)) {
     throw new Error("finished event has invalid status");
   }
-  if (input.status === "completed") {
-    const proved = input.evidence.some(
-      (item) => item.kind === "user_confirmation" || (EXECUTION_EVIDENCE.has(item.kind) && item.exitCode === 0),
-    );
-    if (!proved) throw new Error("completed code task requires successful behavioral evidence");
-  }
 }
 
 export function emitEvent({ cwd, input }) {
@@ -314,11 +354,14 @@ export function emitEvent({ cwd, input }) {
   const root = stateRoot(cwd);
   if (!existsSync(path.join(root, "config.json"))) throw new Error("project manager store is not initialized");
 
+  const normalizedInput = input.status === "completed" && !hasSuccessfulBehaviorEvidence(input.evidence)
+    ? { ...input, status: "needs_verification" }
+    : input;
   const event = {
     schemaVersion: 1,
     eventId: randomUUID(),
-    ...input,
-    worktreePath: path.resolve(cwd),
+    ...normalizedInput,
+    worktreePath: canonicalExistingPath(cwd),
     branch: git(cwd, ["branch", "--show-current"]) || "detached",
     headSha: git(cwd, ["rev-parse", "HEAD"]),
     createdAt: new Date().toISOString(),
@@ -397,9 +440,65 @@ function activeClaimConflicts(state, events) {
     if (worktrees.size) byTask.set(event.taskId, worktrees);
     else byTask.delete(event.taskId);
   }
-  return [...byTask]
+  const taskConflicts = [...byTask]
     .filter(([, worktrees]) => worktrees.size > 1)
-    .map(([taskId, worktrees]) => ({ taskId, worktrees: [...worktrees].sort() }));
+    .map(([taskId, worktrees]) => ({
+      kind: "task_claimed_by_multiple_worktrees",
+      taskId,
+      worktrees: [...worktrees].sort(),
+    }))
+    .sort((left, right) => left.taskId.localeCompare(right.taskId));
+  const byWorktree = new Map();
+  for (const [taskId, worktrees] of byTask) {
+    for (const worktreePath of worktrees) {
+      const taskIds = byWorktree.get(worktreePath) ?? [];
+      taskIds.push(taskId);
+      byWorktree.set(worktreePath, taskIds);
+    }
+  }
+  const worktreeConflicts = [...byWorktree]
+    .filter(([, taskIds]) => taskIds.length > 1)
+    .map(([worktreePath, taskIds]) => ({
+      kind: "worktree_claims_multiple_tasks",
+      worktreePath,
+      taskIds: taskIds.sort(),
+    }))
+    .sort((left, right) => left.worktreePath.localeCompare(right.worktreePath));
+  return [...taskConflicts, ...worktreeConflicts];
+}
+
+function projectedTaskIds(managementWorktree) {
+  const taskIds = new Set();
+  const statusFile = path.join(managementWorktree, "docs/project/STATUS.md");
+  if (existsSync(statusFile)) {
+    for (const line of readFileSync(statusFile, "utf8").split(/\r?\n/)) {
+      if (!line.startsWith(PROJECT_TASK_PREFIX)) continue;
+      let task;
+      try {
+        task = JSON.parse(line.slice(PROJECT_TASK_PREFIX.length));
+      } catch {
+        throw new Error("invalid project task marker in STATUS.md");
+      }
+      if (!task || typeof task !== "object" || Array.isArray(task) || typeof task.taskId !== "string" || !task.taskId.trim()) {
+        throw new Error("invalid project task marker in STATUS.md");
+      }
+      if (!STATUSES.has(task.status)) throw new Error("invalid project task status in STATUS.md");
+      if (typeof task.title !== "string" || !task.title.trim()) throw new Error("project task title is required in STATUS.md");
+      if (!Array.isArray(task.evidence)) throw new Error("project task evidence must be an array in STATUS.md");
+      taskIds.add(task.taskId);
+    }
+  }
+  const backlogFile = path.join(managementWorktree, "docs/project/BACKLOG.md");
+  if (existsSync(backlogFile)) {
+    for (const line of readFileSync(backlogFile, "utf8").split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) continue;
+      const cells = trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
+      if (cells.length !== 8 || !/^P[0-3]$/.test(cells[1] || "") || !BACKLOG_STATUSES.has(cells[3])) continue;
+      if (cells[0] && cells[2]) taskIds.add(cells[0]);
+    }
+  }
+  return taskIds;
 }
 
 export function acquireLock({ cwd }) {
@@ -476,7 +575,7 @@ export function lockStatus({ cwd }) {
   const status = existsSync(lock)
     ? (() => {
       const owner = readLockOwner(lock);
-      return { held: true, recoverable: !owner, owner };
+      return { held: true, recoverable: !owner || !isProcessAlive(owner.pid), owner };
     })()
     : { held: false, recoverable: false, owner: null };
   const result = { ...status, recoveryTombstones: diagnostics.recoveryTombstones };
@@ -495,7 +594,9 @@ export function recoverLock({ cwd, confirm = false }) {
     let diagnostics = lockDiagnostics(root);
     let cleanedStaleIntents = false;
     const currentOwner = readLockOwner(lock);
-    if (currentOwner) throw new Error("aggregate lock owner exists; release requires token");
+    if (currentOwner && isProcessAlive(currentOwner.pid)) {
+      throw new Error("aggregate lock owner exists or PID was reused; release requires token");
+    }
     if (diagnostics.blockingTombstones.length) {
       throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
     }
@@ -543,8 +644,14 @@ export function recoverLock({ cwd, confirm = false }) {
       if (error.code === "ENOENT") throw new Error("aggregate lock is not held");
       throw error;
     }
-    if (readLockOwner(tombstone)) {
-      throw new Error("lock recovery found an owner; tombstone retained");
+    const tombstoneOwner = readLockOwner(tombstone);
+    if (tombstoneOwner && (
+      !currentOwner
+      || tombstoneOwner.token !== currentOwner.token
+      || tombstoneOwner.pid !== currentOwner.pid
+      || isProcessAlive(tombstoneOwner.pid)
+    )) {
+      throw new Error("lock recovery found a live, reused, or changed owner; tombstone retained");
     }
     rmSync(tombstone, { recursive: true });
     return true;
@@ -583,15 +690,29 @@ export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
   if (!sameDocumentHashes(currentDocumentHashes, expectedDocumentHashes)) {
     throw new Error("management document hashes do not match expected results");
   }
-  if (!Array.isArray(eventIds) || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
+  if (!Array.isArray(eventIds) || eventIds.length === 0 || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
     throw new Error("invalid event ID");
   }
+  const pendingEvents = [];
   for (const eventId of eventIds) {
     if (state.processedEventIds.includes(eventId)) continue;
     const source = path.join(root, "events", "pending", `${eventId}.json`);
     const destination = path.join(root, "events", "processed", `${eventId}.json`);
     if (!existsSync(source) && !existsSync(destination)) throw new Error(`event not found: ${eventId}`);
     const event = readJson(existsSync(source) ? source : destination);
+    if (!isStoredEvent(event, eventId)) throw new Error(`invalid stored event: ${eventId}`);
+    pendingEvents.push(event);
+  }
+  const projected = projectedTaskIds(config.managementWorktree);
+  for (const event of pendingEvents) {
+    if (!projected.has(event.taskId)) {
+      throw new Error(`task is not projected in STATUS.md or BACKLOG.md: ${event.taskId}`);
+    }
+  }
+  for (const eventId of eventIds) {
+    if (state.processedEventIds.includes(eventId)) continue;
+    const source = path.join(root, "events", "pending", `${eventId}.json`);
+    const destination = path.join(root, "events", "processed", `${eventId}.json`);
     if (existsSync(source)) renameSync(source, destination);
     state.processedEventIds.push(eventId);
   }

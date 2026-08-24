@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,7 +31,7 @@ function createRepo() {
   writeFileSync(path.join(cwd, "AGENTS.md"), "# Rules\n");
   git(cwd, "add", "AGENTS.md");
   git(cwd, "commit", "-m", "fixture");
-  return cwd;
+  return realpathSync(cwd);
 }
 
 function started(overrides = {}) {
@@ -59,6 +59,19 @@ function documentHashes(cwd) {
   }));
 }
 
+function renderTaskDocuments(cwd, events) {
+  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
+  const markers = events.map((event) => `${PROJECT_TASK_PREFIX_FOR_TEST}${JSON.stringify({
+    taskId: event.taskId,
+    status: event.status,
+    title: event.summary,
+    evidence: event.evidence.map((item) => item.summary),
+  })}`);
+  const rows = events.map((event) => `| ${event.taskId} | P1 | ${event.module} | ${event.status} | - | fixture projection | test fixture | 2026-08-25 |`);
+  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${markers.join("\n")}\n`);
+  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), `# Backlog\n\n| ID | Priority | Module | Status | Dependencies | Ordering reason | Source | Updated |\n|---|---|---|---|---|---|---|---|\n${rows.join("\n")}\n`);
+}
+
 function writePendingEvent(cwd, event, createdAt) {
   const root = stateRoot(cwd);
   writeFileSync(
@@ -76,6 +89,7 @@ function writeLifecycleIntent(cwd, name, pid) {
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const helperPath = path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/scripts/project-events.mjs");
+const PROJECT_TASK_PREFIX_FOR_TEST = "- [project-task] ";
 
 test("init records the explicit main worktree", () => {
   const cwd = createRepo();
@@ -92,6 +106,17 @@ test("init rejects a main worktree from another repository", () => {
   );
 });
 
+test("existing path aliases share one canonical state root and worktree identity", () => {
+  const cwd = createRepo();
+  const aliasRoot = mkdtempSync(path.join(tmpdir(), "dkagent-pm-alias-"));
+  const alias = path.join(aliasRoot, "repo");
+  symlinkSync(cwd, alias, "dir");
+  const config = initStore({ cwd: alias, managementWorktree: cwd, managementBranch: "main" });
+  assert.equal(stateRoot(alias), stateRoot(cwd));
+  assert.equal(config.managementWorktree, cwd);
+  assert.equal(emitEvent({ cwd: alias, input: started() }).worktreePath, cwd);
+});
+
 test("emit enriches and queues a strict event", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
@@ -104,7 +129,7 @@ test("emit enriches and queues a strict event", () => {
   assert.equal(snapshot.events[0].headSha, git(cwd, "rev-parse", "HEAD"));
 });
 
-test("emit rejects extra fields and unsupported completion", () => {
+test("emit rejects extra fields", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   assert.throws(() => emitEvent({ cwd, input: started({ rawLog: "secret" }) }), /unknown event field: rawLog/);
@@ -113,13 +138,38 @@ test("emit rejects extra fields and unsupported completion", () => {
     /unknown discovered todo field: rawLog/,
   );
   assert.throws(
-    () => emitEvent({ cwd, input: started({ action: "finished", status: "completed" }) }),
-    /completed code task requires successful behavioral evidence/,
-  );
-  assert.throws(
     () => emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", exitCode: 0, rawLog: "secret" }] }) }),
     /unknown evidence field: rawLog/,
   );
+});
+
+test("emit downgrades unproved or failed completed events without losing finished action", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const inputs = [
+    started({ action: "finished", status: "completed" }),
+    started({
+      action: "finished",
+      status: "completed",
+      evidence: [{ kind: "commit", summary: "commit abc123" }],
+    }),
+    started({
+      action: "finished",
+      status: "completed",
+      evidence: [{ kind: "test", summary: "failed", command: "npm test", exitCode: 1 }],
+    }),
+  ];
+  const events = inputs.map((input) => emitEvent({ cwd, input }));
+  assert.deepEqual(events.map(({ action, status }) => ({ action, status })), [
+    { action: "finished", status: "needs_verification" },
+    { action: "finished", status: "needs_verification" },
+    { action: "finished", status: "needs_verification" },
+  ]);
+  assert.deepEqual(readSnapshot({ cwd }).events.map((event) => event.status), [
+    "needs_verification",
+    "needs_verification",
+    "needs_verification",
+  ]);
 });
 
 test("emit rejects unsafe or oversized persisted text", () => {
@@ -228,25 +278,64 @@ test("emit rejects shell wrappers and non-whitelisted executables", () => {
   }
 });
 
-test("emit accepts only whitelisted verification commands", () => {
+test("emit accepts recognized commands with matching evidence kinds", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
-  const commands = [
-    "npm test",
-    "npm run test:project-manager",
-    "node --test .codex/skills/dkagent-project-manager/scripts/project-events.test.mjs",
-    "node --check scripts/project-events.mjs",
-    "git diff --check",
-    "python3 scripts/quick_validate.py .codex/skills/dkagent-project-manager",
-    "tsx --test scripts/project-events.test.mjs",
-    "npx tsx --test scripts/project-events.test.mjs",
-    "npx tsc --noEmit",
-    "npx vitest --run",
+  const evidenceItems = [
+    { kind: "test", command: "npm test" },
+    { kind: "test", command: "npm run test:project-manager" },
+    { kind: "test", command: "node --test .codex/skills/dkagent-project-manager/scripts/project-events.test.mjs" },
+    { kind: "test", command: "tsx --test scripts/project-events.test.mjs" },
+    { kind: "test", command: "npx tsx --test scripts/project-events.test.mjs" },
+    { kind: "typecheck", command: "npx tsc --noEmit" },
+    { kind: "test", command: "npx vitest --run" },
+    { kind: "build", command: "npm run build" },
   ];
-  for (const command of commands) {
-    emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", command, exitCode: 0 }] }) });
+  for (const evidence of evidenceItems) {
+    emitEvent({ cwd, input: started({ evidence: [{ ...evidence, summary: "pass", exitCode: 0 }] }) });
   }
-  assert.equal(readSnapshot({ cwd }).events.length, commands.length);
+  assert.equal(readSnapshot({ cwd }).events.length, evidenceItems.length);
+});
+
+test("execution evidence kind must match the validation command", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  for (const evidence of [
+    { kind: "test", command: "npm run typecheck" },
+    { kind: "typecheck", command: "npm test" },
+    { kind: "build", command: "npm test" },
+    { kind: "test", command: "git diff --check" },
+    { kind: "test", command: "node --check scripts/project-events.mjs" },
+    { kind: "test", command: "python3 scripts/quick_validate.py .codex/skills/dkagent-project-manager" },
+  ]) {
+    assert.throws(
+      () => emitEvent({ cwd, input: started({ evidence: [{ ...evidence, summary: "pass", exitCode: 0 }] }) }),
+      /evidence kind does not match command/,
+    );
+  }
+  for (const evidence of [
+    { kind: "test", command: "npm run test:project-manager" },
+    { kind: "typecheck", command: "npm run typecheck" },
+    { kind: "build", command: "npm run build" },
+  ]) {
+    emitEvent({ cwd, input: started({ evidence: [{ ...evidence, summary: "pass", exitCode: 0 }] }) });
+  }
+  assert.equal(readSnapshot({ cwd }).events.length, 3);
+});
+
+test("provenance and user confirmation cannot carry command exit semantics", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  for (const evidence of [
+    { kind: "commit", summary: "commit abc123", exitCode: 0 },
+    { kind: "user_confirmation", summary: "accepted", command: "npm test", exitCode: 0 },
+    { kind: "user_confirmation", summary: "accepted", exitCode: 0 },
+  ]) {
+    assert.throws(
+      () => emitEvent({ cwd, input: started({ evidence: [evidence] }) }),
+      /non-execution evidence cannot contain command or exitCode/,
+    );
+  }
 });
 
 test("emit rejects environment assignments hidden in allowed command arguments", () => {
@@ -281,6 +370,29 @@ test("emit rejects high-confidence credentials in persisted free text", () => {
   );
 });
 
+test("emit rejects multiline and Markdown-heading injection in every persisted free-text field", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const cases = [
+    (value) => started({ taskId: value }),
+    (value) => started({ module: value }),
+    (value) => started({ summary: value }),
+    (value) => started({ dependencies: [value] }),
+    (value) => started({ evidence: [{ kind: "commit", summary: value }] }),
+    (value) => started({ discoveredTodos: [{ summary: value, module: "agent", reason: "Gap" }] }),
+    (value) => started({ discoveredTodos: [{ summary: "Follow up", module: value, reason: "Gap" }] }),
+    (value) => started({ discoveredTodos: [{ summary: "Follow up", module: "agent", reason: value }] }),
+  ];
+  for (const createInput of cases) {
+    for (const value of ["safe\n# injected", "safe\rinjected", "# injected heading"]) {
+      assert.throws(
+        () => emitEvent({ cwd, input: createInput(value) }),
+        /must be a single line|Markdown heading/,
+      );
+    }
+  }
+});
+
 test("only one aggregator holds the lock", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
@@ -299,8 +411,24 @@ test("snapshot reports one task claimed by two worktrees", () => {
   emitEvent({ cwd: second, input: started() });
   const token = acquireLock({ cwd }).token;
   const snapshot = readSnapshot({ cwd, token });
-  assert.equal(snapshot.conflicts[0].taskId, "DKA-20260824-a1b2");
-  assert.equal(snapshot.conflicts[0].worktrees.length, 2);
+  assert.deepEqual(snapshot.conflicts, [{
+    kind: "task_claimed_by_multiple_worktrees",
+    taskId: "DKA-20260824-a1b2",
+    worktrees: [cwd, second].sort(),
+  }]);
+});
+
+test("snapshot reports one worktree claiming two pending tasks", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  emitEvent({ cwd, input: started({ taskId: "DKA-WIP-first" }) });
+  emitEvent({ cwd, input: started({ taskId: "DKA-WIP-second" }) });
+  const token = acquireLock({ cwd }).token;
+  assert.deepEqual(readSnapshot({ cwd, token }).conflicts, [{
+    kind: "worktree_claims_multiple_tasks",
+    worktreePath: cwd,
+    taskIds: ["DKA-WIP-first", "DKA-WIP-second"],
+  }]);
 });
 
 test("processed active claim still conflicts with a later worktree", () => {
@@ -308,12 +436,29 @@ test("processed active claim still conflicts with a later worktree", () => {
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const first = emitEvent({ cwd, input: started() });
   const firstToken = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, [first]);
   ackEvents({ cwd, token: firstToken, eventIds: [first.eventId], expectedDocumentHashes: documentHashes(cwd) });
   const second = `${cwd}-later`;
   git(cwd, "worktree", "add", "-b", "later", second);
   emitEvent({ cwd: second, input: started() });
   const token = acquireLock({ cwd }).token;
   assert.equal(readSnapshot({ cwd, token }).conflicts[0].worktrees.length, 2);
+});
+
+test("processed active task conflicts with a second pending task in the same worktree", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const first = emitEvent({ cwd, input: started({ taskId: "DKA-WIP-processed" }) });
+  const firstToken = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, [first]);
+  ackEvents({ cwd, token: firstToken, eventIds: [first.eventId], expectedDocumentHashes: documentHashes(cwd) });
+  emitEvent({ cwd, input: started({ taskId: "DKA-WIP-pending" }) });
+  const token = acquireLock({ cwd }).token;
+  assert.deepEqual(readSnapshot({ cwd, token }).conflicts, [{
+    kind: "worktree_claims_multiple_tasks",
+    worktreePath: cwd,
+    taskIds: ["DKA-WIP-pending", "DKA-WIP-processed"],
+  }]);
 });
 
 test("external document edit requires explicit adoption", () => {
@@ -354,6 +499,7 @@ test("ack accepts the locked writer changes and is idempotent", () => {
   const token = acquireLock({ cwd }).token;
   assert.equal(readSnapshot({ cwd, token }).target.safe, true);
   writeFileSync(path.join(cwd, "AGENTS.md"), "# Aggregated rules\n");
+  renderTaskDocuments(cwd, [event]);
   ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) });
   const repeatedToken = acquireLock({ cwd }).token;
   ackEvents({ cwd, token: repeatedToken, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) });
@@ -372,6 +518,7 @@ test("ack repairs an event moved before state persistence", () => {
     path.join(root, "events", "processed", `${event.eventId}.json`),
   );
   const token = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, [event]);
   ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) });
   assert.ok(readSnapshot({ cwd }).state.processedEventIds.includes(event.eventId));
 });
@@ -386,6 +533,7 @@ test("ack replays processed events in creation order instead of input order", ()
   writePendingEvent(cwd, finished, "2026-08-24T00:00:01.000Z");
   writePendingEvent(cwd, last, "2026-08-24T00:00:02.000Z");
   const token = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, [first, finished, last]);
   ackEvents({
     cwd,
     token,
@@ -410,6 +558,66 @@ test("ack rejects external document drift that differs from rendered hashes", ()
   const snapshot = readSnapshot({ cwd, token });
   assert.equal(snapshot.events.length, 1);
   assert.equal(snapshot.state.processedEventIds.length, 0);
+  releaseLock({ cwd, token });
+});
+
+test("ack rejects task IDs mentioned only in comments or prose", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started() });
+  const token = acquireLock({ cwd }).token;
+  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
+  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n<!-- ${event.taskId} -->\n\nMention ${event.taskId} in prose.\n`);
+  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Backlog\n");
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /task is not projected in STATUS.md or BACKLOG.md/,
+  );
+  assert.equal(readSnapshot({ cwd, token }).events.length, 1);
+  releaseLock({ cwd, token });
+});
+
+test("ack rejects title-only management documents", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started() });
+  const token = acquireLock({ cwd }).token;
+  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
+  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "# Rendered status\n");
+  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Rendered backlog\n");
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /task is not projected/,
+  );
+  assert.equal(readSnapshot({ cwd, token }).events.length, 1);
+  releaseLock({ cwd, token });
+});
+
+test("ack rejects a structured STATUS task with an empty title", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started() });
+  const token = acquireLock({ cwd }).token;
+  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
+  const marker = `${PROJECT_TASK_PREFIX_FOR_TEST}${JSON.stringify({ taskId: event.taskId, status: event.status, title: "", evidence: [] })}`;
+  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${marker}\n`);
+  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Backlog\n");
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /project task title is required/,
+  );
+  assert.equal(readSnapshot({ cwd, token }).events.length, 1);
+  releaseLock({ cwd, token });
+});
+
+test("ack rejects an empty event ID list", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const token = acquireLock({ cwd }).token;
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [], expectedDocumentHashes: documentHashes(cwd) }),
+    /invalid event ID/,
+  );
   releaseLock({ cwd, token });
 });
 
@@ -472,6 +680,38 @@ test("published lock files expose a complete owner and require token release", (
   const root = stateRoot(cwd);
   assert.deepEqual(JSON.parse(readFileSync(path.join(root, "aggregate.lock"), "utf8")), owner);
   assert.throws(() => recoverLock({ cwd, confirm: true }), /release requires token/);
+  assert.equal(releaseLock({ cwd, token: owner.token }), true);
+});
+
+test("CLI owner can be recovered only after its process exits", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const acquired = spawnSync(process.execPath, [helperPath, "acquire-lock"], { cwd, encoding: "utf8" });
+  assert.equal(acquired.status, 0, acquired.stderr);
+  const owner = JSON.parse(acquired.stdout);
+  assert.notEqual(owner.pid, process.pid);
+  assert.equal(lockStatus({ cwd }).recoverable, true);
+  assert.throws(() => recoverLock({ cwd }), /lock recovery requires explicit confirmation/);
+  assert.equal(recoverLock({ cwd, confirm: true }), true);
+  assert.equal(lockStatus({ cwd }).held, false);
+});
+
+test("EPERM and PID reuse conservatively block owner recovery", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const owner = acquireLock({ cwd });
+  const originalKill = process.kill;
+  process.kill = () => {
+    const error = new Error("operation not permitted");
+    error.code = "EPERM";
+    throw error;
+  };
+  try {
+    assert.equal(lockStatus({ cwd }).recoverable, false);
+    assert.throws(() => recoverLock({ cwd, confirm: true }), /PID was reused|release requires token/);
+  } finally {
+    process.kill = originalKill;
+  }
   assert.equal(releaseLock({ cwd, token: owner.token }), true);
 });
 
@@ -549,10 +789,14 @@ test("three worktrees render the management documents before ACKing exact hashes
   assert.equal(new Set(snapshot.events.map((event) => event.worktreePath)).size, 3);
   assert.deepEqual(snapshot.conflicts, []);
 
-  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
   writeFileSync(path.join(cwd, "AGENTS.md"), "# DKAgent Agent Instructions\n");
-  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "# DKAgent 项目状态\n");
-  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# DKAgent 待办\n");
+  renderTaskDocuments(cwd, snapshot.events);
+  const renderedStatus = readFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "utf8");
+  for (const event of snapshot.events) {
+    assert.match(renderedStatus, new RegExp(event.taskId));
+    assert.match(renderedStatus, new RegExp(event.status));
+    assert.match(renderedStatus, new RegExp(`"evidence":\\[${event.evidence.length ? ".+" : ""}\\]`));
+  }
   ackEvents({
     cwd,
     token,
@@ -585,10 +829,8 @@ test("CLI ACK accepts rendered hashes from the invoking worktree and clears pend
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const event = emitEvent({ cwd, input: started() });
   const token = acquireLock({ cwd }).token;
-  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
   writeFileSync(path.join(cwd, "AGENTS.md"), "# Rendered rules\n");
-  writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "# Rendered status\n");
-  writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Rendered backlog\n");
+  renderTaskDocuments(cwd, [event]);
   const expectedDocumentHashes = documentHashes(cwd);
   const hashesFile = path.join(cwd, "expected-hashes.json");
   writeFileSync(hashesFile, `${JSON.stringify(expectedDocumentHashes)}\n`);
@@ -612,6 +854,30 @@ test("CLI ACK accepts rendered hashes from the invoking worktree and clears pend
   assert.deepEqual(snapshot.state.documentHashes, expectedDocumentHashes);
 });
 
+test("CLI ACK rejects expected-hash files outside cwd, including symlink escapes", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started() });
+  const token = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, [event]);
+  const outsideDirectory = mkdtempSync(path.join(tmpdir(), "dkagent-pm-hashes-"));
+  const outsideFile = path.join(outsideDirectory, "expected-hashes.json");
+  writeFileSync(outsideFile, `${JSON.stringify(documentHashes(cwd))}\n`);
+  const link = path.join(cwd, "expected-hashes-link.json");
+  symlinkSync(outsideFile, link);
+  for (const hashesFile of [outsideFile, link]) {
+    const result = spawnSync(
+      process.execPath,
+      [helperPath, "ack", "--token", token, "--event-ids", event.eventId, "--expected-hashes-file", hashesFile],
+      { cwd, encoding: "utf8" },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /expected hashes file must be a JSON file inside cwd/);
+  }
+  assert.equal(readSnapshot({ cwd, token }).events.length, 1);
+  releaseLock({ cwd, token });
+});
+
 test("activated project-management documents and Skill describe the hash-checked ACK workflow", () => {
   for (const relative of ["AGENTS.md", "docs/project/STATUS.md", "docs/project/BACKLOG.md"]) {
     assert.equal(existsSync(path.join(repositoryRoot, relative)), true, `${relative} must be activated`);
@@ -619,4 +885,12 @@ test("activated project-management documents and Skill describe the hash-checked
   const skill = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/SKILL.md"), "utf8");
   assert.match(skill, /--expected-hashes-file/);
   assert.match(skill, /`snapshot` 的 `target\.managementWorktree`/);
+  assert.match(skill, /lock-status/);
+  assert.match(skill, /recover-lock --confirm/);
+  assert.match(skill, /`conflicts` 非空/);
+  const contracts = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/references/document-contracts.md"), "utf8");
+  assert.match(contracts, /- \[project-task\]/);
+  assert.match(contracts, /worktree_claims_multiple_tasks/);
+  assert.match(contracts, /git diff --check.*cannot/);
+  assert.match(contracts, /deterministically downgrades.*`needs_verification`/);
 });
