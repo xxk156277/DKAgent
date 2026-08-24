@@ -161,9 +161,48 @@ test("emit only accepts one simple command with safe arguments", () => {
   }
   const event = emitEvent({
     cwd,
-    input: started({ evidence: [{ kind: "test", summary: "pass", command: "grep status=completed output.log", exitCode: 0 }] }),
+    input: started({ evidence: [{ kind: "test", summary: "pass", command: "node --test status=completed", exitCode: 0 }] }),
   });
   const snapshot = readSnapshot({ cwd });
   assert.equal(snapshot.events.length, 1);
   assert.equal(snapshot.events[0].eventId, event.eventId);
+});
+
+test("emit rejects shell wrappers and non-whitelisted executables", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  for (const command of [
+    "npm test & DATABASE_URL=postgres://db/app",
+    "bash -c 'DATABASE_URL=postgres://db/app npm test'",
+    "node -e process.exit(0)",
+    "python3 -c pass",
+    "npm exec vitest",
+    "curl https://example.test",
+  ]) {
+    assert.throws(
+      () => emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", command, exitCode: 0 }] }) }),
+      /unsafe text content/,
+    );
+  }
+});
+
+test("emit accepts only whitelisted verification commands", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const commands = [
+    "npm test",
+    "npm run test:project-manager",
+    "node --test status=completed",
+    "node --check scripts/project-events.mjs",
+    "git diff --check",
+    "python3 scripts/quick_validate.py .codex/skills/dkagent-project-manager",
+    "tsx --test scripts/project-events.test.mjs",
+    "npx tsx --test scripts/project-events.test.mjs",
+    "npx tsc --noEmit",
+    "npx vitest --run",
+  ];
+  for (const command of commands) {
+    emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", command, exitCode: 0 }] }) });
+  }
+  assert.equal(readSnapshot({ cwd }).events.length, commands.length);
 });

@@ -16,9 +16,9 @@ const DOCUMENTS = ["AGENTS.md", "docs/project/STATUS.md", "docs/project/BACKLOG.
 const SECRET_ASSIGNMENT = /\b[A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|AUTHORIZATION)[A-Z0-9_]*\s*=\s*\S+/i;
 const BEARER_TOKEN = /\bBearer\s+\S+/i;
 const SK_TOKEN = /\bsk-[A-Za-z0-9_-]+\b/i;
-const SHELL_CONTROL = /;|&&|\|\||\||[()`<>]|\$\(/;
+const SHELL_CONSTRUCT = /[;|&()`<>'"\\]/;
 const SENSITIVE_HEADER = /\b(?:x-)?api-key\s*:\s*\S+|\bauthorization\s*:\s*\S+/i;
-const SENSITIVE_FLAG = /(?:^|\s)--[a-z0-9-]*(?:api-key|apikey|token|secret|password|passphrase|authorization|auth|credential|private-key)[a-z0-9-]*(?:\s+|=)\S+/i;
+const SENSITIVE_FLAG = /(?:^|\s)--[a-z0-9-]*(?:api-key|apikey|token|secret|password|passphrase|authorization|auth|credential|private-key)[a-z0-9-]*(?:\s+\S+|=\S+|$)/i;
 const URL_USERINFO = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s]*@/i;
 
 function git(cwd, args) {
@@ -45,30 +45,29 @@ function documentHashes(root) {
   return Object.fromEntries(DOCUMENTS.map((relative) => [relative, hashFile(path.join(root, relative))]));
 }
 
-function isEnvironmentAssignment(token) {
-  return /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
-}
-
-function hasEnvironmentPrefix(tokens) {
-  if (isEnvironmentAssignment(tokens[0])) return true;
-  if (tokens[0] === "export") return isEnvironmentAssignment(tokens[1] || "");
-  if (tokens[0] !== "env") return false;
-
-  for (let index = 1; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (isEnvironmentAssignment(token)) return true;
-    if (token === "--") return isEnvironmentAssignment(tokens[index + 1] || "");
-    if (!token.startsWith("-")) return false;
-    if (token === "-u" || token === "--unset") index += 1;
+function isAllowedValidationCommand(tokens) {
+  const [executable, subcommand] = tokens;
+  if (executable === "npm") {
+    return (tokens.length === 2 && subcommand === "test")
+      || (subcommand === "run" && /^[a-zA-Z0-9:_-]+$/.test(tokens[2] || ""));
+  }
+  if (executable === "node") {
+    return subcommand === "--test" || (subcommand === "--check" && tokens.length === 3);
+  }
+  if (executable === "git") return subcommand === "diff" && tokens.includes("--check");
+  if (executable === "python3") return tokens.length === 3 && /quick_validate\.py$/.test(subcommand || "");
+  if (executable === "tsx") return subcommand === "--test";
+  if (executable === "npx") {
+    return (subcommand === "tsx" && tokens[2] === "--test") || subcommand === "tsc" || subcommand === "vitest";
   }
   return false;
 }
 
 function isUnsafeSimpleCommand(command) {
-  if (SHELL_CONTROL.test(command) || SENSITIVE_HEADER.test(command) || SENSITIVE_FLAG.test(command) || URL_USERINFO.test(command)) {
+  if (SHELL_CONSTRUCT.test(command) || SENSITIVE_HEADER.test(command) || SENSITIVE_FLAG.test(command) || URL_USERINFO.test(command)) {
     return true;
   }
-  return hasEnvironmentPrefix(command.trim().split(/\s+/));
+  return !isAllowedValidationCommand(command.trim().split(/\s+/));
 }
 
 function validateStoredText(value, field, maximumLength, { singleLine = false, command = false } = {}) {
