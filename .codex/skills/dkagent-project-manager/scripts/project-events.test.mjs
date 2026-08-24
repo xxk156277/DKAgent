@@ -677,6 +677,96 @@ test("ack accepts the locked writer changes and is idempotent", () => {
   assert.ok(snapshot.state.processedEventIds.includes(event.eventId));
 });
 
+test("snapshot reconciles orphan processed events without writing state", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const eventId = emitEvent({ cwd, input: started({ taskId: "DKA-RESTART-RECOVERY" }) }).eventId;
+  const root = stateRoot(cwd);
+  renameSync(
+    path.join(root, "events", "pending", `${eventId}.json`),
+    path.join(root, "events", "processed", `${eventId}.json`),
+  );
+  const stateFile = path.join(root, "state.json");
+  const staleState = JSON.parse(readFileSync(stateFile, "utf8"));
+  staleState.processedEventIds = ["00000000-0000-4000-8000-000000000000"];
+  staleState.activeClaims = { "DKA-PHANTOM": [cwd] };
+  writeFileSync(stateFile, `${JSON.stringify(staleState, null, 2)}\n`);
+  const persistedBefore = readFileSync(stateFile, "utf8");
+
+  const snapshot = readSnapshot({ cwd });
+
+  assert.deepEqual(snapshot.state.processedEventIds, [eventId]);
+  assert.deepEqual(snapshot.state.activeClaims, { "DKA-RESTART-RECOVERY": [cwd] });
+  assert.deepEqual(snapshot.recoveryEvents.map((event) => event.eventId), [eventId]);
+  assert.equal(readFileSync(stateFile, "utf8"), persistedBefore);
+});
+
+test("ack blocks orphan processed WIP conflicts before moving or recording events", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const orphan = emitEvent({ cwd, input: started({ taskId: "DKA-ORPHAN-A" }) });
+  const root = stateRoot(cwd);
+  renameSync(
+    path.join(root, "events", "pending", `${orphan.eventId}.json`),
+    path.join(root, "events", "processed", `${orphan.eventId}.json`),
+  );
+  const pending = emitEvent({ cwd, input: started({ taskId: "DKA-PENDING-B" }) });
+  const snapshot = readSnapshot({ cwd });
+  assert.deepEqual(snapshot.recoveryEvents.map((event) => event.eventId), [orphan.eventId]);
+  assert.deepEqual(snapshot.conflicts, [{
+    kind: "worktree_claims_multiple_tasks",
+    worktreePath: cwd,
+    taskIds: [orphan.taskId, pending.taskId],
+  }]);
+
+  const token = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, token, [orphan, pending]);
+  for (const eventIds of [[pending.eventId], [orphan.eventId, pending.eventId]]) {
+    assert.throws(
+      () => ackEvents({ cwd, token, eventIds, expectedDocumentHashes: documentHashes(cwd) }),
+      /active claim conflicts block ACK/,
+    );
+  }
+
+  assert.equal(existsSync(path.join(root, "events", "pending", `${pending.eventId}.json`)), true);
+  assert.equal(existsSync(path.join(root, "events", "processed", `${orphan.eventId}.json`)), true);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(root, "state.json"), "utf8")).processedEventIds, []);
+  assert.equal(lockStatus({ cwd }).owner.token, token);
+  releaseLock({ cwd, token });
+});
+
+test("ack requires every recovery event before persisting reconciled state", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const orphan = emitEvent({
+    cwd,
+    input: started({
+      taskId: "DKA-ORPHAN-FINISHED",
+      action: "finished",
+      status: "needs_verification",
+      summary: "Orphan finished event",
+    }),
+  });
+  const root = stateRoot(cwd);
+  renameSync(
+    path.join(root, "events", "pending", `${orphan.eventId}.json`),
+    path.join(root, "events", "processed", `${orphan.eventId}.json`),
+  );
+  const pending = emitEvent({ cwd, input: started({ taskId: "DKA-RECOVERY-OMITTED" }) });
+  const token = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, token, [pending]);
+
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [pending.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /event IDs must include all recovery events/,
+  );
+
+  assert.equal(existsSync(path.join(root, "events", "pending", `${pending.eventId}.json`)), true);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(root, "state.json"), "utf8")).processedEventIds, []);
+  assert.equal(lockStatus({ cwd }).owner.token, token);
+  releaseLock({ cwd, token });
+});
+
 test("ack repairs an event moved before state persistence", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
@@ -690,6 +780,47 @@ test("ack repairs an event moved before state persistence", () => {
   renderTaskDocuments(cwd, token, [event]);
   ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) });
   assert.ok(readSnapshot({ cwd }).state.processedEventIds.includes(event.eventId));
+});
+
+test("ack uses snapshot recovery IDs and persists a fully reconciled processed state", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const orphan = emitEvent({
+    cwd,
+    input: started({
+      taskId: "DKA-RECOVER-ORPHAN",
+      action: "finished",
+      status: "needs_verification",
+      summary: "Recover completed orphan",
+    }),
+  });
+  const pending = emitEvent({ cwd, input: started({ taskId: "DKA-RECOVER-PENDING" }) });
+  writePendingEvent(cwd, pending, "2026-08-24T00:00:00.000Z");
+  writePendingEvent(cwd, orphan, "2026-08-24T00:00:01.000Z");
+  const root = stateRoot(cwd);
+  renameSync(
+    path.join(root, "events", "pending", `${orphan.eventId}.json`),
+    path.join(root, "events", "processed", `${orphan.eventId}.json`),
+  );
+
+  const recoveryIds = readSnapshot({ cwd }).recoveryEvents.map((event) => event.eventId);
+  assert.deepEqual(recoveryIds, [orphan.eventId]);
+  const token = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, token, [orphan, pending]);
+  ackEvents({
+    cwd,
+    token,
+    eventIds: [...recoveryIds, pending.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
+  });
+
+  const snapshot = readSnapshot({ cwd });
+  assert.deepEqual(snapshot.recoveryEvents, []);
+  assert.deepEqual(snapshot.state.processedEventIds, [pending.eventId, orphan.eventId]);
+  assert.deepEqual(snapshot.state.activeClaims, { [pending.taskId]: [cwd] });
+  const persisted = JSON.parse(readFileSync(path.join(root, "state.json"), "utf8"));
+  assert.deepEqual(persisted.processedEventIds, [pending.eventId, orphan.eventId]);
+  assert.deepEqual(persisted.activeClaims, { [pending.taskId]: [cwd] });
 });
 
 test("ack replays processed events in creation order instead of input order", () => {
@@ -1283,6 +1414,8 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(skill, /schema version.*canonical worktree.*branch.*HEAD.*creation time/);
   assert.match(skill, /sorts by.*createdAt.*eventId.*folds by taskId/);
   assert.match(skill, /all pending events for every selected task/);
+  assert.match(skill, /recoveryEvents.*event-ids/);
+  assert.match(skill, /processed.*source of truth/i);
   const contracts = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/references/document-contracts.md"), "utf8");
   assert.match(contracts, /- \[project-task\]/);
   assert.match(contracts, /- \[project-event\]/);
@@ -1296,6 +1429,8 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(contracts, /ACK sort requested events by.*createdAt.*eventId/);
   assert.match(contracts, /exactly one current block across STATUS and BACKLOG/);
   assert.match(contracts, /include all pending events for each selected task/);
+  assert.match(contracts, /read-only reconciled.*recoveryEvents/);
+  assert.match(contracts, /all recoveryEvents.*eventIds/);
   assert.match(contracts, /git diff --check.*cannot/);
   assert.match(contracts, /deterministically downgrades.*`needs_verification`/);
   const report = readFileSync(path.join(repositoryRoot, ".superpowers/sdd/final-fix-report.md"), "utf8");
@@ -1303,4 +1438,5 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(report, /canonical event projection/);
   assert.match(report, /latest current projection/);
   assert.match(report, /folded latest projection/);
+  assert.match(report, /processed directory.*source of truth/);
 });

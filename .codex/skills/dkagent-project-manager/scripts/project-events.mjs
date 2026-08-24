@@ -411,9 +411,9 @@ function applyActiveClaim(activeClaims, event) {
   else delete activeClaims[event.taskId];
 }
 
-function replayActiveClaims(root) {
+function readProcessedEvents(root) {
   const processed = path.join(root, "events", "processed");
-  const events = readdirSync(processed)
+  return readdirSync(processed)
     .filter((name) => name.endsWith(".json"))
     .map((name) => ({ eventId: name.slice(0, -".json".length), file: path.join(processed, name) }))
     .filter(({ eventId }) => EVENT_ID.test(eventId))
@@ -421,9 +421,17 @@ function replayActiveClaims(root) {
     .filter(({ eventId, event }) => isStoredEvent(event, eventId))
     .map(({ event }) => event)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId));
+}
+
+function reconcileProcessedState(root, state) {
+  const events = readProcessedEvents(root);
   const activeClaims = {};
   for (const event of events) applyActiveClaim(activeClaims, event);
-  return activeClaims;
+  const recordedIds = new Set(state.processedEventIds);
+  return {
+    state: { ...state, processedEventIds: events.map((event) => event.eventId), activeClaims },
+    recoveryEvents: events.filter((event) => !recordedIds.has(event.eventId)),
+  };
 }
 
 function targetStatus(config, state) {
@@ -738,8 +746,9 @@ export function readSnapshot({ cwd, token } = {}) {
   if (token) requireToken(root, token);
   const events = readPendingEvents(root);
   const config = readJson(path.join(root, "config.json"));
-  const state = readJson(path.join(root, "state.json"));
-  return { config, state, events, conflicts: activeClaimConflicts(state, events), target: targetStatus(config, state) };
+  const persistedState = readJson(path.join(root, "state.json"));
+  const { state, recoveryEvents } = reconcileProcessedState(root, persistedState);
+  return { config, state, events, recoveryEvents, conflicts: activeClaimConflicts(state, events), target: targetStatus(config, state) };
 }
 
 export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
@@ -747,7 +756,8 @@ export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
   const owner = requireToken(root, token);
   const config = readJson(path.join(root, "config.json"));
   const stateFile = path.join(root, "state.json");
-  const state = readJson(stateFile);
+  const persistedState = readJson(stateFile);
+  const { state, recoveryEvents } = reconcileProcessedState(root, persistedState);
   if (!sameDocumentHashes(owner.baselineHashes, state.documentHashes)) {
     throw new Error("document baseline changed after lock acquisition");
   }
@@ -768,6 +778,10 @@ export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
   const allPendingEvents = readPendingEvents(root);
   const conflicts = activeClaimConflicts(state, allPendingEvents);
   if (conflicts.length) throw new Error(`active claim conflicts block ACK: ${JSON.stringify(conflicts)}`);
+  const requestedIds = new Set(eventIds);
+  if (recoveryEvents.some((event) => !requestedIds.has(event.eventId))) {
+    throw new Error("event IDs must include all recovery events");
+  }
   const requestedEvents = [];
   const pendingEvents = [];
   for (const eventId of eventIds) {
@@ -779,7 +793,6 @@ export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
     requestedEvents.push(event);
     if (!state.processedEventIds.includes(eventId)) pendingEvents.push(event);
   }
-  const requestedIds = new Set(eventIds);
   const selectedTaskIds = new Set(requestedEvents.map((event) => event.taskId));
   for (const event of allPendingEvents) {
     if (selectedTaskIds.has(event.taskId) && !requestedIds.has(event.eventId)) {
@@ -801,14 +814,13 @@ export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
     const source = path.join(root, "events", "pending", `${event.eventId}.json`);
     const destination = path.join(root, "events", "processed", `${event.eventId}.json`);
     if (existsSync(source)) renameSync(source, destination);
-    state.processedEventIds.push(event.eventId);
   }
-  state.activeClaims = replayActiveClaims(root);
-  state.documentHashes = currentDocumentHashes;
-  state.lastSynchronizedAt = new Date().toISOString();
-  writeJsonAtomic(stateFile, state);
+  const reconciledState = reconcileProcessedState(root, state).state;
+  reconciledState.documentHashes = currentDocumentHashes;
+  reconciledState.lastSynchronizedAt = new Date().toISOString();
+  writeJsonAtomic(stateFile, reconciledState);
   releaseLock({ cwd, token });
-  return state;
+  return reconciledState;
 }
 
 export function adoptDocuments({ cwd, token }) {

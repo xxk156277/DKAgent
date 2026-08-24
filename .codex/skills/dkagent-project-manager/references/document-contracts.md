@@ -33,6 +33,10 @@ STATUS/BACKLOG hold one current projection per `taskId`: the current projection 
 
 `project` and ACK sort requested events by `(createdAt,eventId)` and fold them by `taskId`; only the folded latest projection is written and verified, while every requested event is still moved to `events/processed/` and recorded in that order. `eventIds` must include all pending events for each selected task, so a partial ACK cannot later overwrite the current view with an older event. A requested event already moved to processed during the recovery window but not yet recorded in state remains eligible for ACK.
 
+The processed directory is the source of truth for derived state. Snapshot scans every valid stored event in `(createdAt,eventId)` order and returns a read-only reconciled `state` plus `recoveryEvents` for processed events absent from persisted `processedEventIds`; snapshot never writes state. Conflicts use the reconciled active claims plus all pending events, so a restart cannot hide WIP.
+
+ACK requires all recoveryEvents IDs in `eventIds`; they participate in the same task-folded projection validation with pending events instead of being silently recorded. Before moving anything, ACK reconciles processed state and checks WIP conflicts. On success it scans processed again and persists complete sorted `processedEventIds` and replayed `activeClaims`, including recovered events. On failure it writes neither state nor event moves and retains the lock.
+
 ACK scans canonical projection blocks in both documents. Each selected task must have exactly one current block across STATUS and BACKLOG, and that block must equal the folded latest event. It rejects only-old projection, old+new coexistence, repeated blocks in one file, and duplicates split across both files.
 
 ## BACKLOG.md
