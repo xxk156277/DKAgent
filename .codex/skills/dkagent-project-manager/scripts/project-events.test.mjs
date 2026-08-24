@@ -161,7 +161,7 @@ test("emit only accepts one simple command with safe arguments", () => {
   }
   const event = emitEvent({
     cwd,
-    input: started({ evidence: [{ kind: "test", summary: "pass", command: "node --test status=completed", exitCode: 0 }] }),
+    input: started({ evidence: [{ kind: "test", summary: "pass", command: "node --test .codex/skills/dkagent-project-manager/scripts/project-events.test.mjs", exitCode: 0 }] }),
   });
   const snapshot = readSnapshot({ cwd });
   assert.equal(snapshot.events.length, 1);
@@ -192,7 +192,7 @@ test("emit accepts only whitelisted verification commands", () => {
   const commands = [
     "npm test",
     "npm run test:project-manager",
-    "node --test status=completed",
+    "node --test .codex/skills/dkagent-project-manager/scripts/project-events.test.mjs",
     "node --check scripts/project-events.mjs",
     "git diff --check",
     "python3 scripts/quick_validate.py .codex/skills/dkagent-project-manager",
@@ -205,4 +205,19 @@ test("emit accepts only whitelisted verification commands", () => {
     emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", command, exitCode: 0 }] }) });
   }
   assert.equal(readSnapshot({ cwd }).events.length, commands.length);
+});
+
+test("emit rejects environment assignments hidden in allowed command arguments", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  for (const command of [
+    "npm run test:project-manager -- DATABASE_URL=postgres://db/app",
+    "node --test --test-reporter-destination=DATABASE_URL=postgres://db/app",
+    "npx vitest --run --config=DATABASE_URL=postgres://db/app",
+  ]) {
+    assert.throws(
+      () => emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", command, exitCode: 0 }] }) }),
+      /unsafe text content/,
+    );
+  }
 });

@@ -20,6 +20,10 @@ const SHELL_CONSTRUCT = /[;|&()`<>'"\\]/;
 const SENSITIVE_HEADER = /\b(?:x-)?api-key\s*:\s*\S+|\bauthorization\s*:\s*\S+/i;
 const SENSITIVE_FLAG = /(?:^|\s)--[a-z0-9-]*(?:api-key|apikey|token|secret|password|passphrase|authorization|auth|credential|private-key)[a-z0-9-]*(?:\s+\S+|=\S+|$)/i;
 const URL_USERINFO = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s]*@/i;
+const ENVIRONMENT_ASSIGNMENT_TOKEN = /[A-Za-z_][A-Za-z0-9_]*=/;
+const PATH_TOKEN = /^(?:\/|\.{1,2}\/)?[A-Za-z0-9_./*-]+$/;
+const TEST_PATH = /\.test\.[cm]?[jt]s$/;
+const NODE_CHECK_PATH = /\.[cm]?js$/;
 
 function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -45,20 +49,27 @@ function documentHashes(root) {
   return Object.fromEntries(DOCUMENTS.map((relative) => [relative, hashFile(path.join(root, relative))]));
 }
 
+function areTestPaths(tokens) {
+  return tokens.every((token) => PATH_TOKEN.test(token) && TEST_PATH.test(token));
+}
+
 function isAllowedValidationCommand(tokens) {
   const [executable, subcommand] = tokens;
   if (executable === "npm") {
     return (tokens.length === 2 && subcommand === "test")
-      || (subcommand === "run" && /^[a-zA-Z0-9:_-]+$/.test(tokens[2] || ""));
+      || (tokens.length === 3 && subcommand === "run" && /^[a-zA-Z0-9:_-]+$/.test(tokens[2] || ""));
   }
   if (executable === "node") {
-    return subcommand === "--test" || (subcommand === "--check" && tokens.length === 3);
+    return (subcommand === "--test" && areTestPaths(tokens.slice(2)))
+      || (subcommand === "--check" && tokens.length === 3 && PATH_TOKEN.test(tokens[2]) && NODE_CHECK_PATH.test(tokens[2]));
   }
-  if (executable === "git") return subcommand === "diff" && tokens.includes("--check");
-  if (executable === "python3") return tokens.length === 3 && /quick_validate\.py$/.test(subcommand || "");
-  if (executable === "tsx") return subcommand === "--test";
+  if (executable === "git") return tokens.length === 3 && subcommand === "diff" && tokens[2] === "--check";
+  if (executable === "python3") return tokens.length === 3 && PATH_TOKEN.test(subcommand || "") && /quick_validate\.py$/.test(subcommand) && PATH_TOKEN.test(tokens[2]);
+  if (executable === "tsx") return subcommand === "--test" && areTestPaths(tokens.slice(2));
   if (executable === "npx") {
-    return (subcommand === "tsx" && tokens[2] === "--test") || subcommand === "tsc" || subcommand === "vitest";
+    return (subcommand === "tsx" && tokens[2] === "--test" && areTestPaths(tokens.slice(3)))
+      || (tokens.length === 3 && subcommand === "tsc" && tokens[2] === "--noEmit")
+      || (tokens.length === 3 && subcommand === "vitest" && tokens[2] === "--run");
   }
   return false;
 }
@@ -67,7 +78,8 @@ function isUnsafeSimpleCommand(command) {
   if (SHELL_CONSTRUCT.test(command) || SENSITIVE_HEADER.test(command) || SENSITIVE_FLAG.test(command) || URL_USERINFO.test(command)) {
     return true;
   }
-  return !isAllowedValidationCommand(command.trim().split(/\s+/));
+  const tokens = command.trim().split(/\s+/);
+  return tokens.some((token) => ENVIRONMENT_ASSIGNMENT_TOKEN.test(token)) || !isAllowedValidationCommand(tokens);
 }
 
 function validateStoredText(value, field, maximumLength, { singleLine = false, command = false } = {}) {
