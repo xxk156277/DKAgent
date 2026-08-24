@@ -8,11 +8,14 @@ import { fileURLToPath } from "node:url";
 const EVENT_FIELDS = new Set(["taskId", "action", "module", "summary", "status", "dependencies", "evidence", "discoveredTodos"]);
 const ACTIONS = new Set(["started", "finished", "blocked", "discovered"]);
 const STATUSES = new Set(["in_progress", "completed", "needs_verification", "blocked"]);
-const BEHAVIOR_EVIDENCE = new Set(["test", "typecheck", "build", "user_confirmation"]);
+const EXECUTION_EVIDENCE = new Set(["test", "typecheck", "build"]);
 const EVIDENCE_KINDS = new Set(["test", "typecheck", "build", "commit", "user_confirmation"]);
 const EVIDENCE_FIELDS = new Set(["kind", "summary", "command", "exitCode"]);
 const DISCOVERED_FIELDS = new Set(["summary", "module", "reason"]);
 const DOCUMENTS = ["AGENTS.md", "docs/project/STATUS.md", "docs/project/BACKLOG.md"];
+const SECRET_ASSIGNMENT = /\b[A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|AUTHORIZATION)[A-Z0-9_]*\s*(?:=|:)\s*\S+/i;
+const BEARER_TOKEN = /\bBearer\s+\S+/i;
+const SK_TOKEN = /\bsk-[A-Za-z0-9_-]+\b/i;
 
 function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -36,6 +39,15 @@ function hashFile(file) {
 
 function documentHashes(root) {
   return Object.fromEntries(DOCUMENTS.map((relative) => [relative, hashFile(path.join(root, relative))]));
+}
+
+function validateStoredText(value, field, maximumLength, { singleLine = false } = {}) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
+  if (value.length > maximumLength) throw new Error(`${field} text is too long`);
+  if (singleLine && /[\r\n]/.test(value)) throw new Error(`${field} must be a single line`);
+  if (SECRET_ASSIGNMENT.test(value) || BEARER_TOKEN.test(value) || SK_TOKEN.test(value)) {
+    throw new Error("unsafe text content");
+  }
 }
 
 export function stateRoot(cwd) {
@@ -75,6 +87,9 @@ function validateInput(input) {
   for (const key of ["taskId", "module", "summary"]) {
     if (typeof input[key] !== "string" || !input[key].trim()) throw new Error(`${key} is required`);
   }
+  validateStoredText(input.taskId, "taskId", 128);
+  validateStoredText(input.module, "module", 120);
+  validateStoredText(input.summary, "summary", 500);
   if (!ACTIONS.has(input.action)) throw new Error("invalid action");
   if (!STATUSES.has(input.status)) throw new Error("invalid status");
   for (const key of ["dependencies", "evidence", "discoveredTodos"]) {
@@ -83,12 +98,21 @@ function validateInput(input) {
   if (input.dependencies.some((item) => typeof item !== "string" || !item.trim())) {
     throw new Error("dependencies must contain non-empty task IDs");
   }
+  for (const dependency of input.dependencies) validateStoredText(dependency, "dependency", 128);
   for (const evidence of input.evidence) {
     for (const key of Object.keys(evidence)) {
       if (!EVIDENCE_FIELDS.has(key)) throw new Error(`unknown evidence field: ${key}`);
     }
     if (!EVIDENCE_KINDS.has(evidence.kind) || typeof evidence.summary !== "string" || !evidence.summary.trim()) {
       throw new Error("invalid evidence item");
+    }
+    validateStoredText(evidence.summary, "evidence summary", 500);
+    if (EXECUTION_EVIDENCE.has(evidence.kind) && evidence.command === undefined) {
+      throw new Error("evidence command is required");
+    }
+    if (evidence.command !== undefined) validateStoredText(evidence.command, "command", 1000, { singleLine: true });
+    if (EXECUTION_EVIDENCE.has(evidence.kind) && evidence.exitCode === undefined) {
+      throw new Error("evidence exitCode is required");
     }
     if (evidence.exitCode !== undefined && !Number.isInteger(evidence.exitCode)) {
       throw new Error("evidence exitCode must be an integer");
@@ -103,6 +127,9 @@ function validateInput(input) {
         throw new Error(`discovered todo ${key} is required`);
       }
     }
+    validateStoredText(todo.summary, "discovered todo summary", 500);
+    validateStoredText(todo.module, "discovered todo module", 120);
+    validateStoredText(todo.reason, "discovered todo reason", 500);
   }
   if (input.action === "started" && input.status !== "in_progress") {
     throw new Error("started event must be in_progress");
@@ -115,7 +142,7 @@ function validateInput(input) {
   }
   if (input.status === "completed") {
     const proved = input.evidence.some(
-      (item) => BEHAVIOR_EVIDENCE.has(item.kind) && (item.kind === "user_confirmation" || item.exitCode === 0),
+      (item) => item.kind === "user_confirmation" || (EXECUTION_EVIDENCE.has(item.kind) && item.exitCode === 0),
     );
     if (!proved) throw new Error("completed code task requires successful behavioral evidence");
   }

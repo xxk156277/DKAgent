@@ -67,6 +67,10 @@ test("emit rejects extra fields and unsupported completion", () => {
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   assert.throws(() => emitEvent({ cwd, input: started({ rawLog: "secret" }) }), /unknown event field: rawLog/);
   assert.throws(
+    () => emitEvent({ cwd, input: started({ discoveredTodos: [{ summary: "Follow up", module: "agent", reason: "Gap", rawLog: "secret" }] }) }),
+    /unknown discovered todo field: rawLog/,
+  );
+  assert.throws(
     () => emitEvent({ cwd, input: started({ action: "finished", status: "completed" }) }),
     /completed code task requires successful behavioral evidence/,
   );
@@ -74,4 +78,38 @@ test("emit rejects extra fields and unsupported completion", () => {
     () => emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", exitCode: 0, rawLog: "secret" }] }) }),
     /unknown evidence field: rawLog/,
   );
+});
+
+test("emit rejects unsafe or oversized persisted text", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  assert.throws(
+    () => emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", command: "TOKEN=example-secret npm test", exitCode: 0 }] }) }),
+    /unsafe text content/,
+  );
+  assert.throws(() => emitEvent({ cwd, input: started({ summary: "x".repeat(501) }) }), /text is too long/);
+  assert.throws(
+    () => emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", command: "npm test\nnpm run typecheck", exitCode: 0 }] }) }),
+    /command must be a single line/,
+  );
+});
+
+test("completion requires complete execution evidence and accepts a successful command", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  assert.throws(
+    () => emitEvent({ cwd, input: started({ action: "finished", status: "completed", evidence: [{ kind: "test", summary: "pass", exitCode: 0 }] }) }),
+    /evidence command is required/,
+  );
+  const event = emitEvent({
+    cwd,
+    input: started({
+      action: "finished",
+      status: "completed",
+      evidence: [{ kind: "test", summary: "pass", command: "npm test", exitCode: 0 }],
+    }),
+  });
+  const snapshot = readSnapshot({ cwd });
+  assert.equal(snapshot.events.length, 1);
+  assert.equal(snapshot.events[0].eventId, event.eventId);
 });
