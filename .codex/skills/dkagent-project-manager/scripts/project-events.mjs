@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,6 +24,8 @@ const ENVIRONMENT_ASSIGNMENT_TOKEN = /[A-Za-z_][A-Za-z0-9_]*=/;
 const PATH_TOKEN = /^(?:\/|\.{1,2}\/)?[A-Za-z0-9_./*-]+$/;
 const TEST_PATH = /\.test\.[cm]?[jt]s$/;
 const NODE_CHECK_PATH = /\.[cm]?js$/;
+const EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DOCUMENT_HASH = /^[0-9a-f]{64}$/;
 
 function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -47,6 +49,19 @@ function hashFile(file) {
 
 function documentHashes(root) {
   return Object.fromEntries(DOCUMENTS.map((relative) => [relative, hashFile(path.join(root, relative))]));
+}
+
+function validDocumentHashes(hashes) {
+  return hashes
+    && typeof hashes === "object"
+    && !Array.isArray(hashes)
+    && Object.keys(hashes).length === DOCUMENTS.length
+    && DOCUMENTS.every((relative) => Object.hasOwn(hashes, relative) && (hashes[relative] === null || (typeof hashes[relative] === "string" && DOCUMENT_HASH.test(hashes[relative]))));
+}
+
+function sameDocumentHashes(left, right) {
+  return validDocumentHashes(left) && validDocumentHashes(right)
+    && DOCUMENTS.every((relative) => left[relative] === right[relative]);
 }
 
 function containsHighConfidenceCredential(value) {
@@ -223,6 +238,42 @@ function requireToken(root, token) {
   return owner;
 }
 
+function isStoredEvent(event, eventId) {
+  return event
+    && event.eventId === eventId
+    && typeof event.taskId === "string"
+    && Boolean(event.taskId.trim())
+    && typeof event.worktreePath === "string"
+    && Boolean(event.worktreePath)
+    && typeof event.createdAt === "string"
+    && !Number.isNaN(Date.parse(event.createdAt))
+    && ACTIONS.has(event.action)
+    && STATUSES.has(event.status);
+}
+
+function applyActiveClaim(activeClaims, event) {
+  const claims = new Set(activeClaims[event.taskId] ?? []);
+  if (event.action === "started" && event.status === "in_progress") claims.add(event.worktreePath);
+  if (event.action === "finished" || event.action === "blocked") claims.delete(event.worktreePath);
+  if (claims.size) activeClaims[event.taskId] = [...claims].sort();
+  else delete activeClaims[event.taskId];
+}
+
+function replayActiveClaims(root) {
+  const processed = path.join(root, "events", "processed");
+  const events = readdirSync(processed)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => ({ eventId: name.slice(0, -".json".length), file: path.join(processed, name) }))
+    .filter(({ eventId }) => EVENT_ID.test(eventId))
+    .map(({ eventId, file }) => ({ eventId, event: readJson(file) }))
+    .filter(({ eventId, event }) => isStoredEvent(event, eventId))
+    .map(({ event }) => event)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId));
+  const activeClaims = {};
+  for (const event of events) applyActiveClaim(activeClaims, event);
+  return activeClaims;
+}
+
 function targetStatus(config, state) {
   const reasons = [];
   if (!existsSync(config.managementWorktree)) reasons.push("management worktree is missing");
@@ -279,6 +330,24 @@ export function releaseLock({ cwd, token }) {
   return true;
 }
 
+export function lockStatus({ cwd }) {
+  const lock = path.join(stateRoot(cwd), "aggregate.lock");
+  if (!existsSync(lock)) return { held: false, recoverable: false, owner: null };
+  const ownerFile = path.join(lock, "owner.json");
+  if (!existsSync(ownerFile)) return { held: true, recoverable: true, owner: null };
+  return { held: true, recoverable: false, owner: readJson(ownerFile) };
+}
+
+export function recoverLock({ cwd, confirm = false }) {
+  const root = stateRoot(cwd);
+  const lock = path.join(root, "aggregate.lock");
+  if (!existsSync(lock)) throw new Error("aggregate lock is not held");
+  if (existsSync(path.join(lock, "owner.json"))) throw new Error("aggregate lock owner exists; release requires token");
+  if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
+  rmSync(lock, { recursive: true });
+  return true;
+}
+
 export function readSnapshot({ cwd, token } = {}) {
   const root = stateRoot(cwd);
   if (token) requireToken(root, token);
@@ -292,14 +361,25 @@ export function readSnapshot({ cwd, token } = {}) {
   return { config, state, events, conflicts: activeClaimConflicts(state, events), target: targetStatus(config, state) };
 }
 
-export function ackEvents({ cwd, token, eventIds }) {
+export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
   const root = stateRoot(cwd);
   const owner = requireToken(root, token);
   const config = readJson(path.join(root, "config.json"));
   const stateFile = path.join(root, "state.json");
   const state = readJson(stateFile);
-  if (JSON.stringify(owner.baselineHashes) !== JSON.stringify(state.documentHashes)) {
+  if (!sameDocumentHashes(owner.baselineHashes, state.documentHashes)) {
     throw new Error("document baseline changed after lock acquisition");
+  }
+  if (!existsSync(config.managementWorktree)) throw new Error("management worktree is missing");
+  const branch = git(config.managementWorktree, ["branch", "--show-current"]);
+  if (branch !== config.managementBranch) throw new Error(`management branch mismatch: ${branch || "detached"}`);
+  if (!validDocumentHashes(expectedDocumentHashes)) throw new Error("invalid expected document hashes");
+  const currentDocumentHashes = documentHashes(config.managementWorktree);
+  if (!sameDocumentHashes(currentDocumentHashes, expectedDocumentHashes)) {
+    throw new Error("management document hashes do not match expected results");
+  }
+  if (!Array.isArray(eventIds) || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
+    throw new Error("invalid event ID");
   }
   for (const eventId of eventIds) {
     if (state.processedEventIds.includes(eventId)) continue;
@@ -307,15 +387,11 @@ export function ackEvents({ cwd, token, eventIds }) {
     const destination = path.join(root, "events", "processed", `${eventId}.json`);
     if (!existsSync(source) && !existsSync(destination)) throw new Error(`event not found: ${eventId}`);
     const event = readJson(existsSync(source) ? source : destination);
-    const claims = new Set(state.activeClaims[event.taskId] ?? []);
-    if (event.action === "started" && event.status === "in_progress") claims.add(event.worktreePath);
-    if (event.action === "finished" || event.action === "blocked") claims.delete(event.worktreePath);
-    if (claims.size) state.activeClaims[event.taskId] = [...claims].sort();
-    else delete state.activeClaims[event.taskId];
     if (existsSync(source)) renameSync(source, destination);
     state.processedEventIds.push(eventId);
   }
-  state.documentHashes = documentHashes(config.managementWorktree);
+  state.activeClaims = replayActiveClaims(root);
+  state.documentHashes = currentDocumentHashes;
   state.lastSynchronizedAt = new Date().toISOString();
   writeJsonAtomic(stateFile, state);
   releaseLock({ cwd, token });
@@ -340,6 +416,21 @@ function valueAfter(args, flag) {
   return args[index + 1];
 }
 
+function readExpectedDocumentHashes(cwd, file) {
+  const root = realpathSync(cwd);
+  const candidate = path.resolve(root, file);
+  if (path.extname(candidate) !== ".json" || path.relative(root, candidate).startsWith(`..${path.sep}`) || path.isAbsolute(path.relative(root, candidate))) {
+    throw new Error("expected hashes file must be a JSON file inside cwd");
+  }
+  const resolved = realpathSync(candidate);
+  if (path.relative(root, resolved).startsWith(`..${path.sep}`) || path.isAbsolute(path.relative(root, resolved))) {
+    throw new Error("expected hashes file must be a JSON file inside cwd");
+  }
+  const hashes = readJson(resolved);
+  if (!validDocumentHashes(hashes)) throw new Error("invalid expected document hashes");
+  return hashes;
+}
+
 async function main(args) {
   const [command] = args;
   const cwd = process.cwd();
@@ -353,8 +444,17 @@ async function main(args) {
   if (command === "emit") return emitEvent({ cwd, input: readJson(path.resolve(valueAfter(args, "--file"))) });
   if (command === "acquire-lock") return acquireLock({ cwd });
   if (command === "release-lock") return { released: releaseLock({ cwd, token: valueAfter(args, "--token") }) };
+  if (command === "lock-status") return lockStatus({ cwd });
+  if (command === "recover-lock") return { recovered: recoverLock({ cwd, confirm: args.includes("--confirm") }) };
   if (command === "adopt-documents") return adoptDocuments({ cwd, token: valueAfter(args, "--token") });
-  if (command === "ack") return ackEvents({ cwd, token: valueAfter(args, "--token"), eventIds: valueAfter(args, "--event-ids").split(",").filter(Boolean) });
+  if (command === "ack") {
+    return ackEvents({
+      cwd,
+      token: valueAfter(args, "--token"),
+      eventIds: valueAfter(args, "--event-ids").split(",").filter(Boolean),
+      expectedDocumentHashes: readExpectedDocumentHashes(cwd, valueAfter(args, "--expected-hashes-file")),
+    });
+  }
   if (command === "snapshot") return readSnapshot({ cwd, token: args.includes("--token") ? valueAfter(args, "--token") : undefined });
   throw new Error(`unknown command: ${command || "<empty>"}`);
 }

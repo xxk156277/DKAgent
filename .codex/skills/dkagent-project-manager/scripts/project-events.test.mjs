@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, renameSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,7 +11,9 @@ import {
   adoptDocuments,
   emitEvent,
   initStore,
+  lockStatus,
   readSnapshot,
+  recoverLock,
   releaseLock,
   stateRoot,
 } from "./project-events.mjs";
@@ -42,6 +45,25 @@ function started(overrides = {}) {
     discoveredTodos: [],
     ...overrides,
   };
+}
+
+function documentHashes(cwd) {
+  return Object.fromEntries([
+    "AGENTS.md",
+    "docs/project/STATUS.md",
+    "docs/project/BACKLOG.md",
+  ].map((relative) => {
+    const file = path.join(cwd, relative);
+    return [relative, existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : null];
+  }));
+}
+
+function writePendingEvent(cwd, event, createdAt) {
+  const root = stateRoot(cwd);
+  writeFileSync(
+    path.join(root, "events", "pending", `${event.eventId}.json`),
+    `${JSON.stringify({ ...event, createdAt }, null, 2)}\n`,
+  );
 }
 
 test("init records the explicit main worktree", () => {
@@ -275,7 +297,7 @@ test("processed active claim still conflicts with a later worktree", () => {
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const first = emitEvent({ cwd, input: started() });
   const firstToken = acquireLock({ cwd }).token;
-  ackEvents({ cwd, token: firstToken, eventIds: [first.eventId] });
+  ackEvents({ cwd, token: firstToken, eventIds: [first.eventId], expectedDocumentHashes: documentHashes(cwd) });
   const second = `${cwd}-later`;
   git(cwd, "worktree", "add", "-b", "later", second);
   emitEvent({ cwd: second, input: started() });
@@ -311,9 +333,9 @@ test("ack accepts the locked writer changes and is idempotent", () => {
   const token = acquireLock({ cwd }).token;
   assert.equal(readSnapshot({ cwd, token }).target.safe, true);
   writeFileSync(path.join(cwd, "AGENTS.md"), "# Aggregated rules\n");
-  ackEvents({ cwd, token, eventIds: [event.eventId] });
+  ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) });
   const repeatedToken = acquireLock({ cwd }).token;
-  ackEvents({ cwd, token: repeatedToken, eventIds: [event.eventId] });
+  ackEvents({ cwd, token: repeatedToken, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) });
   const snapshot = readSnapshot({ cwd });
   assert.equal(snapshot.events.length, 0);
   assert.ok(snapshot.state.processedEventIds.includes(event.eventId));
@@ -329,6 +351,77 @@ test("ack repairs an event moved before state persistence", () => {
     path.join(root, "events", "processed", `${event.eventId}.json`),
   );
   const token = acquireLock({ cwd }).token;
-  ackEvents({ cwd, token, eventIds: [event.eventId] });
+  ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) });
   assert.ok(readSnapshot({ cwd }).state.processedEventIds.includes(event.eventId));
+});
+
+test("ack replays processed events in creation order instead of input order", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const first = emitEvent({ cwd, input: started() });
+  const finished = emitEvent({ cwd, input: started({ action: "finished", status: "needs_verification" }) });
+  const last = emitEvent({ cwd, input: started() });
+  writePendingEvent(cwd, first, "2026-08-24T00:00:00.000Z");
+  writePendingEvent(cwd, finished, "2026-08-24T00:00:01.000Z");
+  writePendingEvent(cwd, last, "2026-08-24T00:00:02.000Z");
+  const token = acquireLock({ cwd }).token;
+  ackEvents({
+    cwd,
+    token,
+    eventIds: [last.eventId, first.eventId, finished.eventId],
+    expectedDocumentHashes: documentHashes(cwd),
+  });
+  assert.deepEqual(readSnapshot({ cwd }).state.activeClaims, { [first.taskId]: [cwd] });
+});
+
+test("ack rejects external document drift that differs from rendered hashes", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started() });
+  const token = acquireLock({ cwd }).token;
+  writeFileSync(path.join(cwd, "AGENTS.md"), "# Human drift\n");
+  const expectedDocumentHashes = documentHashes(cwd);
+  expectedDocumentHashes["AGENTS.md"] = createHash("sha256").update("# Rendered rules\n").digest("hex");
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes }),
+    /management document hashes do not match expected results/,
+  );
+  const snapshot = readSnapshot({ cwd, token });
+  assert.equal(snapshot.events.length, 1);
+  assert.equal(snapshot.state.processedEventIds.length, 0);
+  releaseLock({ cwd, token });
+});
+
+test("ack rejects an invalid event ID without changing state", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const token = acquireLock({ cwd }).token;
+  const before = readSnapshot({ cwd, token }).state;
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: ["../../config"], expectedDocumentHashes: documentHashes(cwd) }),
+    /invalid event ID/,
+  );
+  assert.deepEqual(readSnapshot({ cwd, token }).state, before);
+  assert.ok(existsSync(path.join(stateRoot(cwd), "config.json")));
+  releaseLock({ cwd, token });
+});
+
+test("half-created locks are diagnosable and require explicit recovery", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const root = stateRoot(cwd);
+  mkdirSync(path.join(root, "aggregate.lock"));
+  assert.deepEqual(lockStatus({ cwd }), { held: true, recoverable: true, owner: null });
+  assert.throws(() => recoverLock({ cwd }), /lock recovery requires explicit confirmation/);
+  assert.equal(recoverLock({ cwd, confirm: true }), true);
+  assert.ok(acquireLock({ cwd }).token);
+});
+
+test("lock recovery refuses to delete a lock with an owner", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const owner = acquireLock({ cwd });
+  assert.equal(lockStatus({ cwd }).recoverable, false);
+  assert.throws(() => recoverLock({ cwd, confirm: true }), /release requires token/);
+  assert.equal(releaseLock({ cwd, token: owner.token }), true);
 });
