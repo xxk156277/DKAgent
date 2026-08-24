@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -82,9 +82,60 @@ function writeLifecycleIntent(cwd, name, pid) {
   );
 }
 
+function writeAckLifecycleIntent(cwd, name, { pid, lockToken, operation = "ack", includeLockToken = true }) {
+  writeFileSync(
+    path.join(stateRoot(cwd), name),
+    `${JSON.stringify({
+      operation,
+      token: "00000000-0000-4000-8000-000000000000",
+      pid,
+      createdAt: "2026-08-24T00:00:00.000Z",
+      ...(includeLockToken ? { lockToken } : {}),
+    })}\n`,
+  );
+}
+
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const helperPath = path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/scripts/project-events.mjs");
+const helperUrl = new URL("./project-events.mjs", import.meta.url).href;
 const PROJECT_TASK_PREFIX_FOR_TEST = "- [project-task] ";
+
+function runCrashingAck({ cwd, token, eventIds, expectedDocumentHashes, phase, signal = "exit" }) {
+  const source = `
+    import { ackEvents } from ${JSON.stringify(helperUrl)};
+    const input = JSON.parse(process.env.DKA_TEST_ACK_INPUT);
+    ackEvents({ ...input, _testTerminateAfterPhase: ${JSON.stringify(phase)}, _testTerminationSignal: ${JSON.stringify(signal)} });
+  `;
+  return spawnSync(process.execPath, ["--input-type=module", "--eval", source], {
+    cwd,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      DKA_TEST_ACK_INPUT: JSON.stringify({ cwd, token, eventIds, expectedDocumentHashes }),
+    },
+  });
+}
+
+function runAckProcess({ cwd, token, eventIds, expectedDocumentHashes }) {
+  const source = `
+    import { ackEvents } from ${JSON.stringify(helperUrl)};
+    ackEvents(JSON.parse(process.env.DKA_TEST_ACK_INPUT));
+  `;
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", source], {
+      cwd,
+      env: {
+        ...process.env,
+        DKA_TEST_ACK_INPUT: JSON.stringify({ cwd, token, eventIds, expectedDocumentHashes }),
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("close", (status, signal) => resolve({ status, signal, stderr }));
+  });
+}
 
 test("init records the explicit main worktree", () => {
   const cwd = createRepo();
@@ -517,6 +568,98 @@ test("external document edit requires explicit adoption", () => {
   assert.equal(readSnapshot({ cwd, token: next }).target.safe, true);
 });
 
+test("adopt lifecycle excludes ACK, acquire, release, and recover until owner deletion", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ADOPT-LIFECYCLE" }) });
+  writeFileSync(path.join(cwd, "AGENTS.md"), "# Adopted edit\n");
+  const owner = acquireLock({ cwd });
+  let checked = false;
+
+  adoptDocuments({
+    cwd,
+    token: owner.token,
+    _testAfterLifecycleAcquired() {
+      checked = true;
+      const status = lockStatus({ cwd });
+      assert.equal(status.lifecycleIntents.length, 1);
+      assert.deepEqual(
+        {
+          operation: status.lifecycleIntents[0].operation,
+          lockToken: status.lifecycleIntents[0].lockToken,
+          processAlive: status.lifecycleIntents[0].processAlive,
+        },
+        { operation: "adopt", lockToken: owner.token, processAlive: true },
+      );
+      assert.throws(
+        () => ackEvents({ cwd, token: owner.token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+        /lifecycle operation is in progress/,
+      );
+      assert.throws(() => acquireLock({ cwd }), /lifecycle operation is in progress/);
+      assert.throws(() => releaseLock({ cwd, token: owner.token }), /lifecycle operation is in progress/);
+      assert.throws(() => recoverLock({ cwd, confirm: true }), /lifecycle operation is in progress/);
+    },
+  });
+
+  assert.equal(checked, true);
+  assert.equal(lockStatus({ cwd }).held, false);
+  assert.equal(lockStatus({ cwd }).intentMarkers, undefined);
+});
+
+test("adopt refuses an unfinished ACK intent before changing state or owner", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ADOPT-ACK-INTENT" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  assert.throws(
+    () => ackEvents({
+      cwd,
+      token: owner.token,
+      eventIds: [event.eventId],
+      expectedDocumentHashes: documentHashes(cwd),
+      _testCrashAfterPhase: "intent",
+    }),
+    /simulated crash after ACK intent/,
+  );
+  const root = stateRoot(cwd);
+  const beforeState = readFileSync(path.join(root, "state.json"), "utf8");
+
+  assert.throws(
+    () => adoptDocuments({ cwd, token: owner.token }),
+    /ACK intent must be completed before adopting documents/,
+  );
+  assert.equal(readFileSync(path.join(root, "state.json"), "utf8"), beforeState);
+  assert.equal(lockStatus({ cwd }).owner.token, owner.token);
+  assert.equal(existsSync(path.join(root, "ack-intent.json")), true);
+});
+
+test("adopt revalidates its owner before writing adopted hashes", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  writeFileSync(path.join(cwd, "AGENTS.md"), "# Owner recheck edit\n");
+  const owner = acquireLock({ cwd });
+  const root = stateRoot(cwd);
+  const beforeState = readFileSync(path.join(root, "state.json"), "utf8");
+  const replacement = { ...owner, token: "00000000-0000-4000-8000-000000000001" };
+
+  assert.throws(
+    () => adoptDocuments({
+      cwd,
+      token: owner.token,
+      _testBeforeStateWrite() {
+        writeFileSync(
+          path.join(root, "aggregate.lock"),
+          `${JSON.stringify(replacement, null, 2)}\n`,
+        );
+      },
+    }),
+    /aggregate lock token mismatch/,
+  );
+  assert.equal(readFileSync(path.join(root, "state.json"), "utf8"), beforeState);
+  assert.equal(lockStatus({ cwd }).owner.token, replacement.token);
+});
+
 test("adopt rejects management branch drift and retains the lock", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
@@ -906,6 +1049,254 @@ test("snapshot exposes a safe ACK-intent recovery before event moves", () => {
   assert.equal(lockStatus({ cwd }).held, false);
 });
 
+test("a real process exit after ACK journal publication permits exact-token takeover", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-DEAD-JOURNAL" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const expectedDocumentHashes = documentHashes(cwd);
+
+  const crashed = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "intent",
+  });
+  assert.equal(crashed.status, 86, crashed.stderr);
+  const crashedStatus = lockStatus({ cwd });
+  assert.equal(crashedStatus.lifecycleIntents.length, 1);
+  assert.deepEqual(
+    {
+      operation: crashedStatus.lifecycleIntents[0].operation,
+      lockToken: crashedStatus.lifecycleIntents[0].lockToken,
+      processAlive: crashedStatus.lifecycleIntents[0].processAlive,
+      takeoverEligible: crashedStatus.lifecycleIntents[0].takeoverEligible,
+    },
+    { operation: "ack", lockToken: owner.token, processAlive: false, takeoverEligible: true },
+  );
+  const snapshot = readSnapshot({ cwd });
+  assert.equal(snapshot.target.recoveryMode, "ack_intent");
+
+  ackEvents({
+    cwd,
+    token: owner.token,
+    eventIds: snapshot.ackRecoveryEventIds,
+    expectedDocumentHashes: snapshot.ackIntent.expectedDocumentHashes,
+  });
+  assert.equal(lockStatus({ cwd }).held, false);
+  assert.equal(existsSync(path.join(stateRoot(cwd), "ack-intent.json")), false);
+  assert.equal(existsSync(path.join(stateRoot(cwd), "events", "processed", `${event.eventId}.json`)), true);
+});
+
+test("a SIGKILL after ACK event moves permits exact-token takeover and state recovery", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-DEAD-EVENTS" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const expectedDocumentHashes = documentHashes(cwd);
+
+  const crashed = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "events",
+    signal: "SIGKILL",
+  });
+  assert.equal(crashed.status, null);
+  assert.equal(crashed.signal, "SIGKILL");
+  const snapshot = readSnapshot({ cwd });
+  assert.equal(snapshot.target.recoveryMode, "ack_intent");
+  assert.deepEqual(snapshot.recoveryEvents.map((item) => item.eventId), [event.eventId]);
+
+  ackEvents({
+    cwd,
+    token: owner.token,
+    eventIds: snapshot.ackRecoveryEventIds,
+    expectedDocumentHashes: snapshot.ackIntent.expectedDocumentHashes,
+  });
+  assert.deepEqual(readSnapshot({ cwd }).state.processedEventIds, [event.eventId]);
+  assert.equal(lockStatus({ cwd }).held, false);
+});
+
+test("a real process exit before ACK journal publication permits matching-owner retry", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-DEAD-PREJOURNAL" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const expectedDocumentHashes = documentHashes(cwd);
+
+  const crashed = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "lifecycle",
+  });
+  assert.equal(crashed.status, 86, crashed.stderr);
+  const root = stateRoot(cwd);
+  assert.equal(existsSync(path.join(root, "ack-intent.json")), false);
+  assert.equal(existsSync(path.join(root, "events", "pending", `${event.eventId}.json`)), true);
+  assert.equal(lockStatus({ cwd }).lifecycleIntents[0].processAlive, false);
+
+  ackEvents({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+  });
+  assert.equal(lockStatus({ cwd }).held, false);
+});
+
+test("concurrent exact retries never both take over one dead ACK marker", async () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-TAKEOVER-RACE" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const expectedDocumentHashes = documentHashes(cwd);
+  const crashed = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "lifecycle",
+  });
+  assert.equal(crashed.status, 86, crashed.stderr);
+
+  const retries = await Promise.all([
+    runAckProcess({ cwd, token: owner.token, eventIds: [event.eventId], expectedDocumentHashes }),
+    runAckProcess({ cwd, token: owner.token, eventIds: [event.eventId], expectedDocumentHashes }),
+  ]);
+  const successes = retries.filter((result) => result.status === 0);
+  assert.ok(successes.length <= 1, JSON.stringify(retries));
+  if (successes.length === 0) {
+    ackEvents({ cwd, token: owner.token, eventIds: [event.eventId], expectedDocumentHashes });
+  }
+  assert.equal(lockStatus({ cwd }).held, false);
+  assert.deepEqual(readSnapshot({ cwd }).state.processedEventIds, [event.eventId]);
+});
+
+test("ACK takeover rejects a live matching marker", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-LIVE-MARKER" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  writeAckLifecycleIntent(cwd, "aggregate.intent-ack-live", {
+    pid: process.pid,
+    lockToken: owner.token,
+  });
+
+  assert.throws(
+    () => ackEvents({ cwd, token: owner.token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /lifecycle operation is in progress/,
+  );
+  assert.deepEqual(lockStatus({ cwd }).intentMarkers, ["aggregate.intent-ack-live"]);
+});
+
+test("ACK takeover rejects a dead marker for a different request token", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-WRONG-TOKEN" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  writeAckLifecycleIntent(cwd, "aggregate.intent-ack-dead", {
+    pid: 999999999,
+    lockToken: owner.token,
+  });
+
+  assert.throws(
+    () => ackEvents({
+      cwd,
+      token: "00000000-0000-4000-8000-000000000001",
+      eventIds: [event.eventId],
+      expectedDocumentHashes: documentHashes(cwd),
+    }),
+    /lifecycle operation is in progress/,
+  );
+  assert.deepEqual(lockStatus({ cwd }).intentMarkers, ["aggregate.intent-ack-dead"]);
+});
+
+test("ACK takeover rejects malformed and non-ACK lifecycle markers", () => {
+  for (const variant of [
+    { name: "aggregate.intent-ack-malformed", operation: "ack", includeLockToken: false },
+    { name: "aggregate.intent-adopt-dead", operation: "adopt", includeLockToken: true },
+  ]) {
+    const cwd = createRepo();
+    initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+    const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-BLOCKED-MARKER" }) });
+    const owner = acquireLock({ cwd });
+    renderTaskDocuments(cwd, owner.token, [event]);
+    writeAckLifecycleIntent(cwd, variant.name, {
+      pid: 999999999,
+      lockToken: owner.token,
+      operation: variant.operation,
+      includeLockToken: variant.includeLockToken,
+    });
+
+    assert.throws(
+      () => ackEvents({ cwd, token: owner.token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+      /lifecycle operation is in progress/,
+    );
+    assert.deepEqual(lockStatus({ cwd }).intentMarkers, [variant.name]);
+  }
+});
+
+test("lock status reports an out-of-range lifecycle PID as invalid and non-takeoverable", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-PID-RANGE" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  writeAckLifecycleIntent(cwd, "aggregate.intent-ack-invalid-pid", {
+    pid: Number.MAX_SAFE_INTEGER,
+    lockToken: owner.token,
+  });
+
+  assert.deepEqual(lockStatus({ cwd }).lifecycleIntents, [{
+    name: "aggregate.intent-ack-invalid-pid",
+    valid: false,
+    takeoverEligible: false,
+  }]);
+  assert.throws(
+    () => ackEvents({ cwd, token: owner.token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /lifecycle operation is in progress/,
+  );
+});
+
+test("ACK takeover rejects a dead matching marker when its journal owner differs", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-ACK-JOURNAL-OWNER" }) });
+  const owner = acquireLock({ cwd });
+  renderTaskDocuments(cwd, owner.token, [event]);
+  const expectedDocumentHashes = documentHashes(cwd);
+  const crashed = runCrashingAck({
+    cwd,
+    token: owner.token,
+    eventIds: [event.eventId],
+    expectedDocumentHashes,
+    phase: "intent",
+  });
+  assert.equal(crashed.status, 86, crashed.stderr);
+  const intentFile = path.join(stateRoot(cwd), "ack-intent.json");
+  const intent = JSON.parse(readFileSync(intentFile, "utf8"));
+  intent.lockOwner.token = "00000000-0000-4000-8000-000000000001";
+  writeFileSync(intentFile, `${JSON.stringify(intent, null, 2)}\n`);
+
+  assert.throws(
+    () => ackEvents({ cwd, token: owner.token, eventIds: [event.eventId], expectedDocumentHashes }),
+    /lifecycle operation is in progress/,
+  );
+  assert.equal(lockStatus({ cwd }).lifecycleIntents[0].processAlive, false);
+  assert.equal(lockStatus({ cwd }).lifecycleIntents[0].takeoverEligible, false);
+});
+
 test("ACK lifecycle blocks acquire, release, and recover until its owner is removed", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
@@ -924,6 +1315,7 @@ test("ACK lifecycle blocks acquire, release, and recover until its owner is remo
       assert.throws(() => acquireLock({ cwd }), /lifecycle operation is in progress/);
       assert.throws(() => releaseLock({ cwd, token: owner.token }), /lifecycle operation is in progress/);
       assert.throws(() => recoverLock({ cwd, confirm: true }), /lifecycle operation is in progress/);
+      assert.throws(() => adoptDocuments({ cwd, token: owner.token }), /lifecycle operation is in progress/);
       const markers = lockStatus({ cwd }).intentMarkers;
       assert.equal(markers.length, 1);
       assert.match(markers[0], /^aggregate\.intent-ack-/);
@@ -1914,7 +2306,12 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(skill, /ACK intent.*release-lock/);
   assert.match(skill, /ACK lifecycle marker.*owner.*deleted/i);
   assert.match(skill, /existing ACK journal.*later pending.*next aggregation/i);
-  assert.match(skill, /any lifecycle marker.*hard stop/i);
+  assert.match(skill, /dead matching ACK marker.*same owner token.*retry ACK/i);
+  assert.match(skill, /without an ACK journal.*retry.*original token.*eventIds.*expected hashes/i);
+  assert.match(skill, /original ACK parameters.*lost.*manual stop/i);
+  assert.match(skill, /owner PID.*never.*lease.*dead/i);
+  assert.match(skill, /nonmatching lifecycle marker.*hard stop/i);
+  assert.match(skill, /adopt.*lifecycle marker.*reject.*ACK intent/i);
   const contracts = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/references/document-contracts.md"), "utf8");
   assert.match(contracts, /- \[project-task\]/);
   assert.match(contracts, /- \[project-event\]/);
@@ -1935,6 +2332,9 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(contracts, /intent.*move.*state.*delete.*release/i);
   assert.match(contracts, /ACK lifecycle marker.*release.*recover.*acquire/i);
   assert.match(contracts, /journal freezes.*eventIds.*expectedDocumentHashes/i);
+  assert.match(contracts, /short-lived lifecycle PID.*dead matching ACK marker/i);
+  assert.match(contracts, /before journal publication.*original token.*eventIds.*expected hashes/i);
+  assert.match(contracts, /adopt.*lockToken.*owner token.*state write/i);
   assert.match(contracts, /git diff --check.*cannot/);
   assert.match(contracts, /deterministically downgrades.*`needs_verification`/);
   const report = readFileSync(path.join(repositoryRoot, ".superpowers/sdd/final-fix-report.md"), "utf8");

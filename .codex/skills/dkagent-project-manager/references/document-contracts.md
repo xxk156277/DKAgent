@@ -41,7 +41,11 @@ ACK scans canonical projection blocks in both documents. Each selected task must
 
 ## Two-phase ACK journal
 
-ACK, release, and recover each first publish a unique lifecycle marker and then reject the operation if any other marker exists. Acquire checks markers both before and after publishing an owner. The ACK lifecycle marker remains held while journal validation/publication, event moves, state persistence, journal deletion, and owner deletion run; release, recover, and acquire cannot proceed during that interval. ACK removes its owned lock inside the same lifecycle instead of starting a nested release operation, and revalidates the owner token before journal publication, event moves, and state write. Competing operations may both stop, but cannot both continue.
+ACK, adopt, release, and recover each first atomically publish a complete unique lifecycle marker and then reject the operation if any other marker exists. ACK and adopt markers include the durable owner's `lockToken`. Acquire checks markers both before and after publishing an owner. The ACK lifecycle marker remains held while journal validation/publication, event moves, state persistence, journal deletion, and owner deletion run; adopt, release, recover, and acquire cannot proceed during that interval. ACK removes its owned lock inside the same lifecycle instead of starting a nested release operation, and revalidates the owner token before journal publication, event moves, and state write. Competing operations may both stop, but cannot both continue.
+
+The owner PID describes a durable Agent lease and is never evidence that ownership ended. The short-lived lifecycle PID may be checked only for a dead matching ACK marker. An exact ACK retry may take it over only when its strict schema is valid, `lockToken` equals both the request token and current owner token, and any ACK journal has the same owner identity/token. The retry atomically renames that marker to a unique tombstone and removes only its own tombstone before rechecking exclusivity. Live or EPERM, malformed, different-token, different-operation, and journal-mismatched markers hard-block. Two contenders therefore yield one continuing retry or both stopping, never two writers.
+
+For a crash before journal publication, takeover is still limited to an exact retry using the retained original token, `eventIds`, and expected hashes. Because no journal can reconstruct those request facts, lost original parameters require a manual stop with the owner and marker intact; re-render, adopt, release, and ordinary recovery are forbidden.
 
 After every hash, branch, WIP, event-set, and projection check succeeds but before moving an event, ACK exclusively publishes common-root `ack-intent.json`. Its fixed schema contains only `schemaVersion`, `lockOwner` (`token`, `pid`, `acquiredAt`), sorted `eventIds`, `expectedDocumentHashes`, `baselineHashes`, and `createdAt`; commands, logs, secrets, and extra fields are forbidden. An existing journal permits only the same token, owner identity, eventIds, and hashes. Any invalid or different journal hard-blocks without overwrite.
 
@@ -52,6 +56,12 @@ The commit order is intent → move events → write reconciled state → delete
 If a crash occurs after journal deletion but before owner release, state and events are already committed: snapshot returns the ordinary safe view with no ACK intent, and the remaining recovery action is token-authenticated `release-lock`.
 
 Snapshot exposes `ackIntentExists`, a valid `ackIntent` when safe to parse, and `ackRecoveryEventIds`. It returns `target.recoveryMode: "ack_intent"` only when the current lock owner identity matches, the management branch is correct, current document hashes equal intent expected hashes, intent baseline equals the lock baseline, and persisted state is either still at that baseline or already committed to expected hashes with every intent event recorded. A second document drift, owner/token change, invalid journal, or unrelated state phase remains `target.safe:false`; it is never adopted as normal progress.
+
+`lock-status` exposes parsed `lifecycleIntents` with validity, operation, lock token, PID liveness, and `takeoverEligible`, so the exact ACK recovery path is observable without treating the owner PID as a lease timeout.
+
+## Document adoption
+
+`adopt-documents` publishes an `operation: adopt` lifecycle marker bound to the owner `lockToken` before reading owner state. It confirms exclusivity, rejects an existing ACK intent, revalidates the owner token before management-branch inspection, document hash read, and state write, then removes the owner inside the same marker. ACK and adopt cannot both write; neither calls public `release-lock` while holding its marker.
 
 ## BACKLOG.md
 
@@ -82,4 +92,4 @@ If a Worker submits `finished/completed` without successful behavior evidence or
 
 ## Lock recovery
 
-Use `lock-status` first. A valid owner is a durable Agent lease even when its CLI PID has exited, and `recover-lock` never removes it. If the local token was lost, retrieve `owner.token` from status and release it only when the remaining owner facts match the current aggregation; otherwise stop for human confirmation. Confirmed recovery is limited to invalid/legacy ownerless locks and stale creating files when no lifecycle marker exists. Any lifecycle marker, regardless of PID liveness or apparent age, and any owned recovery tombstone hard-block recovery; the current operation removes only its own marker. After valid recovery, check status and acquire a new token.
+Use `lock-status` first. A valid owner is a durable Agent lease even when its CLI PID has exited, and `recover-lock` never removes it. If the local token was lost, retrieve `owner.token` from status and release it only when the remaining owner facts match the current aggregation; otherwise stop for human confirmation. Confirmed recovery is limited to invalid/legacy ownerless locks and stale creating files when no lifecycle marker exists. `recover-lock` never removes lifecycle markers; only an exact ACK retry may atomically take over its eligible dead matching ACK marker. All other markers and any owned recovery tombstone hard-block recovery. After valid ownerless recovery, check status and acquire a new token.

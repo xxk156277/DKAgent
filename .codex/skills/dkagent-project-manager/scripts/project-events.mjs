@@ -36,6 +36,7 @@ const LOCK_CREATING_PREFIX = "aggregate.lock.creating-";
 const LOCK_RECOVERY_PREFIX = "aggregate.lock.recovery-";
 const LOCK_INTENT_PREFIX = "aggregate.intent-";
 const LOCK_INTENT_CREATING_PREFIX = "aggregate.intent.creating-";
+const LOCK_INTENT_TOMBSTONE_PREFIX = "aggregate.intent.tombstone-";
 const ACK_INTENT_FILE = "ack-intent.json";
 const ACK_INTENT_FIELDS = new Set(["schemaVersion", "lockOwner", "eventIds", "expectedDocumentHashes", "baselineHashes", "createdAt"]);
 const ACK_LOCK_OWNER_FIELDS = new Set(["token", "pid", "acquiredAt"]);
@@ -201,6 +202,44 @@ function readLockOwner(lock) {
   }
 }
 
+function validLifecycleIntent(intent) {
+  if (!intent || typeof intent !== "object" || Array.isArray(intent)) return false;
+  const requiresLockToken = intent.operation === "ack" || intent.operation === "adopt";
+  const fields = requiresLockToken
+    ? ["operation", "token", "pid", "createdAt", "lockToken"]
+    : ["operation", "token", "pid", "createdAt"];
+  return new Set(["ack", "adopt", "release", "recover"]).has(intent.operation)
+    && Object.keys(intent).length === fields.length
+    && Object.keys(intent).every((key) => fields.includes(key))
+    && EVENT_ID.test(intent.token)
+    && Number.isSafeInteger(intent.pid)
+    && intent.pid > 0
+    && intent.pid <= 2147483647
+    && typeof intent.createdAt === "string"
+    && !Number.isNaN(Date.parse(intent.createdAt))
+    && (!requiresLockToken || (typeof intent.lockToken === "string" && EVENT_ID.test(intent.lockToken)));
+}
+
+function readLifecycleIntent(marker) {
+  try {
+    const intent = readJson(marker);
+    return validLifecycleIntent(intent) ? intent : null;
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") return false;
+    // Unknown probe failures are not proof that the lifecycle process is dead.
+    return true;
+  }
+}
+
 function lockDiagnostics(root) {
   const entries = existsSync(root) ? readdirSync(root) : [];
   const recoveryTombstones = entries.filter((name) => name.startsWith(LOCK_RECOVERY_PREFIX)).sort();
@@ -218,8 +257,18 @@ function lockDiagnostics(root) {
   };
 }
 
-function createLifecycleIntent(root, operation) {
-  const intent = { operation, token: randomUUID(), pid: process.pid, createdAt: new Date().toISOString() };
+function createLifecycleIntent(root, operation, lockToken) {
+  const requiresLockToken = operation === "ack" || operation === "adopt";
+  if (requiresLockToken && (typeof lockToken !== "string" || !EVENT_ID.test(lockToken))) {
+    throw new Error("invalid lifecycle lock token");
+  }
+  const intent = {
+    operation,
+    token: randomUUID(),
+    pid: process.pid,
+    createdAt: new Date().toISOString(),
+    ...(requiresLockToken ? { lockToken } : {}),
+  };
   const marker = path.join(root, `${LOCK_INTENT_PREFIX}${operation}-${intent.token}`);
   const creating = path.join(root, `${LOCK_INTENT_CREATING_PREFIX}${randomUUID()}`);
   writeFileSync(creating, `${JSON.stringify(intent, null, 2)}\n`, { flag: "wx" });
@@ -240,10 +289,57 @@ function hasOtherLifecycleIntent(diagnostics, marker) {
   return diagnostics.intentMarkers.some((name) => name !== ownName);
 }
 
-function assertExclusiveLifecycleIntent(root, marker) {
-  if (hasOtherLifecycleIntent(lockDiagnostics(root), marker)) {
-    throw new Error("aggregate lifecycle operation is in progress");
+function deadAckTakeoverEligible(root, intent, owner, requestToken, processAlive = isProcessAlive(intent.pid)) {
+  if (intent.operation !== "ack"
+    || intent.lockToken !== requestToken
+    || owner?.token !== requestToken
+    || processAlive) {
+    return false;
   }
+  const ackRecord = ackIntentRecord(root);
+  return !ackRecord.exists
+    || (ackRecord.intent
+      && ackRecord.intent.lockOwner.token === requestToken
+      && sameLockOwnerIdentity(ackRecord.intent.lockOwner, owner));
+}
+
+function assertExclusiveLifecycleIntent(root, marker, { deadAckToken } = {}) {
+  const diagnostics = lockDiagnostics(root);
+  if (!hasOtherLifecycleIntent(diagnostics, marker)) return;
+  const otherNames = diagnostics.intentMarkers.filter((name) => name !== path.basename(marker));
+  if (!deadAckToken) throw new Error("aggregate lifecycle operation is in progress");
+  const owner = readLockOwner(path.join(root, LOCK_FILE));
+  const mayTakeOver = otherNames.every((name) => {
+    const intent = readLifecycleIntent(path.join(root, name));
+    return intent && deadAckTakeoverEligible(root, intent, owner, deadAckToken);
+  });
+  if (!mayTakeOver) throw new Error("aggregate lifecycle operation is in progress");
+
+  const tombstones = [];
+  try {
+    for (const name of otherNames) {
+      const source = path.join(root, name);
+      const tombstone = path.join(root, `${LOCK_INTENT_TOMBSTONE_PREFIX}${randomUUID()}`);
+      try {
+        renameSync(source, tombstone);
+      } catch (error) {
+        if (error.code === "ENOENT") throw new Error("aggregate lifecycle operation is in progress");
+        throw error;
+      }
+      tombstones.push(tombstone);
+    }
+    if (hasOtherLifecycleIntent(lockDiagnostics(root), marker)) {
+      throw new Error("aggregate lifecycle operation is in progress");
+    }
+  } finally {
+    for (const tombstone of tombstones) removeLifecycleIntent(tombstone);
+  }
+}
+
+function terminateTestProcess(requestedPhase, signal, phase) {
+  if (requestedPhase !== phase) return;
+  if (signal === "SIGKILL") process.kill(process.pid, "SIGKILL");
+  process.exit(86);
 }
 
 function containsHighConfidenceCredential(value) {
@@ -782,7 +878,21 @@ export function lockStatus({ cwd }) {
   const result = { ...status, recoveryTombstones: diagnostics.recoveryTombstones };
   if (diagnostics.blockingTombstones.length) result.blockingTombstones = diagnostics.blockingTombstones;
   if (diagnostics.creatingFiles.length) result.creatingFiles = diagnostics.creatingFiles;
-  if (diagnostics.intentMarkers.length) result.intentMarkers = diagnostics.intentMarkers;
+  if (diagnostics.intentMarkers.length) {
+    result.intentMarkers = diagnostics.intentMarkers;
+    result.lifecycleIntents = diagnostics.intentMarkers.map((name) => {
+      const intent = readLifecycleIntent(path.join(root, name));
+      if (!intent) return { name, valid: false, takeoverEligible: false };
+      const processAlive = isProcessAlive(intent.pid);
+      return {
+        name,
+        valid: true,
+        ...intent,
+        processAlive,
+        takeoverEligible: deadAckTakeoverEligible(root, intent, status.owner, intent.lockToken, processAlive),
+      };
+    });
+  }
   if (diagnostics.intentCreatingFiles.length) result.intentCreatingFiles = diagnostics.intentCreatingFiles;
   return result;
 }
@@ -869,13 +979,16 @@ export function ackEvents({
   eventIds,
   expectedDocumentHashes,
   _testCrashAfterPhase,
+  _testTerminateAfterPhase,
+  _testTerminationSignal,
   _testAfterLifecycleAcquired,
   _testBeforeStateWrite,
 }) {
   const root = stateRoot(cwd);
-  const marker = createLifecycleIntent(root, "ack");
+  const marker = createLifecycleIntent(root, "ack", token);
   try {
-    assertExclusiveLifecycleIntent(root, marker);
+    assertExclusiveLifecycleIntent(root, marker, { deadAckToken: token });
+    terminateTestProcess(_testTerminateAfterPhase, _testTerminationSignal, "lifecycle");
     _testAfterLifecycleAcquired?.();
     const owner = requireToken(root, token);
     const config = readJson(path.join(root, "config.json"));
@@ -949,6 +1062,7 @@ export function ackEvents({
     }
     requireToken(root, token);
     ensureAckIntent(root, owner, eventIds, expectedDocumentHashes);
+    terminateTestProcess(_testTerminateAfterPhase, _testTerminationSignal, "intent");
     if (_testCrashAfterPhase === "intent") throw new Error("simulated crash after ACK intent");
     requireToken(root, token);
     for (const event of sortEventsByCreation(pendingEvents)) {
@@ -956,6 +1070,7 @@ export function ackEvents({
       const destination = path.join(root, "events", "processed", `${event.eventId}.json`);
       if (existsSync(source)) renameSync(source, destination);
     }
+    terminateTestProcess(_testTerminateAfterPhase, _testTerminationSignal, "events");
     if (_testCrashAfterPhase === "events") throw new Error("simulated crash after ACK event moves");
     const reconciledState = reconcileProcessedState(root, state).state;
     reconciledState.documentHashes = currentDocumentHashes;
@@ -973,19 +1088,33 @@ export function ackEvents({
   }
 }
 
-export function adoptDocuments({ cwd, token }) {
+export function adoptDocuments({ cwd, token, _testAfterLifecycleAcquired, _testBeforeStateWrite }) {
   const root = stateRoot(cwd);
-  requireToken(root, token);
-  const config = readJson(path.join(root, "config.json"));
-  if (!existsSync(config.managementWorktree)) throw new Error("management worktree is missing");
-  const branch = git(config.managementWorktree, ["branch", "--show-current"]);
-  if (branch !== config.managementBranch) throw new Error(`management branch mismatch: ${branch || "detached"}`);
-  const stateFile = path.join(root, "state.json");
-  const state = readJson(stateFile);
-  state.documentHashes = documentHashes(config.managementWorktree);
-  writeJsonAtomic(stateFile, state);
-  releaseLock({ cwd, token });
-  return state;
+  const marker = createLifecycleIntent(root, "adopt", token);
+  try {
+    assertExclusiveLifecycleIntent(root, marker);
+    _testAfterLifecycleAcquired?.();
+    requireToken(root, token);
+    if (existsSync(path.join(root, ACK_INTENT_FILE))) {
+      throw new Error("ACK intent must be completed before adopting documents");
+    }
+    const config = readJson(path.join(root, "config.json"));
+    if (!existsSync(config.managementWorktree)) throw new Error("management worktree is missing");
+    requireToken(root, token);
+    const branch = git(config.managementWorktree, ["branch", "--show-current"]);
+    if (branch !== config.managementBranch) throw new Error(`management branch mismatch: ${branch || "detached"}`);
+    const stateFile = path.join(root, "state.json");
+    const state = readJson(stateFile);
+    requireToken(root, token);
+    state.documentHashes = documentHashes(config.managementWorktree);
+    _testBeforeStateWrite?.();
+    requireToken(root, token);
+    writeJsonAtomic(stateFile, state);
+    removeOwnedLockUnderLifecycle(root, token);
+    return state;
+  } finally {
+    removeLifecycleIntent(marker);
+  }
 }
 
 function valueAfter(args, flag) {
