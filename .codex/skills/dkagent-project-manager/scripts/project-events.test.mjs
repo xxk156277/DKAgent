@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -462,4 +462,33 @@ test("published lock files expose a complete owner and require token release", (
   assert.deepEqual(JSON.parse(readFileSync(path.join(root, "aggregate.lock"), "utf8")), owner);
   assert.throws(() => recoverLock({ cwd, confirm: true }), /release requires token/);
   assert.equal(releaseLock({ cwd, token: owner.token }), true);
+});
+
+test("release intent blocks acquires before and after the current lock is removed", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const root = stateRoot(cwd);
+  const owner = acquireLock({ cwd });
+  const intent = path.join(root, "aggregate.intent-release-test");
+  mkdirSync(intent);
+  assert.throws(() => acquireLock({ cwd }), /lifecycle operation is in progress/);
+  assert.equal(releaseLock({ cwd, token: owner.token }), true);
+  assert.throws(() => acquireLock({ cwd }), /lifecycle operation is in progress/);
+  assert.deepEqual(lockStatus({ cwd }).intentMarkers, ["aggregate.intent-release-test"]);
+  assert.equal(recoverLock({ cwd, confirm: true }), true);
+  assert.ok(acquireLock({ cwd }).token);
+});
+
+test("legacy recovery preserves the lock while another lifecycle intent exists", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const root = stateRoot(cwd);
+  const lock = path.join(root, "aggregate.lock");
+  const intent = path.join(root, "aggregate.intent-release-test");
+  mkdirSync(lock);
+  mkdirSync(intent);
+  assert.throws(() => recoverLock({ cwd, confirm: true }), /lifecycle operation is in progress/);
+  assert.ok(existsSync(lock));
+  rmSync(intent, { recursive: true });
+  assert.equal(recoverLock({ cwd, confirm: true }), true);
 });

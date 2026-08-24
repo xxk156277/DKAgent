@@ -29,6 +29,7 @@ const DOCUMENT_HASH = /^[0-9a-f]{64}$/;
 const LOCK_FILE = "aggregate.lock";
 const LOCK_CREATING_PREFIX = "aggregate.lock.creating-";
 const LOCK_RECOVERY_PREFIX = "aggregate.lock.recovery-";
+const LOCK_INTENT_PREFIX = "aggregate.intent-";
 
 function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -98,7 +99,23 @@ function lockDiagnostics(root) {
     recoveryTombstones,
     blockingTombstones,
     creatingFiles: entries.filter((name) => name.startsWith(LOCK_CREATING_PREFIX)).sort(),
+    intentMarkers: entries.filter((name) => name.startsWith(LOCK_INTENT_PREFIX)).sort(),
   };
+}
+
+function createLifecycleIntent(root, operation) {
+  const marker = path.join(root, `${LOCK_INTENT_PREFIX}${operation}-${randomUUID()}`);
+  mkdirSync(marker);
+  return marker;
+}
+
+function removeLifecycleIntent(marker) {
+  if (existsSync(marker)) rmSync(marker, { recursive: true });
+}
+
+function hasOtherLifecycleIntent(diagnostics, marker) {
+  const ownName = path.basename(marker);
+  return diagnostics.intentMarkers.some((name) => name !== ownName);
 }
 
 function containsHighConfidenceCredential(value) {
@@ -348,6 +365,7 @@ export function acquireLock({ cwd }) {
   if (diagnostics.blockingTombstones.length) {
     throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
   }
+  if (diagnostics.intentMarkers.length) throw new Error("aggregate lifecycle operation is in progress");
   const lock = path.join(root, LOCK_FILE);
   const owner = {
     token: randomUUID(),
@@ -365,21 +383,47 @@ export function acquireLock({ cwd }) {
   } finally {
     if (existsSync(creating)) unlinkSync(creating);
   }
+  let publishedInode;
+  try {
+    publishedInode = statSync(lock).ino;
+  } catch (error) {
+    if (error.code === "ENOENT") throw new Error("aggregate lifecycle operation is in progress; retry acquisition");
+    throw error;
+  }
+  const afterPublish = lockDiagnostics(root);
+  const currentOwner = readLockOwner(lock);
+  const currentInode = existsSync(lock) ? statSync(lock).ino : null;
+  if (afterPublish.blockingTombstones.length || afterPublish.intentMarkers.length || currentOwner?.token !== owner.token || currentInode !== publishedInode) {
+    if (currentOwner?.token === owner.token && currentInode === publishedInode) unlinkSync(lock);
+    if (afterPublish.blockingTombstones.length) {
+      throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
+    }
+    throw new Error("aggregate lifecycle operation is in progress; retry acquisition");
+  }
   return owner;
 }
 
 export function releaseLock({ cwd, token }) {
   const root = stateRoot(cwd);
-  requireToken(root, token);
-  const lock = path.join(root, LOCK_FILE);
-  if (statSync(lock).isDirectory()) {
-    const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
-    renameSync(lock, tombstone);
-    rmSync(tombstone, { recursive: true });
-  } else {
-    unlinkSync(lock);
+  const marker = createLifecycleIntent(root, "release");
+  try {
+    requireToken(root, token);
+    const lock = path.join(root, LOCK_FILE);
+    try {
+      if (statSync(lock).isDirectory()) {
+        const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
+        renameSync(lock, tombstone);
+        rmSync(tombstone, { recursive: true });
+      } else {
+        unlinkSync(lock);
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    return true;
+  } finally {
+    removeLifecycleIntent(marker);
   }
-  return true;
 }
 
 export function lockStatus({ cwd }) {
@@ -395,46 +439,67 @@ export function lockStatus({ cwd }) {
   const result = { ...status, recoveryTombstones: diagnostics.recoveryTombstones };
   if (diagnostics.blockingTombstones.length) result.blockingTombstones = diagnostics.blockingTombstones;
   if (diagnostics.creatingFiles.length) result.creatingFiles = diagnostics.creatingFiles;
+  if (diagnostics.intentMarkers.length) result.intentMarkers = diagnostics.intentMarkers;
   return result;
 }
 
 export function recoverLock({ cwd, confirm = false }) {
   const root = stateRoot(cwd);
   const lock = path.join(root, LOCK_FILE);
-  const diagnostics = lockDiagnostics(root);
-  if (diagnostics.blockingTombstones.length) {
-    throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
-  }
-  if (!existsSync(lock)) {
-    if (!diagnostics.creatingFiles.length) throw new Error("aggregate lock is not held");
-    if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
-    for (const name of diagnostics.creatingFiles) {
-      const creating = path.join(root, name);
-      const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
-      try {
-        renameSync(creating, tombstone);
-      } catch (error) {
-        if (error.code === "ENOENT") continue;
-        throw error;
-      }
-      rmSync(tombstone, { recursive: true });
-    }
-    return true;
-  }
-  if (readLockOwner(lock)) throw new Error("aggregate lock owner exists; release requires token");
-  if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
-  const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
+  const marker = createLifecycleIntent(root, "recover");
   try {
-    renameSync(lock, tombstone);
-  } catch (error) {
-    if (error.code === "ENOENT") throw new Error("aggregate lock is not held");
-    throw error;
+    let diagnostics = lockDiagnostics(root);
+    let cleanedLifecycleIntents = false;
+    if (diagnostics.blockingTombstones.length) {
+      throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
+    }
+    if (hasOtherLifecycleIntent(diagnostics, marker)) {
+      if (existsSync(lock)) throw new Error("aggregate lifecycle operation is in progress");
+      if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
+      for (const name of diagnostics.intentMarkers) {
+        if (name !== path.basename(marker)) {
+          removeLifecycleIntent(path.join(root, name));
+          cleanedLifecycleIntents = true;
+        }
+      }
+      diagnostics = lockDiagnostics(root);
+    }
+    if (!existsSync(lock)) {
+      if (!diagnostics.creatingFiles.length) {
+        if (cleanedLifecycleIntents) return true;
+        throw new Error("aggregate lock is not held");
+      }
+      if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
+      for (const name of diagnostics.creatingFiles) {
+        const creating = path.join(root, name);
+        const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
+        try {
+          renameSync(creating, tombstone);
+        } catch (error) {
+          if (error.code === "ENOENT") continue;
+          throw error;
+        }
+        rmSync(tombstone, { recursive: true });
+      }
+      return true;
+    }
+    if (readLockOwner(lock)) throw new Error("aggregate lock owner exists; release requires token");
+    if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
+    const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
+    try {
+      renameSync(lock, tombstone);
+    } catch (error) {
+      if (error.code === "ENOENT") throw new Error("aggregate lock is not held");
+      throw error;
+    }
+    if (readLockOwner(tombstone)) {
+      throw new Error("lock recovery found an owner; tombstone retained");
+    }
+    rmSync(tombstone, { recursive: true });
+    return true;
+  } finally {
+    removeLifecycleIntent(marker);
   }
-  if (readLockOwner(tombstone)) {
-    throw new Error("lock recovery found an owner; tombstone retained");
-  }
-  rmSync(tombstone, { recursive: true });
-  return true;
 }
 
 export function readSnapshot({ cwd, token } = {}) {
