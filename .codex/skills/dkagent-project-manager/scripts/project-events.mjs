@@ -1,0 +1,184 @@
+#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const EVENT_FIELDS = new Set(["taskId", "action", "module", "summary", "status", "dependencies", "evidence", "discoveredTodos"]);
+const ACTIONS = new Set(["started", "finished", "blocked", "discovered"]);
+const STATUSES = new Set(["in_progress", "completed", "needs_verification", "blocked"]);
+const BEHAVIOR_EVIDENCE = new Set(["test", "typecheck", "build", "user_confirmation"]);
+const EVIDENCE_KINDS = new Set(["test", "typecheck", "build", "commit", "user_confirmation"]);
+const EVIDENCE_FIELDS = new Set(["kind", "summary", "command", "exitCode"]);
+const DISCOVERED_FIELDS = new Set(["summary", "module", "reason"]);
+const DOCUMENTS = ["AGENTS.md", "docs/project/STATUS.md", "docs/project/BACKLOG.md"];
+
+function git(cwd, args) {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+function readJson(file) {
+  return JSON.parse(readFileSync(file, "utf8"));
+}
+
+function writeJsonAtomic(file, value) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
+  renameSync(temporary, file);
+}
+
+function hashFile(file) {
+  if (!existsSync(file)) return null;
+  return createHash("sha256").update(readFileSync(file)).digest("hex");
+}
+
+function documentHashes(root) {
+  return Object.fromEntries(DOCUMENTS.map((relative) => [relative, hashFile(path.join(root, relative))]));
+}
+
+export function stateRoot(cwd) {
+  return path.join(path.resolve(cwd, git(cwd, ["rev-parse", "--git-common-dir"])), "dkagent-project-manager");
+}
+
+export function initStore({ cwd, managementWorktree, managementBranch = "main" }) {
+  const root = stateRoot(cwd);
+  if (existsSync(path.join(root, "config.json"))) throw new Error("project manager store already initialized");
+
+  const resolved = path.resolve(managementWorktree);
+  if (stateRoot(resolved) !== root) throw new Error("management worktree does not share the Git common directory");
+
+  const branch = git(resolved, ["branch", "--show-current"]);
+  if (branch !== managementBranch) {
+    throw new Error(`management branch mismatch: expected ${managementBranch}, got ${branch || "detached"}`);
+  }
+
+  mkdirSync(path.join(root, "events", "pending"), { recursive: true });
+  mkdirSync(path.join(root, "events", "processed"), { recursive: true });
+  const config = { schemaVersion: 1, managementWorktree: resolved, managementBranch };
+  writeJsonAtomic(path.join(root, "config.json"), config);
+  writeJsonAtomic(path.join(root, "state.json"), {
+    schemaVersion: 1,
+    processedEventIds: [],
+    activeClaims: {},
+    documentHashes: documentHashes(resolved),
+    lastSynchronizedAt: null,
+  });
+  return config;
+}
+
+function validateInput(input) {
+  for (const key of Object.keys(input)) {
+    if (!EVENT_FIELDS.has(key)) throw new Error(`unknown event field: ${key}`);
+  }
+  for (const key of ["taskId", "module", "summary"]) {
+    if (typeof input[key] !== "string" || !input[key].trim()) throw new Error(`${key} is required`);
+  }
+  if (!ACTIONS.has(input.action)) throw new Error("invalid action");
+  if (!STATUSES.has(input.status)) throw new Error("invalid status");
+  for (const key of ["dependencies", "evidence", "discoveredTodos"]) {
+    if (!Array.isArray(input[key])) throw new Error(`${key} must be an array`);
+  }
+  if (input.dependencies.some((item) => typeof item !== "string" || !item.trim())) {
+    throw new Error("dependencies must contain non-empty task IDs");
+  }
+  for (const evidence of input.evidence) {
+    for (const key of Object.keys(evidence)) {
+      if (!EVIDENCE_FIELDS.has(key)) throw new Error(`unknown evidence field: ${key}`);
+    }
+    if (!EVIDENCE_KINDS.has(evidence.kind) || typeof evidence.summary !== "string" || !evidence.summary.trim()) {
+      throw new Error("invalid evidence item");
+    }
+    if (evidence.exitCode !== undefined && !Number.isInteger(evidence.exitCode)) {
+      throw new Error("evidence exitCode must be an integer");
+    }
+  }
+  for (const todo of input.discoveredTodos) {
+    for (const key of Object.keys(todo)) {
+      if (!DISCOVERED_FIELDS.has(key)) throw new Error(`unknown discovered todo field: ${key}`);
+    }
+    for (const key of DISCOVERED_FIELDS) {
+      if (typeof todo[key] !== "string" || !todo[key].trim()) {
+        throw new Error(`discovered todo ${key} is required`);
+      }
+    }
+  }
+  if (input.action === "started" && input.status !== "in_progress") {
+    throw new Error("started event must be in_progress");
+  }
+  if (input.action === "blocked" && input.status !== "blocked") {
+    throw new Error("blocked event must be blocked");
+  }
+  if (input.action === "finished" && !new Set(["completed", "needs_verification"]).has(input.status)) {
+    throw new Error("finished event has invalid status");
+  }
+  if (input.status === "completed") {
+    const proved = input.evidence.some(
+      (item) => BEHAVIOR_EVIDENCE.has(item.kind) && (item.kind === "user_confirmation" || item.exitCode === 0),
+    );
+    if (!proved) throw new Error("completed code task requires successful behavioral evidence");
+  }
+}
+
+export function emitEvent({ cwd, input }) {
+  validateInput(input);
+  const root = stateRoot(cwd);
+  if (!existsSync(path.join(root, "config.json"))) throw new Error("project manager store is not initialized");
+
+  const event = {
+    schemaVersion: 1,
+    eventId: randomUUID(),
+    ...input,
+    worktreePath: path.resolve(cwd),
+    branch: git(cwd, ["branch", "--show-current"]) || "detached",
+    headSha: git(cwd, ["rev-parse", "HEAD"]),
+    createdAt: new Date().toISOString(),
+  };
+  writeJsonAtomic(path.join(root, "events", "pending", `${event.eventId}.json`), event);
+  return event;
+}
+
+export function readSnapshot({ cwd }) {
+  const root = stateRoot(cwd);
+  const pending = path.join(root, "events", "pending");
+  const events = readdirSync(pending)
+    .filter((name) => name.endsWith(".json"))
+    .sort()
+    .map((name) => readJson(path.join(pending, name)));
+  return {
+    config: readJson(path.join(root, "config.json")),
+    state: readJson(path.join(root, "state.json")),
+    events,
+  };
+}
+
+function valueAfter(args, flag) {
+  const index = args.indexOf(flag);
+  if (index < 0 || !args[index + 1]) throw new Error(`missing ${flag}`);
+  return args[index + 1];
+}
+
+async function main(args) {
+  const [command] = args;
+  const cwd = process.cwd();
+  if (command === "init") {
+    return initStore({
+      cwd,
+      managementWorktree: valueAfter(args, "--management-worktree"),
+      managementBranch: args.includes("--management-branch") ? valueAfter(args, "--management-branch") : "main",
+    });
+  }
+  if (command === "emit") return emitEvent({ cwd, input: readJson(path.resolve(valueAfter(args, "--file"))) });
+  if (command === "snapshot") return readSnapshot({ cwd });
+  throw new Error(`unknown command: ${command || "<empty>"}`);
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main(process.argv.slice(2))
+    .then((result) => console.log(JSON.stringify(result, null, 2)))
+    .catch((error) => {
+      console.error(error.message);
+      process.exitCode = 1;
+    });
+}

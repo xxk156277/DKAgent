@@ -7,7 +7,8 @@
     "agent": "npm run agent -w @dkagent/agent",
     "observe": "npm run observe -w @dkagent/web-tap",
     "dev": "npm run dev -w @dkagent/web-tap",
-    "test": "npm test --workspaces --if-present",
+    "test": "npm test --workspaces --if-present && npm run test:project-manager",
+    "test:project-manager": "node --test .codex/skills/dkagent-project-manager/scripts/project-events.test.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test:phase1": "npm run test:phase1 -w @dkagent/agent",
     "typecheck:phase1": "npm run typecheck:phase1 -w @dkagent/agent"
