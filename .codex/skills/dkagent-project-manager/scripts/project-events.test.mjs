@@ -121,6 +121,8 @@ test("emit rejects shell credentials but accepts a descriptive token summary", (
     "DATABASE_URL=postgres://db/app npm test",
     "NODE_ENV=test npm test",
     "export FOO=bar",
+    "env -i FOO=bar npm test",
+    "env --unset FOO BAR=bar npm test",
     "curl -H 'x-api-key: value' https://example.test",
     "curl -H 'api-key: value' https://example.test",
     "curl -H 'Authorization: Bearer value' https://example.test",
@@ -136,6 +138,31 @@ test("emit rejects shell credentials but accepts a descriptive token summary", (
     );
   }
   const event = emitEvent({ cwd, input: started({ summary: "Implement token: refresh strategy" }) });
+  const snapshot = readSnapshot({ cwd });
+  assert.equal(snapshot.events.length, 1);
+  assert.equal(snapshot.events[0].eventId, event.eventId);
+});
+
+test("emit only accepts one simple command with safe arguments", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  for (const command of [
+    "npm test && npm run typecheck",
+    "echo $(whoami)",
+    "(DATABASE_URL=postgres://db/app npm test)",
+    "curl https://token@example.test",
+    "curl https://:password@example.test",
+    "tool --authorization value",
+  ]) {
+    assert.throws(
+      () => emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", command, exitCode: 0 }] }) }),
+      /unsafe text content/,
+    );
+  }
+  const event = emitEvent({
+    cwd,
+    input: started({ evidence: [{ kind: "test", summary: "pass", command: "grep status=completed output.log", exitCode: 0 }] }),
+  });
   const snapshot = readSnapshot({ cwd });
   assert.equal(snapshot.events.length, 1);
   assert.equal(snapshot.events[0].eventId, event.eventId);

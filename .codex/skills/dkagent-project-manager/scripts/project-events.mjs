@@ -16,10 +16,10 @@ const DOCUMENTS = ["AGENTS.md", "docs/project/STATUS.md", "docs/project/BACKLOG.
 const SECRET_ASSIGNMENT = /\b[A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD|AUTHORIZATION)[A-Z0-9_]*\s*=\s*\S+/i;
 const BEARER_TOKEN = /\bBearer\s+\S+/i;
 const SK_TOKEN = /\bsk-[A-Za-z0-9_-]+\b/i;
-const SHELL_ENV_ASSIGNMENT = /(?:^|[\s;|&])[A-Za-z_][A-Za-z0-9_]*\s*=/;
+const SHELL_CONTROL = /;|&&|\|\||\||[()`<>]|\$\(/;
 const SENSITIVE_HEADER = /\b(?:x-)?api-key\s*:\s*\S+|\bauthorization\s*:\s*\S+/i;
-const SENSITIVE_FLAG = /(?:^|\s)--(?:api-key|token|password|secret)(?:\s+|=)\S+/i;
-const URL_USERINFO = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/i;
+const SENSITIVE_FLAG = /(?:^|\s)--[a-z0-9-]*(?:api-key|apikey|token|secret|password|passphrase|authorization|auth|credential|private-key)[a-z0-9-]*(?:\s+|=)\S+/i;
+const URL_USERINFO = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s]*@/i;
 
 function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -45,6 +45,32 @@ function documentHashes(root) {
   return Object.fromEntries(DOCUMENTS.map((relative) => [relative, hashFile(path.join(root, relative))]));
 }
 
+function isEnvironmentAssignment(token) {
+  return /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
+}
+
+function hasEnvironmentPrefix(tokens) {
+  if (isEnvironmentAssignment(tokens[0])) return true;
+  if (tokens[0] === "export") return isEnvironmentAssignment(tokens[1] || "");
+  if (tokens[0] !== "env") return false;
+
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (isEnvironmentAssignment(token)) return true;
+    if (token === "--") return isEnvironmentAssignment(tokens[index + 1] || "");
+    if (!token.startsWith("-")) return false;
+    if (token === "-u" || token === "--unset") index += 1;
+  }
+  return false;
+}
+
+function isUnsafeSimpleCommand(command) {
+  if (SHELL_CONTROL.test(command) || SENSITIVE_HEADER.test(command) || SENSITIVE_FLAG.test(command) || URL_USERINFO.test(command)) {
+    return true;
+  }
+  return hasEnvironmentPrefix(command.trim().split(/\s+/));
+}
+
 function validateStoredText(value, field, maximumLength, { singleLine = false, command = false } = {}) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
   if (value.length > maximumLength) throw new Error(`${field} text is too long`);
@@ -53,7 +79,7 @@ function validateStoredText(value, field, maximumLength, { singleLine = false, c
     SECRET_ASSIGNMENT.test(value)
     || BEARER_TOKEN.test(value)
     || SK_TOKEN.test(value)
-    || (command && (SHELL_ENV_ASSIGNMENT.test(value) || SENSITIVE_HEADER.test(value) || SENSITIVE_FLAG.test(value) || URL_USERINFO.test(value)))
+    || (command && isUnsafeSimpleCommand(value))
   ) {
     throw new Error("unsafe text content");
   }
