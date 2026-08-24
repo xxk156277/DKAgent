@@ -331,11 +331,15 @@ export function releaseLock({ cwd, token }) {
 }
 
 export function lockStatus({ cwd }) {
-  const lock = path.join(stateRoot(cwd), "aggregate.lock");
-  if (!existsSync(lock)) return { held: false, recoverable: false, owner: null };
+  const root = stateRoot(cwd);
+  const lock = path.join(root, "aggregate.lock");
+  const recoveryTombstones = existsSync(root)
+    ? readdirSync(root).filter((name) => name.startsWith("aggregate.lock.recovery-")).sort()
+    : [];
+  if (!existsSync(lock)) return { held: false, recoverable: false, owner: null, recoveryTombstones };
   const ownerFile = path.join(lock, "owner.json");
-  if (!existsSync(ownerFile)) return { held: true, recoverable: true, owner: null };
-  return { held: true, recoverable: false, owner: readJson(ownerFile) };
+  if (!existsSync(ownerFile)) return { held: true, recoverable: true, owner: null, recoveryTombstones };
+  return { held: true, recoverable: false, owner: readJson(ownerFile), recoveryTombstones };
 }
 
 export function recoverLock({ cwd, confirm = false }) {
@@ -344,7 +348,17 @@ export function recoverLock({ cwd, confirm = false }) {
   if (!existsSync(lock)) throw new Error("aggregate lock is not held");
   if (existsSync(path.join(lock, "owner.json"))) throw new Error("aggregate lock owner exists; release requires token");
   if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
-  rmSync(lock, { recursive: true });
+  const tombstone = path.join(root, `aggregate.lock.recovery-${randomUUID()}`);
+  try {
+    renameSync(lock, tombstone);
+  } catch (error) {
+    if (error.code === "ENOENT") throw new Error("aggregate lock is not held");
+    throw error;
+  }
+  if (existsSync(path.join(tombstone, "owner.json"))) {
+    throw new Error("lock recovery found an owner; tombstone retained");
+  }
+  rmSync(tombstone, { recursive: true });
   return true;
 }
 
@@ -402,6 +416,9 @@ export function adoptDocuments({ cwd, token }) {
   const root = stateRoot(cwd);
   requireToken(root, token);
   const config = readJson(path.join(root, "config.json"));
+  if (!existsSync(config.managementWorktree)) throw new Error("management worktree is missing");
+  const branch = git(config.managementWorktree, ["branch", "--show-current"]);
+  if (branch !== config.managementBranch) throw new Error(`management branch mismatch: ${branch || "detached"}`);
   const stateFile = path.join(root, "state.json");
   const state = readJson(stateFile);
   state.documentHashes = documentHashes(config.managementWorktree);
