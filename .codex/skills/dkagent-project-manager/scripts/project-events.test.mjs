@@ -113,3 +113,30 @@ test("completion requires complete execution evidence and accepts a successful c
   assert.equal(snapshot.events.length, 1);
   assert.equal(snapshot.events[0].eventId, event.eventId);
 });
+
+test("emit rejects shell credentials but accepts a descriptive token summary", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  for (const command of [
+    "DATABASE_URL=postgres://db/app npm test",
+    "NODE_ENV=test npm test",
+    "export FOO=bar",
+    "curl -H 'x-api-key: value' https://example.test",
+    "curl -H 'api-key: value' https://example.test",
+    "curl -H 'Authorization: Bearer value' https://example.test",
+    "tool --api-key value",
+    "tool --token value",
+    "tool --password value",
+    "tool --secret value",
+    "curl https://user:password@example.test",
+  ]) {
+    assert.throws(
+      () => emitEvent({ cwd, input: started({ evidence: [{ kind: "test", summary: "pass", command, exitCode: 0 }] }) }),
+      /unsafe text content/,
+    );
+  }
+  const event = emitEvent({ cwd, input: started({ summary: "Implement token: refresh strategy" }) });
+  const snapshot = readSnapshot({ cwd });
+  assert.equal(snapshot.events.length, 1);
+  assert.equal(snapshot.events[0].eventId, event.eventId);
+});
