@@ -2,7 +2,7 @@
 
 ## 结论
 
-基于 `53589d6` 完成三轮最终审查修复。改动仅限仓库级项目管家 Skill、helper、契约文档和回归测试；没有进入 DKAgent 业务运行时，没有实现通用文档渲染平台，也没有把虚假真实进度写入 STATUS/BACKLOG。
+基于 `53589d6` 完成四轮最终审查修复。改动仅限仓库级项目管家 Skill、helper、契约文档和回归测试；没有进入 DKAgent 业务运行时，没有实现通用文档渲染平台，也没有把虚假真实进度写入 STATUS/BACKLOG。
 
 ## 修复
 
@@ -14,15 +14,16 @@
 6. Snapshot 同样返回带 `kind` 的稳定排序冲突 shape，并覆盖 pending 与 processed+pending 重放。
 7. `test`、`typecheck`、`build` 证据严格匹配命令类型；缺少成功行为证据、失败证据或只有 commit 证据的 `finished/completed` 保留 action，并确定性降级为 `needs_verification`。
 8. 所有持久化自由文本拒绝 CR/LF 和 Markdown heading 注入；已存在 repo/worktree/common-dir 使用 canonical realpath，兼容 macOS `/var` 与 `/private/var`，同时保留路径 containment 和 symlink escape 防护。
+9. `project` 与 ACK 按 `(createdAt,eventId)` 排序并按 taskId 折叠，只要求 folded latest projection；成功后仍逐事件写入 processed，保留完整审计。ACK 要求 selected task 覆盖全部 pending，并扫描 STATUS+BACKLOG，拒绝旧新并存、同文件重复、跨文件重复和 only-old current block。
 
 ## TDD 证据
 
-回归测试覆盖合法 lease 的 token 取回、canonical taskId、projection helper/CLI、完整来源与 HEAD 防伪、latest current projection 替换、processed 审计历史、stale started→finished、双向 ACK 冲突、三 worktree 完整投影、证据降级、自由文本与 canonical path。每类修复均先用失败断言复现，再做最小实现。
+回归测试覆盖合法 lease 的 token 取回、canonical taskId、projection helper/CLI、完整来源与 HEAD 防伪、folded latest projection、部分 ACK 防倒退、唯一 current block、processed 审计历史、恢复窗口、双向 ACK 冲突、三 worktree 完整投影、证据降级、自由文本与 canonical path。每类修复均先用失败断言复现，再做最小实现。
 
 ## 验证
 
-- `npm run test:project-manager`：58/58 PASS。
-- `npm test`：exit 0，包含 Project Manager 58/58 与 Vite build。
+- `npm run test:project-manager`：60/60 PASS。
+- `npm test`：exit 0，包含 Project Manager 60/60 与 Vite build。
 - `npm run typecheck`：exit 0。
 - `python3 /Users/xuxiaokang/.codex/skills/.system/skill-creator/scripts/quick_validate.py .codex/skills/dkagent-project-manager`：`Skill is valid!`。
 - `node --check .codex/skills/dkagent-project-manager/scripts/project-events.mjs`：exit 0。

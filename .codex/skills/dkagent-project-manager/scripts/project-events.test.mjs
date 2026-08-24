@@ -702,14 +702,53 @@ test("ack replays processed events in creation order instead of input order", ()
   writePendingEvent(cwd, finished, "2026-08-24T00:00:01.000Z");
   writePendingEvent(cwd, last, "2026-08-24T00:00:02.000Z");
   const token = acquireLock({ cwd }).token;
-  renderTaskDocuments(cwd, token, [first, finished, last]);
+  const projection = renderEventProjections({
+    cwd,
+    token,
+    eventIds: [last.eventId, first.eventId, finished.eventId],
+  });
+  assert.equal(projection.blocks.length, 1);
+  assert.equal(projection.blocks[0].eventId, last.eventId);
+  renderTaskDocuments(cwd, token, [last, first, finished]);
   ackEvents({
     cwd,
     token,
     eventIds: [last.eventId, first.eventId, finished.eventId],
     expectedDocumentHashes: documentHashes(cwd),
   });
-  assert.deepEqual(readSnapshot({ cwd }).state.activeClaims, { [first.taskId]: [cwd] });
+  const snapshot = readSnapshot({ cwd });
+  assert.deepEqual(snapshot.state.activeClaims, { [first.taskId]: [cwd] });
+  assert.deepEqual(snapshot.state.processedEventIds, [first.eventId, finished.eventId, last.eventId]);
+  for (const event of [first, finished, last]) {
+    assert.equal(existsSync(path.join(stateRoot(cwd), "events", "processed", `${event.eventId}.json`)), true);
+  }
+  const status = readFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "utf8");
+  assert.equal(status.split(/\r?\n/).filter((line) => line.startsWith("- [project-event] ")).length, 1);
+  assert.match(status, new RegExp(last.eventId));
+});
+
+test("ack rejects a selected task when event IDs omit one of its pending events", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const first = emitEvent({ cwd, input: started({ taskId: "DKA-PARTIAL-ACK" }) });
+  emitEvent({
+    cwd,
+    input: started({
+      taskId: first.taskId,
+      action: "finished",
+      status: "needs_verification",
+      summary: "Finished after the selected start",
+    }),
+  });
+  const token = acquireLock({ cwd }).token;
+  renderTaskDocuments(cwd, token, [first]);
+  assert.throws(
+    () => ackEvents({ cwd, token, eventIds: [first.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    /event IDs must include all pending events for selected task/,
+  );
+  assert.equal(readSnapshot({ cwd, token }).events.length, 2);
+  assert.equal(lockStatus({ cwd }).owner.token, token);
+  releaseLock({ cwd, token });
 });
 
 test("ack rejects external document drift that differs from rendered hashes", () => {
@@ -749,7 +788,7 @@ test("ack rejects a finished event when documents retain only its started projec
   writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), `# Status\n\n${projection.blocks[0].block}\n`);
   writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), "# Backlog\n");
   assert.throws(
-    () => ackEvents({ cwd, token, eventIds: [finished.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+    () => ackEvents({ cwd, token, eventIds: [first.eventId, finished.eventId], expectedDocumentHashes: documentHashes(cwd) }),
     /event is not canonically projected/,
   );
   assert.equal(readSnapshot({ cwd, token }).events.length, 2);
@@ -779,6 +818,26 @@ test("finished ACK replaces the started current projection while processed event
     }),
   });
   const finishedToken = acquireLock({ cwd }).token;
+  const [finishedProjection] = renderEventProjections({
+    cwd,
+    token: finishedToken,
+    eventIds: [finishedEvent.eventId],
+  }).blocks;
+  const staleStatus = readFileSync(path.join(cwd, "docs", "project", "STATUS.md"), "utf8");
+  writeFileSync(
+    path.join(cwd, "docs", "project", "STATUS.md"),
+    `${staleStatus.trimEnd()}\n${finishedProjection.block}\n`,
+  );
+  assert.throws(
+    () => ackEvents({
+      cwd,
+      token: finishedToken,
+      eventIds: [finishedEvent.eventId],
+      expectedDocumentHashes: documentHashes(cwd),
+    }),
+    /exactly one current projection/,
+  );
+  assert.equal(readSnapshot({ cwd, token: finishedToken }).events.length, 1);
   renderTaskDocuments(cwd, finishedToken, [finishedEvent]);
   ackEvents({
     cwd,
@@ -877,6 +936,30 @@ test("ack rejects task IDs mentioned only in comments or prose", () => {
     /event is not canonically projected/,
   );
   assert.equal(readSnapshot({ cwd, token }).events.length, 1);
+  releaseLock({ cwd, token });
+});
+
+test("ack rejects duplicate current projections in one or both management documents", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const event = emitEvent({ cwd, input: started({ taskId: "DKA-DUPLICATE-CURRENT" }) });
+  const token = acquireLock({ cwd }).token;
+  const [projection] = renderEventProjections({ cwd, token, eventIds: [event.eventId] }).blocks;
+  mkdirSync(path.join(cwd, "docs", "project"), { recursive: true });
+
+  for (const [status, backlog] of [
+    [`# Status\n\n${projection.block}\n${projection.block}\n`, "# Backlog\n"],
+    [`# Status\n\n${projection.block}\n`, `# Backlog\n\n${projection.block}\n`],
+  ]) {
+    writeFileSync(path.join(cwd, "docs", "project", "STATUS.md"), status);
+    writeFileSync(path.join(cwd, "docs", "project", "BACKLOG.md"), backlog);
+    assert.throws(
+      () => ackEvents({ cwd, token, eventIds: [event.eventId], expectedDocumentHashes: documentHashes(cwd) }),
+      /exactly one current projection/,
+    );
+  }
+  assert.equal(readSnapshot({ cwd, token }).events.length, 1);
+  assert.equal(lockStatus({ cwd }).owner.token, token);
   releaseLock({ cwd, token });
 });
 
@@ -1196,8 +1279,10 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(skill, /`conflicts` 非空/);
   assert.match(skill, /owner\.token/);
   assert.match(skill, /project --token/);
-  assert.match(skill, /replace that task's previous block with the latest block/);
+  assert.match(skill, /replace that task's previous block with the latest block/i);
   assert.match(skill, /schema version.*canonical worktree.*branch.*HEAD.*creation time/);
+  assert.match(skill, /sorts by.*createdAt.*eventId.*folds by taskId/);
+  assert.match(skill, /all pending events for every selected task/);
   const contracts = readFileSync(path.join(repositoryRoot, ".codex/skills/dkagent-project-manager/references/document-contracts.md"), "utf8");
   assert.match(contracts, /- \[project-task\]/);
   assert.match(contracts, /- \[project-event\]/);
@@ -1208,10 +1293,14 @@ test("activated project-management documents and Skill describe the hash-checked
   assert.match(contracts, /\^DKA-\[A-Z0-9\]/);
   assert.match(contracts, /current projection.*latest event/);
   assert.match(contracts, /processed event JSON.*audit history/);
+  assert.match(contracts, /ACK sort requested events by.*createdAt.*eventId/);
+  assert.match(contracts, /exactly one current block across STATUS and BACKLOG/);
+  assert.match(contracts, /include all pending events for each selected task/);
   assert.match(contracts, /git diff --check.*cannot/);
   assert.match(contracts, /deterministically downgrades.*`needs_verification`/);
   const report = readFileSync(path.join(repositoryRoot, ".superpowers/sdd/final-fix-report.md"), "utf8");
   assert.doesNotMatch(report, /owner PID.*ESRCH/);
   assert.match(report, /canonical event projection/);
   assert.match(report, /latest current projection/);
+  assert.match(report, /folded latest projection/);
 });

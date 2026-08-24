@@ -29,13 +29,17 @@ Every event selected for ACK must have one complete two-line projection block in
 
 The human line must exactly match event `taskId`, `status`, `module`, `summary`, `worktreePath`, `branch`, `headSha`, and `createdAt`. The canonical payload field order is `schemaVersion`, `eventId`, `taskId`, `action`, `status`, `module`, `summary`, `dependencies`, `evidence`, `discoveredTodos`, `worktreePath`, `branch`, `headSha`, `createdAt`; evidence canonicalizes `kind`, `summary`, optional `command`, optional `exitCode`, and todos canonicalize `summary`, `module`, `reason`. `digest` is SHA-256 of the compact canonical payload JSON and therefore binds the complete stored event. Missing source fields, an old or forged HEAD, HTML comments, prose, headings, stale status, recomputed partial payloads, and hand-written equivalents do not count.
 
-STATUS/BACKLOG hold one current projection per `taskId`: the current projection is always the latest event. When a later event arrives, replace the previous two-line block rather than displaying both `in_progress` and the later status. The exact latest block is sufficient for its ACK; old blocks do not remain in the documents. Every processed event JSON remains unchanged under `events/processed/` as the complete audit history.
+STATUS/BACKLOG hold one current projection per `taskId`: the current projection is always the latest event. When a later event arrives, replace the previous two-line block rather than displaying both `in_progress` and the later status. Every processed event JSON remains unchanged under `events/processed/` as the complete audit history.
+
+`project` and ACK sort requested events by `(createdAt,eventId)` and fold them by `taskId`; only the folded latest projection is written and verified, while every requested event is still moved to `events/processed/` and recorded in that order. `eventIds` must include all pending events for each selected task, so a partial ACK cannot later overwrite the current view with an older event. A requested event already moved to processed during the recovery window but not yet recorded in state remains eligible for ACK.
+
+ACK scans canonical projection blocks in both documents. Each selected task must have exactly one current block across STATUS and BACKLOG, and that block must equal the folded latest event. It rejects only-old projection, old+new coexistence, repeated blocks in one file, and duplicates split across both files.
 
 ## BACKLOG.md
 
 Columns: `ID | Priority | Module | Status | Dependencies | Ordering reason | Source | Updated`. Status is `ready|in_progress|needs_verification|blocked|completed`. V1 never deletes or archives automatically.
 
-The eight-column BACKLOG row remains the human priority view but does not satisfy ACK by itself. Store the exact helper-generated current block in STATUS or BACKLOG, replacing the prior block when the same task advances.
+The eight-column BACKLOG row remains the human priority view but does not satisfy ACK by itself. Store the exact folded helper-generated current block in STATUS or BACKLOG, replacing the prior block when the same task advances.
 
 ## Conflicts
 

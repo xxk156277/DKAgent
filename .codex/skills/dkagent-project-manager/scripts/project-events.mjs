@@ -540,17 +540,39 @@ export function renderEventProjections({ cwd, token, eventIds }) {
   if (!Array.isArray(eventIds) || eventIds.length === 0 || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
     throw new Error("invalid event ID");
   }
-  return { schemaVersion: 1, blocks: eventIds.map((eventId) => projectionBlock(readStoredEvent(root, eventId))) };
+  const events = eventIds.map((eventId) => readStoredEvent(root, eventId));
+  return { schemaVersion: 1, blocks: latestEventsByTask(events).map((event) => projectionBlock(event)) };
 }
 
-function isCanonicallyProjected(managementWorktree, event) {
-  const expected = projectionBlock(event);
-  return ["docs/project/STATUS.md", "docs/project/BACKLOG.md"].some((relative) => {
+function currentProjectionBlocks(managementWorktree) {
+  const blocks = [];
+  for (const relative of ["docs/project/STATUS.md", "docs/project/BACKLOG.md"]) {
     const file = path.join(managementWorktree, relative);
-    if (!existsSync(file)) return false;
+    if (!existsSync(file)) continue;
     const lines = readFileSync(file, "utf8").split(/\r?\n/);
-    return lines.some((line, index) => line === expected.taskLine && lines[index + 1] === expected.projectionLine);
-  });
+    for (let index = 0; index < lines.length - 1; index += 1) {
+      if (!lines[index].startsWith(PROJECT_TASK_PREFIX) || !lines[index + 1].startsWith(PROJECT_EVENT_PREFIX)) continue;
+      let human;
+      try {
+        human = JSON.parse(lines[index].slice(PROJECT_TASK_PREFIX.length));
+      } catch {
+        continue;
+      }
+      if (!human || typeof human.taskId !== "string") continue;
+      blocks.push({ taskId: human.taskId, taskLine: lines[index], projectionLine: lines[index + 1] });
+    }
+  }
+  return blocks;
+}
+
+function sortEventsByCreation(events) {
+  return [...events].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.eventId.localeCompare(right.eventId));
+}
+
+function latestEventsByTask(events) {
+  const latest = new Map();
+  for (const event of sortEventsByCreation(events)) latest.set(event.taskId, event);
+  return [...latest.values()];
 }
 
 export function acquireLock({ cwd }) {
@@ -737,32 +759,49 @@ export function ackEvents({ cwd, token, eventIds, expectedDocumentHashes }) {
   if (!sameDocumentHashes(currentDocumentHashes, expectedDocumentHashes)) {
     throw new Error("management document hashes do not match expected results");
   }
-  if (!Array.isArray(eventIds) || eventIds.length === 0 || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
+  if (!Array.isArray(eventIds)
+    || eventIds.length === 0
+    || new Set(eventIds).size !== eventIds.length
+    || eventIds.some((eventId) => typeof eventId !== "string" || !EVENT_ID.test(eventId))) {
     throw new Error("invalid event ID");
   }
-  const conflicts = activeClaimConflicts(state, readPendingEvents(root));
+  const allPendingEvents = readPendingEvents(root);
+  const conflicts = activeClaimConflicts(state, allPendingEvents);
   if (conflicts.length) throw new Error(`active claim conflicts block ACK: ${JSON.stringify(conflicts)}`);
+  const requestedEvents = [];
   const pendingEvents = [];
   for (const eventId of eventIds) {
-    if (state.processedEventIds.includes(eventId)) continue;
     const source = path.join(root, "events", "pending", `${eventId}.json`);
     const destination = path.join(root, "events", "processed", `${eventId}.json`);
     if (!existsSync(source) && !existsSync(destination)) throw new Error(`event not found: ${eventId}`);
     const event = readJson(existsSync(source) ? source : destination);
     if (!isStoredEvent(event, eventId)) throw new Error(`invalid stored event: ${eventId}`);
-    pendingEvents.push(event);
+    requestedEvents.push(event);
+    if (!state.processedEventIds.includes(eventId)) pendingEvents.push(event);
   }
-  for (const event of pendingEvents) {
-    if (!isCanonicallyProjected(config.managementWorktree, event)) {
+  const requestedIds = new Set(eventIds);
+  const selectedTaskIds = new Set(requestedEvents.map((event) => event.taskId));
+  for (const event of allPendingEvents) {
+    if (selectedTaskIds.has(event.taskId) && !requestedIds.has(event.eventId)) {
+      throw new Error(`event IDs must include all pending events for selected task: ${event.taskId}`);
+    }
+  }
+  const currentBlocks = currentProjectionBlocks(config.managementWorktree);
+  for (const event of latestEventsByTask(requestedEvents)) {
+    const taskBlocks = currentBlocks.filter((block) => block.taskId === event.taskId);
+    if (taskBlocks.length !== 1) {
+      throw new Error(`event is not canonically projected; selected task must have exactly one current projection: ${event.taskId}`);
+    }
+    const expected = projectionBlock(event);
+    if (taskBlocks[0].taskLine !== expected.taskLine || taskBlocks[0].projectionLine !== expected.projectionLine) {
       throw new Error(`event is not canonically projected in STATUS.md or BACKLOG.md: ${event.eventId}`);
     }
   }
-  for (const eventId of eventIds) {
-    if (state.processedEventIds.includes(eventId)) continue;
-    const source = path.join(root, "events", "pending", `${eventId}.json`);
-    const destination = path.join(root, "events", "processed", `${eventId}.json`);
+  for (const event of sortEventsByCreation(pendingEvents)) {
+    const source = path.join(root, "events", "pending", `${event.eventId}.json`);
+    const destination = path.join(root, "events", "processed", `${event.eventId}.json`);
     if (existsSync(source)) renameSync(source, destination);
-    state.processedEventIds.push(eventId);
+    state.processedEventIds.push(event.eventId);
   }
   state.activeClaims = replayActiveClaims(root);
   state.documentHashes = currentDocumentHashes;
