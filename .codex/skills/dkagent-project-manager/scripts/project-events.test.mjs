@@ -439,23 +439,27 @@ test("a later recovery cannot delete a lock acquired after abandoned recovery", 
   assert.equal(releaseLock({ cwd, token: owner.token }), true);
 });
 
-test("lock status retains an owned tombstone without deleting a later new lock", () => {
+test("an owned tombstone blocks another aggregator from acquiring the lock", () => {
   const cwd = createRepo();
   initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
   const root = stateRoot(cwd);
   const tombstone = "aggregate.lock.recovery-retained-owner";
-  mkdirSync(path.join(root, tombstone));
-  writeFileSync(path.join(root, tombstone, "owner.json"), "{\"token\":\"old-owner\"}\n");
-  assert.deepEqual(lockStatus({ cwd }), {
-    held: false,
-    recoverable: false,
-    owner: null,
-    recoveryTombstones: [tombstone],
-  });
   const owner = acquireLock({ cwd });
-  assert.equal(lockStatus({ cwd }).owner.token, owner.token);
-  assert.deepEqual(lockStatus({ cwd }).recoveryTombstones, [tombstone]);
+  renameSync(path.join(root, "aggregate.lock"), path.join(root, tombstone));
+  const status = lockStatus({ cwd });
+  assert.deepEqual(status.blockingTombstones, [tombstone]);
+  assert.throws(() => acquireLock({ cwd }), /owned recovery tombstone/);
+  assert.throws(() => recoverLock({ cwd, confirm: true }), /owned recovery tombstone/);
+  assert.ok(existsSync(path.join(root, tombstone)));
+  assert.equal(owner.token.length, 36);
+});
+
+test("published lock files expose a complete owner and require token release", () => {
+  const cwd = createRepo();
+  initStore({ cwd, managementWorktree: cwd, managementBranch: "main" });
+  const owner = acquireLock({ cwd });
+  const root = stateRoot(cwd);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(root, "aggregate.lock"), "utf8")), owner);
   assert.throws(() => recoverLock({ cwd, confirm: true }), /release requires token/);
-  assert.equal(lockStatus({ cwd }).owner.token, owner.token);
   assert.equal(releaseLock({ cwd, token: owner.token }), true);
 });

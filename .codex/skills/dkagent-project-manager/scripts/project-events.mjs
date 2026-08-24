@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +26,9 @@ const TEST_PATH = /\.test\.[cm]?[jt]s$/;
 const NODE_CHECK_PATH = /\.[cm]?js$/;
 const EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DOCUMENT_HASH = /^[0-9a-f]{64}$/;
+const LOCK_FILE = "aggregate.lock";
+const LOCK_CREATING_PREFIX = "aggregate.lock.creating-";
+const LOCK_RECOVERY_PREFIX = "aggregate.lock.recovery-";
 
 function git(cwd, args) {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -62,6 +65,40 @@ function validDocumentHashes(hashes) {
 function sameDocumentHashes(left, right) {
   return validDocumentHashes(left) && validDocumentHashes(right)
     && DOCUMENTS.every((relative) => left[relative] === right[relative]);
+}
+
+function validLockOwner(owner) {
+  return owner
+    && typeof owner === "object"
+    && !Array.isArray(owner)
+    && EVENT_ID.test(owner.token)
+    && Number.isInteger(owner.pid)
+    && typeof owner.acquiredAt === "string"
+    && !Number.isNaN(Date.parse(owner.acquiredAt))
+    && validDocumentHashes(owner.baselineHashes);
+}
+
+function readLockOwner(lock) {
+  try {
+    const ownerFile = statSync(lock).isDirectory() ? path.join(lock, "owner.json") : lock;
+    const owner = readJson(ownerFile);
+    return validLockOwner(owner) ? owner : null;
+  } catch {
+    return null;
+  }
+}
+
+function lockDiagnostics(root) {
+  const entries = existsSync(root) ? readdirSync(root) : [];
+  const recoveryTombstones = entries.filter((name) => name.startsWith(LOCK_RECOVERY_PREFIX)).sort();
+  const blockingTombstones = recoveryTombstones
+    .filter((name) => readLockOwner(path.join(root, name)))
+    .sort();
+  return {
+    recoveryTombstones,
+    blockingTombstones,
+    creatingFiles: entries.filter((name) => name.startsWith(LOCK_CREATING_PREFIX)).sort(),
+  };
 }
 
 function containsHighConfidenceCredential(value) {
@@ -231,9 +268,10 @@ export function emitEvent({ cwd, input }) {
 }
 
 function requireToken(root, token) {
-  const ownerFile = path.join(root, "aggregate.lock", "owner.json");
-  if (!existsSync(ownerFile)) throw new Error("aggregate lock is not held");
-  const owner = readJson(ownerFile);
+  const lock = path.join(root, LOCK_FILE);
+  if (!existsSync(lock)) throw new Error("aggregate lock is not held");
+  const owner = readLockOwner(lock);
+  if (!owner) throw new Error("aggregate lock owner is invalid; explicit recovery required");
   if (owner.token !== token) throw new Error("aggregate lock token mismatch");
   return owner;
 }
@@ -306,56 +344,93 @@ function activeClaimConflicts(state, events) {
 
 export function acquireLock({ cwd }) {
   const root = stateRoot(cwd);
-  const lock = path.join(root, "aggregate.lock");
-  try {
-    mkdirSync(lock);
-  } catch (error) {
-    if (error.code === "EEXIST") throw new Error("aggregate lock is held");
-    throw error;
+  const diagnostics = lockDiagnostics(root);
+  if (diagnostics.blockingTombstones.length) {
+    throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
   }
+  const lock = path.join(root, LOCK_FILE);
   const owner = {
     token: randomUUID(),
     pid: process.pid,
     acquiredAt: new Date().toISOString(),
     baselineHashes: documentHashes(readJson(path.join(root, "config.json")).managementWorktree),
   };
-  writeJsonAtomic(path.join(lock, "owner.json"), owner);
+  const creating = path.join(root, `${LOCK_CREATING_PREFIX}${randomUUID()}`);
+  writeFileSync(creating, `${JSON.stringify(owner, null, 2)}\n`, { flag: "wx" });
+  try {
+    linkSync(creating, lock);
+  } catch (error) {
+    if (error.code === "EEXIST") throw new Error("aggregate lock is held");
+    throw error;
+  } finally {
+    if (existsSync(creating)) unlinkSync(creating);
+  }
   return owner;
 }
 
 export function releaseLock({ cwd, token }) {
   const root = stateRoot(cwd);
   requireToken(root, token);
-  rmSync(path.join(root, "aggregate.lock"), { recursive: true });
+  const lock = path.join(root, LOCK_FILE);
+  if (statSync(lock).isDirectory()) {
+    const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
+    renameSync(lock, tombstone);
+    rmSync(tombstone, { recursive: true });
+  } else {
+    unlinkSync(lock);
+  }
   return true;
 }
 
 export function lockStatus({ cwd }) {
   const root = stateRoot(cwd);
-  const lock = path.join(root, "aggregate.lock");
-  const recoveryTombstones = existsSync(root)
-    ? readdirSync(root).filter((name) => name.startsWith("aggregate.lock.recovery-")).sort()
-    : [];
-  if (!existsSync(lock)) return { held: false, recoverable: false, owner: null, recoveryTombstones };
-  const ownerFile = path.join(lock, "owner.json");
-  if (!existsSync(ownerFile)) return { held: true, recoverable: true, owner: null, recoveryTombstones };
-  return { held: true, recoverable: false, owner: readJson(ownerFile), recoveryTombstones };
+  const lock = path.join(root, LOCK_FILE);
+  const diagnostics = lockDiagnostics(root);
+  const status = existsSync(lock)
+    ? (() => {
+      const owner = readLockOwner(lock);
+      return { held: true, recoverable: !owner, owner };
+    })()
+    : { held: false, recoverable: false, owner: null };
+  const result = { ...status, recoveryTombstones: diagnostics.recoveryTombstones };
+  if (diagnostics.blockingTombstones.length) result.blockingTombstones = diagnostics.blockingTombstones;
+  if (diagnostics.creatingFiles.length) result.creatingFiles = diagnostics.creatingFiles;
+  return result;
 }
 
 export function recoverLock({ cwd, confirm = false }) {
   const root = stateRoot(cwd);
-  const lock = path.join(root, "aggregate.lock");
-  if (!existsSync(lock)) throw new Error("aggregate lock is not held");
-  if (existsSync(path.join(lock, "owner.json"))) throw new Error("aggregate lock owner exists; release requires token");
+  const lock = path.join(root, LOCK_FILE);
+  const diagnostics = lockDiagnostics(root);
+  if (diagnostics.blockingTombstones.length) {
+    throw new Error("owned recovery tombstone blocks aggregation; manual inspection required");
+  }
+  if (!existsSync(lock)) {
+    if (!diagnostics.creatingFiles.length) throw new Error("aggregate lock is not held");
+    if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
+    for (const name of diagnostics.creatingFiles) {
+      const creating = path.join(root, name);
+      const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
+      try {
+        renameSync(creating, tombstone);
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw error;
+      }
+      rmSync(tombstone, { recursive: true });
+    }
+    return true;
+  }
+  if (readLockOwner(lock)) throw new Error("aggregate lock owner exists; release requires token");
   if (confirm !== true) throw new Error("lock recovery requires explicit confirmation");
-  const tombstone = path.join(root, `aggregate.lock.recovery-${randomUUID()}`);
+  const tombstone = path.join(root, `${LOCK_RECOVERY_PREFIX}${randomUUID()}`);
   try {
     renameSync(lock, tombstone);
   } catch (error) {
     if (error.code === "ENOENT") throw new Error("aggregate lock is not held");
     throw error;
   }
-  if (existsSync(path.join(tombstone, "owner.json"))) {
+  if (readLockOwner(tombstone)) {
     throw new Error("lock recovery found an owner; tombstone retained");
   }
   rmSync(tombstone, { recursive: true });
