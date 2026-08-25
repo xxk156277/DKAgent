@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { initializeKnowledgeSchema, openKnowledgeDatabase } from "../../src/knowledge/database.js";
-import type { EmbeddingProvider } from "../../src/knowledge/embedding.js";
-import { KnowledgeRepository } from "../../src/knowledge/repository.js";
-import { KnowledgeSearch } from "../../src/knowledge/search.js";
-import type { KnowledgeEntry } from "../../src/knowledge/types.js";
+import { initializeKnowledgeSchema, openKnowledgeDatabase } from "../src/database.js";
+import type { EmbeddingProvider } from "../src/embedding.js";
+import { KnowledgeRepository } from "../src/repository.js";
+import { KnowledgeSearch } from "../src/search.js";
+import type { KnowledgeEntry } from "../src/types.js";
 
 function entry(
   id: string,

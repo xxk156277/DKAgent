@@ -1,0 +1,20 @@
+{"query":"React diff 中节点删除是怎么处理的？","relevantSourcePaths":["C-前端学习/React/React原理实现/细节/diff.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"React Element 树如何转换成 Fiber 树？","relevantSourcePaths":["C-前端学习/React/React原理实现/细节/fiber树.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"useState 的基本实现原理是什么？","relevantSourcePaths":["C-前端学习/React/React原理实现/细节/useState.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"Zustand 和 Redux 的核心定位有什么区别？","relevantSourcePaths":["C-前端学习/React/Redux/Redux 和 Zustand 对比.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"SSE 适合哪些场景，它和普通 HTTP 有什么区别？","relevantSourcePaths":["C-前端学习/node/SSE.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"GitHub Actions 中 Event、Workflow、Job 和 Runner 是什么关系？","relevantSourcePaths":["CICD/01 GitHub Actions 心智模型.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"AsyncLocalStorage 解决了什么上下文传递问题？","relevantSourcePaths":["个人Agent项目/Trace&Tap/知识点/AsyncLocalStorage.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"Agent 上下文压缩需要保护哪三份数据？","relevantSourcePaths":["个人Agent项目/上下文 - 压缩策略.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"为什么无约束 JSON 容易导致 LLM 输出不合规？","relevantSourcePaths":["个人Agent项目/问题记录/LLM输出的JSON格式不合规.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"为什么 Session 中会出现 Tool Call 没有对应 Result？","relevantSourcePaths":["个人Agent项目/问题记录/Session数据库中，存在Tool、Result不对应问题.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"QueryModel 包含哪些核心模块？","relevantSourcePaths":["个人Agent项目/QueryModel.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"Pi Agent 中 Message 和 Event 为什么要分开？","relevantSourcePaths":["学习笔记/Agent开发/Agent项目/Pi Agent/2 Message vs Event.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"上下文工程通常由哪些部分组成？","relevantSourcePaths":["学习笔记/Agent开发/Agent项目/helloAgent/2.上下文工程.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"Agent 为什么需要记忆和 RAG？","relevantSourcePaths":["学习笔记/Agent开发/Agent项目/helloAgent/3.记忆与RAG.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"MCP 主要解决了什么问题？","relevantSourcePaths":["学习笔记/Agent开发/Agent项目/helloAgent/4.MCP.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"Agent 评估应该关注哪些方面？","relevantSourcePaths":["学习笔记/Agent开发/Agent项目/helloAgent/5. 评估.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"RAG 的基本工作流程是什么？","relevantSourcePaths":["学习笔记/Agent开发/RAG/0.RAG介绍.md","学习笔记/Agent开发/RAG/RAG.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"Zod 如何从 Schema 推导 TypeScript 类型？","relevantSourcePaths":["学习笔记/B-Node后端/BFF小模块/00 Zod.md"],"expectedFacts":[],"shouldRefuse":false}
+{"query":"大康 note 里记载的火星基地氧气循环系统参数是多少？","relevantSourcePaths":[],"expectedFacts":[],"shouldRefuse":true}
+{"query":"请告诉我 2035 年苹果公司尚未发布产品的内部定价。","relevantSourcePaths":[],"expectedFacts":[],"shouldRefuse":true}

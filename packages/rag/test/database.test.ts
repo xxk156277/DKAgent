@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { initializeKnowledgeSchema, openKnowledgeDatabase } from "../../src/knowledge/database.js";
-import { KnowledgeRepository } from "../../src/knowledge/repository.js";
-import type { KnowledgeEntry } from "../../src/knowledge/types.js";
-import { decodeVector, encodeVector } from "../../src/knowledge/vector.js";
+import { initializeKnowledgeSchema, openKnowledgeDatabase } from "../src/database.js";
+import { KnowledgeRepository } from "../src/repository.js";
+import type { KnowledgeEntry } from "../src/types.js";
+import { decodeVector, encodeVector } from "../src/vector.js";
 
 function createEntry(overrides: Partial<KnowledgeEntry> = {}): KnowledgeEntry {
   return {
