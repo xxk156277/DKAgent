@@ -1,0 +1,17 @@
+{
+  "name": "@dkagent/rag",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build:knowledge": "cd ../.. && tsx packages/rag/src/cli.ts",
+    "test": "cd ../.. && tsx --test packages/rag/test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^17.4.2"
+  }
+}

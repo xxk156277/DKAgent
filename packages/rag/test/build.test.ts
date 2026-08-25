@@ -3,10 +3,10 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { buildKnowledgeBase } from "../../src/knowledge/build.js";
-import { initializeKnowledgeSchema, openKnowledgeDatabase } from "../../src/knowledge/database.js";
-import type { EmbeddingProvider } from "../../src/knowledge/embedding.js";
-import { KnowledgeRepository } from "../../src/knowledge/repository.js";
+import { buildKnowledgeBase } from "../src/build.js";
+import { initializeKnowledgeSchema, openKnowledgeDatabase } from "../src/database.js";
+import type { EmbeddingProvider } from "../src/embedding.js";
+import { KnowledgeRepository } from "../src/repository.js";
 
 class FakeEmbeddingProvider implements EmbeddingProvider {
   public readonly model = "fake-build-model";

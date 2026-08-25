@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   OpenAICompatibleEmbeddingProvider,
   createEmbeddingProviderFromEnv,
-} from "../../src/knowledge/embedding.js";
+} from "../src/embedding.js";
 
 test("OpenAI 兼容 Provider 发送批量请求并按 index 恢复顺序", async () => {
   let capturedUrl = "";

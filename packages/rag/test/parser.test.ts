@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseKnowledgeMarkdown } from "../../src/knowledge/parser.js";
+import { parseKnowledgeMarkdown } from "../src/parser.js";
 
 test("解析二三级 Q 标题和连续的回答区块", () => {
   const markdown = `# React

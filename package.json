@@ -9,6 +9,9 @@
     "dev": "npm run dev -w @dkagent/web-tap",
     "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "rag:build": "npm run build:knowledge -w @dkagent/rag",
+    "test:rag": "npm test -w @dkagent/rag",
+    "typecheck:rag": "npm run typecheck -w @dkagent/rag",
     "test:phase1": "npm run test:phase1 -w @dkagent/agent",
     "typecheck:phase1": "npm run typecheck:phase1 -w @dkagent/agent"
   },
