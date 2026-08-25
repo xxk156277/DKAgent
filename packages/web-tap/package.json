@@ -13,8 +13,8 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6",
-    "@dkagent/agent": "*",
-    "@dkagent/trace": "*",
+    "@dkagent/agent": "workspace:*",
+    "@dkagent/trace": "workspace:*",
     "antd": "^6.6.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
