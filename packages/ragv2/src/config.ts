@@ -11,7 +11,7 @@ const defaultVault =
   "/Users/xuxiaokang/Library/Mobile Documents/iCloud~md~obsidian/Documents/大康note";
 
 const EnvSchema = z.object({
-  DATABASE_URL: z.string().default("postgresql://rag:rag@localhost:5438/rag"),
+  DATABASE_URL: z.string().default("postgresql://rag:rag@localhost:5439/rag"),
   RAG_VAULT_PATH: z.string().default(defaultVault),
   SILICONFLOW_API_KEY: z.string().optional(),
   EMBEDDING_BASE_URL: z.string().default("https://api.siliconflow.cn/v1"),
