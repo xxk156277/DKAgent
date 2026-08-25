@@ -134,7 +134,7 @@ export class Tracer {
     }
 
     private createState<Name extends SpanName>(name: Name, input: SpanInputMap[Name], parent: Parent): State<Name> {
-        const inputClone = this.clone(input);
+        const inputClone = this.clone(input, name !== "model.generate");
         const attributesClone = this.clone(parent.attributes ?? {});
         const state: State<Name> = {
             span: {
@@ -163,7 +163,7 @@ export class Tracer {
             event: (name: SpanEventName, data: JsonValue) => { if (!state.closed) this.addEvent(state, name, data); },
             setOutput: (output: SpanOutputMap[Name]) => {
                 if (state.closed) return;
-                const clone = this.clone(output);
+                const clone = this.clone(output, state.span.name !== "model.generate");
                 if (clone.error) {
                     state.span.output = null; state.outputSet = true; this.serializationError(state, "output"); return;
                 }
@@ -214,10 +214,12 @@ export class Tracer {
         if (publish) { state.span.revision += 1; this.publish(state.span); }
     }
 
-    private clone<T>(value: T): { value?: T; error?: Error } {
+    private clone<T>(value: T, sanitize = true): { value?: T; error?: Error } {
         try {
             const result = toJsonValue(value);
-            return result.error ? { error: result.error } : { value: sanitizeJson(result.value!) as T };
+            return result.error
+                ? { error: result.error }
+                : { value: (sanitize ? sanitizeJson(result.value!) : result.value) as T };
         } catch (error) {
             return { error: error instanceof Error ? error : new Error(String(error)) };
         }

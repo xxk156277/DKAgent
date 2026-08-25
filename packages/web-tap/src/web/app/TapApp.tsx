@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
-import { connectEventFeed } from "../api/event-feed.js";
+import { connectTraceFeed } from "../api/trace-feed.js";
 import { AgentInsightsContent, AgentInsightsRail } from "../features/layout/AgentInsightsRail.js";
 import { TapHeader } from "../features/layout/TapHeader.js";
 import { TurnHeader } from "../features/layout/TurnHeader.js";
@@ -44,9 +44,9 @@ export function TapApp({
   const turns = useStore(store, selectTurns);
   const nodes = useStore(store, selectNodes);
   const connectionStatus = useStore(store, (state) => state.connectionStatus);
-  const selectedTurnId = useStore(store, (state) => state.selectedTurnId);
+  const selectedTraceId = useStore(store, (state) => state.selectedTraceId);
   const selectedNodeId = useStore(store, (state) => state.selectedNodeId);
-  const selectTurn = useStore(store, (state) => state.selectTurn);
+  const selectTrace = useStore(store, (state) => state.selectTrace);
   const selectNode = useStore(store, (state) => state.selectNode);
   const viewport = useTapViewport();
   const mobile = viewport === "mobile";
@@ -56,7 +56,7 @@ export function TapApp({
 
   useEffect(
     () => connectLive
-      ? connectEventFeed(store, sessionId ? { sessionId } : {})
+      ? sessionId ? connectTraceFeed(store, { sessionId }) : undefined
       : undefined,
     [connectLive, sessionId, store],
   );
@@ -69,7 +69,7 @@ export function TapApp({
     }
   }, [mobile, viewport]);
 
-  const selectedTurnIndex = turns.findIndex((turn) => turn.id === selectedTurnId);
+  const selectedTurnIndex = turns.findIndex((turn) => turn.id === selectedTraceId);
   const selectedTurn = selectedTurnIndex >= 0 ? turns[selectedTurnIndex] : undefined;
   const turnAnalysis = useMemo(
     () => selectedTurn === undefined ? undefined : analyzeAgentTurn(selectedTurn),
@@ -96,9 +96,9 @@ export function TapApp({
             {mobile ? null : (
               <TurnList
                 turns={turns}
-                selectedTurnId={selectedTurnId}
+                selectedTurnId={selectedTraceId}
                 connectionStatus={connectionStatus}
-                onSelect={selectTurn}
+                onSelect={selectTrace}
               />
             )}
             <section
@@ -143,10 +143,10 @@ export function TapApp({
           >
             <TurnList
               turns={turns}
-              selectedTurnId={selectedTurnId}
+              selectedTurnId={selectedTraceId}
               connectionStatus={connectionStatus}
               onSelect={(turnId) => {
-                selectTurn(turnId);
+                selectTrace(turnId);
                 setTurnsOpen(false);
               }}
             />

@@ -32,7 +32,7 @@ type AnyTraceSpan = { [N in SpanName]: TraceSpan<N> }[SpanName]
 | memory.extract/write | 真实候选/写入内容 → 候选或保存结果 |
 | artifact.put/get | ID/type/metadata → ID/hit；不保存大对象 |
 
-Context 只保存 DTO；完整 messages/tools 只进入 model.generate.input。Memory 内容递归脱敏但保留 recalled memory 普通文本。credential key 规范化后精确匹配 authorization/header(s)/env/environment/password/secret/token/accessToken/refreshToken/bearerToken/clientSecret，或以 `apikey` 结尾；`inputTokens/outputTokens/maxContextTokens` 不脱敏。
+Context 只保存 DTO；完整 messages/tools 只进入 model.generate.input。`model.generate` 的 input/output 不脱敏，完成 JSON-safe clone 后原样写入本地 SQLite；流式调用只保存最终组装输出。Memory 等其他 Span 内容继续递归脱敏并保留 recalled memory 普通文本：credential key 规范化后精确匹配 authorization/header(s)/env/environment/password/secret/token/accessToken/refreshToken/bearerToken/clientSecret，或以 `apikey` 结尾；`inputTokens/outputTokens/maxContextTokens` 不脱敏。
 
 ## 3. 生命周期、完整性与隔离
 

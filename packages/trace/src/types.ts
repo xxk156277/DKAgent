@@ -89,6 +89,38 @@ export type SpanChange =
     | { type: "span_started"; traceId: string; span: AnyTraceSpan }
     | { type: "span_updated"; traceId: string; span: AnyTraceSpan }
     | { type: "span_ended"; traceId: string; span: AnyTraceSpan };
+
+export interface TraceSummary {
+    traceId: string;
+    sessionId?: string;
+    status: SpanStatus;
+    startedAt: string;
+    endedAt?: string;
+    durationMs?: number;
+    spanCount: number;
+    integrity: boolean;
+}
+
+export interface TraceDiagnostics {
+    missingRoot: boolean;
+    missingParent: string[];
+    running: string[];
+    outputMissing: string[];
+    serializationError: string[];
+}
+
+export interface TraceDocument {
+    schemaVersion: 2;
+    trace: TraceSummary;
+    spans: AnyTraceSpan[];
+    complete: boolean;
+    diagnostics: TraceDiagnostics;
+}
+export interface TraceReader {
+    listTraceSummariesBySession(sessionId: string, limit?: number): TraceSummary[];
+    getTraceDocument(traceId: string): TraceDocument | null;
+    hasTraceForSession(sessionId: string): boolean;
+}
 export interface TraceSink { upsert(span: AnyTraceSpan): void }
 export type TraceListener = (change: SpanChange) => void;
 export interface TraceStore extends TraceSink {

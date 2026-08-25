@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import type { ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
-import type { TraceStore } from "@dkagent/trace";
+import type { TraceReader, TraceStore } from "@dkagent/trace";
 import type { TapSessionReader } from "./session-reader.js";
 
 export interface TapServerHandle {
@@ -12,9 +12,11 @@ export interface TapServerHandle {
   close(): Promise<void>;
 }
 
+type TapTraceSource = TraceReader & Pick<TraceStore, "subscribe">;
+
 /** 启动只读 Tap Viewer；所有观测端异常都与 Agent 主流程隔离。 */
 export async function startTapServer(options: {
-  store: TraceStore;
+  store: TapTraceSource;
   sessions?: TapSessionReader;
   webRoot: string;
   host?: string;
@@ -86,18 +88,14 @@ export async function startTapServer(options: {
 async function handleRequest(
   url: string | undefined,
   response: ServerResponse,
-  store: TraceStore,
+  store: TapTraceSource,
   sessions: TapSessionReader | undefined,
   clients: Set<ServerResponse>,
   webRoot: string,
 ): Promise<void> {
   try {
     const pathname = new URL(url ?? "/", "http://127.0.0.1").pathname;
-    if (pathname === "/api/events") {
-      sendJson(response, 200, store.list());
-      return;
-    }
-    if (pathname === "/api/events/stream") {
+    if (pathname === "/api/traces/stream") {
       response.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
@@ -113,10 +111,20 @@ async function handleRequest(
       sendJson(response, 200, sessions?.list() ?? []);
       return;
     }
-    const sessionEventsMatch = /^\/api\/sessions\/([^/]+)\/events$/u.exec(pathname);
-    if (sessionEventsMatch) {
-      const sessionId = decodeURIComponent(sessionEventsMatch[1] ?? "");
-      sendJson(response, 200, store.list().filter((event) => event.sessionId === sessionId));
+    const sessionTracesMatch = /^\/api\/sessions\/([^/]+)\/traces$/u.exec(pathname);
+    if (sessionTracesMatch) {
+      const sessionId = decodeURIComponent(sessionTracesMatch[1] ?? "");
+      sendJson(response, 200, store.listTraceSummariesBySession(sessionId, 100));
+      return;
+    }
+    const traceMatch = /^\/api\/traces\/([^/]+)$/u.exec(pathname);
+    if (traceMatch) {
+      const document = store.getTraceDocument(decodeURIComponent(traceMatch[1] ?? ""));
+      if (!document) {
+        sendJson(response, 404, { error: "Trace 不存在" });
+        return;
+      }
+      sendJson(response, 200, document);
       return;
     }
     const sessionMatch = /^\/api\/sessions\/([^/]+)$/u.exec(pathname);

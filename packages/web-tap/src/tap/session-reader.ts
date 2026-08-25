@@ -1,4 +1,4 @@
-import type { TraceStore } from "@dkagent/trace";
+import type { TraceReader } from "@dkagent/trace";
 
 interface SessionSummarySource {
   id: string;
@@ -36,13 +36,10 @@ export interface TapSessionReader {
 /** 把 Agent Session 的真实状态投影为 Tap 专用只读字段。 */
 export function createTapSessionReader(
   sessions: SessionSource,
-  traces: TraceStore,
+  traces: TraceReader,
 ): TapSessionReader {
   return {
     list() {
-      const tracedSessionIds = new Set(
-        traces.list().flatMap((event) => event.sessionId ? [event.sessionId] : []),
-      );
       return sessions.list().flatMap((summary) => {
         const snapshot = sessions.load(summary.id);
         if (!snapshot) return [];
@@ -52,7 +49,7 @@ export function createTapSessionReader(
           preview: firstUserContent(userMessages) ?? "未命名对话",
           messageCount: snapshot.messages.length,
           turnCount: userMessages.length,
-          hasTrace: tracedSessionIds.has(summary.id),
+          hasTrace: traces.hasTraceForSession(summary.id),
         }];
       });
     },

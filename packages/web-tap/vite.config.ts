@@ -9,8 +9,8 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     proxy: {
-      "/api/events": "http://127.0.0.1:4319",
-      "/api/events/stream": "http://127.0.0.1:4319",
+      "/api/sessions": "http://127.0.0.1:4319",
+      "/api/traces": "http://127.0.0.1:4319",
     },
   },
   test: {

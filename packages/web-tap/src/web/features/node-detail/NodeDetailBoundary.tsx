@@ -30,7 +30,7 @@ export class NodeDetailBoundary extends Component<NodeDetailBoundaryProps, NodeD
           description="该节点包含无法正常渲染的数据，已保留左右导航并展示安全的原始 JSON。"
         />
         <Card className="tap-data-card" size="small" title="安全原始 JSON">
-          <pre className="tap-json-block">{safeJsonStringify(this.props.node?.rawEvents ?? [])}</pre>
+          <pre className="tap-json-block">{safeJsonStringify(this.props.node?.rawSpans ?? [])}</pre>
         </Card>
       </section>
     );

@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Tracer } from "@dkagent/trace";
+import { SqliteTraceStore, Tracer } from "@dkagent/trace";
 import { createInterface } from "node:readline";
 // import { existsSync } from "node:fs";
 import { AgentLoop } from "../agent/loop.js";
@@ -18,9 +18,6 @@ import {
     type SessionStore,
 } from "../session/index.js";
 import {
-    AutomaticMemoryWriter,
-    MemoryExtractor,
-    MemoryRetriever,
     SqliteMemoryStore,
     type MemoryType,
 } from "../memory/index.js";
@@ -46,8 +43,6 @@ export async function runAgentCli(options: {
 } = {}): Promise<void> {
     const config = loadConfig();
     const provider = new OpenAICompatibleProvider(config.apiKey, config.baseURL);
-    const tracer = options.tracer ?? new Tracer();
-    const queryEngine = new QueryEngine(provider, tracer);
     // const knowledgeDatabase = config.knowledgeDatabasePath
     //     && existsSync(config.knowledgeDatabasePath)
     //     ? openKnowledgeDatabase(config.knowledgeDatabasePath)
@@ -65,9 +60,6 @@ export async function runAgentCli(options: {
         AGENT_SYSTEM_PROMPT,
         createSkillRegistry(),
     );
-    // 摘要复用统一 QueryEngine；Compressor 不直接依赖具体 Provider。
-    const compressor = new Compressor(queryEngine);
-    const contextManager = new ContextManager(new ProviderTokenCounter(provider), compressor);
     let memoryStore: SqliteMemoryStore;
     try {
         memoryStore = new SqliteMemoryStore(".dkagent/memory.db");
@@ -90,10 +82,25 @@ export async function runAgentCli(options: {
             throw error;
         }
     }
+    let ownedTraceStore: SqliteTraceStore | undefined;
+    let tracer = options.tracer;
+    if (!tracer) {
+        try {
+            ownedTraceStore = new SqliteTraceStore(".dkagent/sessions.db");
+            tracer = new Tracer(ownedTraceStore, {
+                onWriteError: () => console.warn("DKAgent Trace 写入失败，本轮业务继续运行。"),
+            });
+        } catch {
+            console.warn("DKAgent Trace 初始化失败，将继续运行 Agent。");
+            tracer = new Tracer();
+        }
+    }
+    const queryEngine = new QueryEngine(provider, tracer);
+    // 摘要复用统一 QueryEngine；Compressor 不直接依赖具体 Provider。
+    const compressor = new Compressor(queryEngine);
+    const contextManager = new ContextManager(new ProviderTokenCounter(provider), compressor);
     try {
-    const memoryExtractor = new MemoryExtractor(queryEngine, config.model);
-    const memoryRetriever = new MemoryRetriever(memoryStore);
-    const memoryWriter = new AutomaticMemoryWriter(memoryExtractor, memoryStore);
+    // Demo 阶段暂时下线自动 Memory 召回/提取/写入；手动 Memory 命令继续可用。
     const artifactStores = new Map<string, ArtifactStore>();
     const getOrCreateArtifactStore = (sessionId: string): ArtifactStore => {
         const existingStore = artifactStores.get(sessionId);
@@ -125,8 +132,6 @@ export async function runAgentCli(options: {
                 snapshot,
                 store: sessionStore,
             },
-            memoryReader: memoryRetriever,
-            memoryWriter,
             artifactStore: getOrCreateArtifactStore(snapshot.id),
         });
     }
@@ -318,6 +323,13 @@ export async function runAgentCli(options: {
             memoryStore.close();
         } catch (error: unknown) {
             closeError = error;
+        }
+        if (ownedTraceStore) {
+            try {
+                ownedTraceStore.close();
+            } catch {
+                console.warn("DKAgent Trace 关闭失败，Session 与业务结果不受影响。");
+            }
         }
         if (ownedSessionStore) {
             try {

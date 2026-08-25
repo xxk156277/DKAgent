@@ -3,10 +3,15 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./document": "./src/trace-document.ts"
   },
   "scripts": {
+    "trace": "cd ../.. && tsx packages/trace/src/cli.ts",
     "test": "cd ../.. && tsx --test packages/trace/test/*.test.ts",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
   }
 }

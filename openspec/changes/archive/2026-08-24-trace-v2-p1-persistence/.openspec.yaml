@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-23
+goal: After process restart, Codex can locate and replay the same typed trace
+  through recent and show commands.

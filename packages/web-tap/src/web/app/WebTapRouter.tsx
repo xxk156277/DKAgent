@@ -2,8 +2,8 @@ import { Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Link, Route, Routes, useParams } from "react-router-dom";
 import { useStore } from "zustand";
-import { connectEventFeed } from "../api/event-feed.js";
-import { loadSessionBundle, type TapSessionDetail } from "../api/session-api.js";
+import { connectTraceFeed } from "../api/trace-feed.js";
+import { loadSession, type TapSessionDetail } from "../api/session-api.js";
 import { SessionHistory } from "../features/sessions/SessionHistory.js";
 import { SessionListPage } from "../features/sessions/SessionListPage.js";
 import { createTapStore } from "../store/tap-store.js";
@@ -28,11 +28,11 @@ function SessionDetailPage() {
   const store = useMemo(() => createTapStore(), [sessionId]);
   const [session, setSession] = useState<TapSessionDetail>();
   const [error, setError] = useState<string>();
-  const eventCount = useStore(store, (state) => state.events.length);
+  const traceCount = useStore(store, (state) => state.traceSummaries.length);
   const mobile = useTapViewport() === "mobile";
 
   useEffect(
-    () => sessionId ? connectEventFeed(store, { sessionId }) : undefined,
+    () => sessionId ? connectTraceFeed(store, { sessionId }) : undefined,
     [sessionId, store],
   );
 
@@ -44,10 +44,9 @@ function SessionDetailPage() {
     }
     setSession(undefined);
     setError(undefined);
-    void loadSessionBundle(sessionId).then((bundle) => {
+    void loadSession(sessionId).then((value) => {
       if (!active) return;
-      store.getState().replaceHistory(bundle.events);
-      setSession(bundle.session);
+      setSession(value);
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : String(reason));
     });
@@ -65,7 +64,7 @@ function SessionDetailPage() {
   if (!session || !sessionId) {
     return <main className="tap-session-state">正在加载 Session…</main>;
   }
-  const isTraceView = eventCount > 0;
+  const isTraceView = traceCount > 0;
   const sessionNavigation = (
     <nav className="tap-session-backbar" aria-label="Session 导航">
       <Link to="/">← 返回 Sessions</Link>

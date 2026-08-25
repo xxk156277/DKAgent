@@ -23,6 +23,7 @@ export function AgentMetricsSummary({ metrics }: AgentMetricsSummaryProps) {
           <Statistic title="Tool 调用" value={formatToolCalls(metrics)} />
           <Statistic title="输入 / 输出 Token" value={formatTokens(metrics)} />
           <Statistic title="Context 压缩" value={formatCompaction(metrics)} />
+          <Statistic title="完整性诊断" value={`${metrics.integrityIssueCount} 项`} />
         </div>
       </Card>
     </section>

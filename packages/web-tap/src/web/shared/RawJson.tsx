@@ -1,13 +1,13 @@
 import { App as AntdApp, Button, Collapse } from "antd";
 
 interface RawJsonProps {
-  rawEvents: unknown[];
+  values: unknown[];
 }
 
 /** 原始事件默认收起；复制失败只提示，不影响当前详情。 */
-export function RawJson({ rawEvents }: RawJsonProps) {
+export function RawJson({ values }: RawJsonProps) {
   const { message } = AntdApp.useApp();
-  const json = JSON.stringify(rawEvents, null, 2);
+  const json = JSON.stringify(values, null, 2);
   const copyJson = async () => {
     try {
       if (!navigator.clipboard) throw new Error("Clipboard API unavailable");

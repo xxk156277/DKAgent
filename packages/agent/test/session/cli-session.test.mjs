@@ -17,6 +17,12 @@ const cliModuleUrl = pathToFileURL(
 const toolRegistryModuleUrl = pathToFileURL(
     join(repositoryRoot, "packages/agent/src/tools/registry.ts"),
 ).href;
+const sessionModuleUrl = pathToFileURL(
+    join(repositoryRoot, "packages/agent/src/session/index.ts"),
+).href;
+const traceModuleUrl = pathToFileURL(
+    join(repositoryRoot, "packages/trace/src/index.ts"),
+).href;
 
 function startCli(workingDirectory, {
     runAgentOptions = "",
@@ -149,6 +155,116 @@ test("CLI 启动时创建 Session，输入 /new 后切换到新 Session", () => 
         existsSync(join(workingDirectory, ".dkagent/sessions.db")),
         true,
     );
+});
+
+test("普通 CLI 默认把同一轮 Typed Span 写入 Session SQLite", async () => {
+    const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-trace-"));
+    const server = createArtifactCaptureServer();
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const cli = startCli(workingDirectory, {
+        environment: { LLM_BASE_URL: `http://127.0.0.1:${address.port}/v1` },
+    });
+
+    try {
+        await cli.waitForOutput(/DKAgent 已创建 Session [0-9a-f-]{36}/);
+        const outputIndex = cli.output().length;
+        cli.child.stdin.write("记录 Trace\n");
+        await cli.waitForOutput(/\{"memories":\[\]\}/, outputIndex);
+    } finally {
+        const exitPromise = cli.waitForExit();
+        cli.child.stdin.end();
+        assert.equal(await exitPromise, 0, cli.errorOutput());
+        await new Promise((resolve, reject) => server.close((error) => {
+            if (error) reject(error);
+            else resolve();
+        }));
+    }
+
+    const database = new Database(join(workingDirectory, ".dkagent/sessions.db"), { readonly: true });
+    try {
+        const traces = database.prepare("SELECT trace_id, session_id, status FROM traces").all();
+        const spans = database.prepare(`
+            SELECT trace_id, name, status, parent_span_id
+            FROM trace_spans
+            ORDER BY sequence
+        `).all();
+        assert.equal(traces.length, 1);
+        assert.equal(traces[0].status, "ok");
+        assert.ok(spans.length > 1);
+        assert.equal(spans[0].name, "agent.turn");
+        assert.equal(spans[0].parent_span_id, null);
+        assert.ok(spans.every((span) => span.trace_id === traces[0].trace_id));
+        assert.ok(spans.some((span) => span.name === "model.generate"));
+        assert.equal(spans.some((span) => span.name.startsWith("memory.")), false);
+        assert.ok(spans.every((span) => span.status !== "running"));
+    } finally {
+        database.close();
+    }
+});
+
+test("CLI 不关闭调用方注入的 Session Store 和 Trace Sink", () => {
+    const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-owned-resources-"));
+    const script = `
+        import { runAgentCli } from ${JSON.stringify(cliModuleUrl)};
+        import { SqliteSessionStore } from ${JSON.stringify(sessionModuleUrl)};
+        import { Tracer } from ${JSON.stringify(traceModuleUrl)};
+        const sessionStore = new SqliteSessionStore(".dkagent/sessions.db");
+        let traceCloseCount = 0;
+        const traceSink = { upsert() {}, close() { traceCloseCount += 1; } };
+        await runAgentCli({ sessionStore, tracer: new Tracer(traceSink) });
+        console.log(\`caller-owned:\${sessionStore.list().length}:\${traceCloseCount}\`);
+        sessionStore.close();
+        traceSink.close();
+        console.log(\`caller-closed:\${traceCloseCount}\`);
+    `;
+    const result = spawnSync(tsxPath, ["--input-type=module", "-e", script], {
+        cwd: workingDirectory,
+        input: "",
+        encoding: "utf8",
+        timeout: 10_000,
+        env: {
+            ...process.env,
+            LLM_API_KEY: "test-key",
+            LLM_BASE_URL: "http://127.0.0.1:1",
+        },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /caller-owned:1:0/);
+    assert.match(result.stdout, /caller-closed:1/);
+});
+
+test("注入的 Trace Sink 写入失败不改变 CLI 回答", async () => {
+    const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-trace-failure-"));
+    const server = createArtifactCaptureServer();
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const cli = startCli(workingDirectory, {
+        runAgentOptions: `({ tracer: new Tracer({ upsert() { throw new Error("trace unavailable"); } }, {
+            onWriteError() { console.error("trace-write-failed"); },
+        }) })`,
+        scriptPreamble: `import { Tracer } from ${JSON.stringify(traceModuleUrl)};`,
+        environment: { LLM_BASE_URL: `http://127.0.0.1:${address.port}/v1` },
+    });
+
+    try {
+        await cli.waitForOutput(/DKAgent 已创建 Session [0-9a-f-]{36}/);
+        const outputIndex = cli.output().length;
+        cli.child.stdin.write("Trace 故障仍回答\n");
+        await cli.waitForOutput(/\{"memories":\[\]\}/, outputIndex);
+        await cli.waitForErrorOutput(/trace-write-failed/);
+    } finally {
+        const exitPromise = cli.waitForExit();
+        cli.child.stdin.end();
+        assert.equal(await exitPromise, 0, cli.errorOutput());
+        await new Promise((resolve, reject) => server.close((error) => {
+            if (error) reject(error);
+            else resolve();
+        }));
+    }
 });
 
 test("CLI 为 /new 创建独立 ArtifactStore，并在 /switch 时由 Tool 观察到原 Store", async () => {

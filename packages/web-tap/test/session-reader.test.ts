@@ -1,20 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MemoryTraceStore } from "@dkagent/trace";
+import type { TraceReader } from "@dkagent/trace";
 import { createTapSessionReader } from "../src/tap/session-reader.js";
 
 test("Session Reader 生成 Tap 展示字段且不修改 Agent Session 类型", () => {
-  const traceStore = new MemoryTraceStore();
-  traceStore.emit({
-    sessionId: "session-1",
-    id: "event-1",
-    traceId: "turn-1",
-    sequence: 1,
-    timestamp: "2026-08-18T00:00:02.000Z",
-    name: "agent.turn",
-    phase: "start",
-    data: { input: "你好" },
-  });
+  const traceStore = traceReaderWithSessions("session-1");
   const sessionStore = {
     list: () => [{
       id: "session-1",
@@ -66,8 +56,23 @@ test("没有 Trace 的 Session 保留真实消息并标记 hasTrace=false", () =
     }),
   };
 
-  const reader = createTapSessionReader(sessionStore, new MemoryTraceStore());
+  const reader = createTapSessionReader(sessionStore, traceReaderWithSessions());
 
   assert.equal(reader.list()[0]?.hasTrace, false);
   assert.equal(reader.list()[0]?.preview, "未命名对话");
 });
+
+function traceReaderWithSessions(...sessionIds: string[]): TraceReader {
+  return {
+    listTraceSummariesBySession: (sessionId) => sessionIds.includes(sessionId) ? [{
+      traceId: `trace-${sessionId}`,
+      sessionId,
+      status: "ok",
+      startedAt: "2026-08-18T00:00:02.000Z",
+      spanCount: 1,
+      integrity: true,
+    }] : [],
+    getTraceDocument: () => null,
+    hasTraceForSession: (sessionId) => sessionIds.includes(sessionId),
+  };
+}

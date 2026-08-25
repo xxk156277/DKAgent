@@ -1,5 +1,3 @@
-import type { TraceEvent } from "@dkagent/trace";
-
 export interface TapSessionSummary {
   id: string;
   createdAt: string;
@@ -30,19 +28,11 @@ export async function loadSessions(fetchImpl: FetchLike = globalThis.fetch): Pro
   return readJson<TapSessionSummary[]>(await fetchImpl("/api/sessions"));
 }
 
-export async function loadSessionBundle(
+export async function loadSession(
   sessionId: string,
   fetchImpl: FetchLike = globalThis.fetch,
-): Promise<{ session: TapSessionDetail; events: TraceEvent[] }> {
-  const encodedId = encodeURIComponent(sessionId);
-  const [sessionResponse, eventsResponse] = await Promise.all([
-    fetchImpl(`/api/sessions/${encodedId}`),
-    fetchImpl(`/api/sessions/${encodedId}/events`),
-  ]);
-  return {
-    session: await readJson<TapSessionDetail>(sessionResponse),
-    events: await readJson<TraceEvent[]>(eventsResponse),
-  };
+): Promise<TapSessionDetail> {
+  return readJson<TapSessionDetail>(await fetchImpl(`/api/sessions/${encodeURIComponent(sessionId)}`));
 }
 
 async function readJson<T>(response: Pick<Response, "ok" | "status" | "json">): Promise<T> {

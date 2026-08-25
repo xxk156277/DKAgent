@@ -61,7 +61,6 @@ describe("Session pages", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/sessions") return jsonResponse(sessions);
-      if (url === "/api/sessions/session-1/events") return jsonResponse([]);
       if (url === "/api/sessions/session-1") return jsonResponse({
         id: "session-1",
         createdAt: sessions[0]?.createdAt,
@@ -103,7 +102,7 @@ describe("Session pages", () => {
     vi.stubGlobal("EventSource", FakeEventSource);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.endsWith("/events")) return jsonResponse([]);
+      if (url.endsWith("/traces")) return jsonResponse([]);
       return jsonResponse({
         id: "session-live",
         createdAt: "2026-08-18T00:00:00.000Z",
@@ -117,14 +116,26 @@ describe("Session pages", () => {
     expect(await screen.findByText("暂无运行轨迹")).toBeVisible();
 
     FakeEventSource.latest?.message({
-      sessionId: "session-live",
-      id: "event-live",
+      type: "span_started",
       traceId: "turn-live",
-      sequence: 1,
-      timestamp: "2026-08-18T00:01:01.000Z",
-      name: "agent.turn",
-      phase: "start",
-      data: { input: "开始运行" },
+      span: {
+        schemaVersion: 2,
+        sessionId: "session-live",
+        traceId: "turn-live",
+        spanId: "span-live",
+        sequence: 1,
+        revision: 1,
+        startedAt: "2026-08-18T00:01:01.000Z",
+        name: "agent.turn",
+        kind: "AGENT",
+        status: "running",
+        input: { userInput: "开始运行" },
+        output: null,
+        tokenUsage: null,
+        attributes: {},
+        events: [],
+        integrity: true,
+      },
     });
 
     expect(await screen.findByRole("button", { name: /^第 1 轮/ })).toBeVisible();
