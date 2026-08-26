@@ -7,7 +7,7 @@ const config: UnifiedConfig = {
   prompts: ["{{input}}"],
   // Promptfoo's config declaration models provider references, while its runtime
   // accepts an ApiProvider instance here.
-  providers: [new DkAgentEvalProvider(["read_file", "find_files", "grep_files"])] as unknown as NonNullable<UnifiedConfig["providers"]>,
+  providers: [new DkAgentEvalProvider(["read_file", "find_files", "grep_files", "write_file"])] as unknown as NonNullable<UnifiedConfig["providers"]>,
   tests: [
     {
       description: "M1 read_file reads a fixture and returns its marker",
@@ -73,6 +73,27 @@ const config: UnifiedConfig = {
           requiredTools: ["grep_files"],
           forbiddenTools: ["write_file"],
           expectedGrep: { path: "hit.txt", text: "DKAGENT_GREP_4821" },
+        },
+      }],
+    },
+    {
+      description: "M3 reads source.txt and writes exact result.txt",
+      vars: {
+        caseId: "read-then-write",
+        input: "请读取 source.txt 的完整内容，将内容原样写入新的 result.txt，不要修改 source.txt。",
+        captureFiles: ["result.txt"],
+      },
+      metadata: { milestone: "M3" },
+      options: { runSerially: true, disableVarExpansion: true },
+      assert: [{
+        type: "javascript",
+        value: gradeAgentRun,
+        config: {
+          requiredTools: ["read_file", "write_file"],
+          expectedSequence: ["read_file", "write_file"],
+          expectedFinalFiles: {
+            "result.txt": "DKAgent write evaluation payload\nline two remains unchanged\n",
+          },
         },
       }],
     },

@@ -127,6 +127,36 @@ function hasExpectedGrep(
   });
 }
 
+function toolNamesByTraceSequence(
+  calls: ReturnType<typeof selectToolCalls>,
+): string[] {
+  return [...calls]
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((call) => call.name);
+}
+
+function hasExpectedSequence(
+  calls: ReturnType<typeof selectToolCalls>,
+  expected: string[],
+): boolean {
+  const actual = toolNamesByTraceSequence(calls);
+  return actual.length === expected.length
+    && actual.every((name, index) => name === expected[index]);
+}
+
+function finalFileMismatches(
+  actual: unknown,
+  expected: Record<string, string>,
+): string[] {
+  const files = record(actual);
+  return Object.entries(expected).flatMap(([name, content]) => {
+    if (files === undefined || !Object.hasOwn(files, name)) {
+      return [`缺少最终文件: ${name}`];
+    }
+    return files[name] === content ? [] : [`最终文件内容不匹配: ${name}`];
+  });
+}
+
 export function gradeAgentRun(
   output: string,
   context: AssertionValueFunctionContext,
@@ -207,6 +237,22 @@ export function gradeAgentRun(
       "expectedGrep",
       hasExpectedGrep(results, config.expectedGrep, metadata.workspaceRoot),
       "grep_files 返回包含目标路径和文本的匹配",
+    ));
+  }
+  if (config.expectedSequence !== undefined) {
+    const actual = toolNamesByTraceSequence(calls);
+    components.push(component(
+      "expectedSequence",
+      hasExpectedSequence(calls, config.expectedSequence),
+      `Tool 调用序列: ${actual.join(", ") || "无"}；预期: ${config.expectedSequence.join(", ") || "无"}`,
+    ));
+  }
+  if (config.expectedFinalFiles !== undefined) {
+    const mismatches = finalFileMismatches(metadata.finalFiles, config.expectedFinalFiles);
+    components.push(component(
+      "expectedFinalFiles",
+      mismatches.length === 0,
+      mismatches.length === 0 ? "最终文件内容与预期完全一致" : mismatches.join("; "),
     ));
   }
   const pass = components.every((item) => item.pass);

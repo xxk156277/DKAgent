@@ -97,6 +97,118 @@ test("runAgentEvalCase executes read_file through the production AgentLoop", asy
   );
 });
 
+const readThenWriteContent = "DKAgent write evaluation payload\nline two remains unchanged\n";
+
+class ReadThenWriteFakeProvider implements LLMProvider {
+  public readonly name = "read-then-write-fake";
+  public readonly requests: ModelRequest[] = [];
+  public secondRequestReadResult: string | undefined;
+  private requestCount = 0;
+
+  public async *stream(request: ModelRequest): AsyncIterable<StreamEvent> {
+    this.requests.push(request);
+    this.requestCount += 1;
+    if (this.requestCount === 1) {
+      yield { type: "tool_call_start", index: 0, id: "call-read", name: "read_file" };
+      yield { type: "tool_call_delta", index: 0, argumentsDelta: '{"path":"source.txt"}' };
+      yield { type: "tool_call_end", index: 0 };
+      yield {
+        type: "message_end",
+        usage: { inputTokens: 1, outputTokens: 1 },
+        stopReason: "tool_use",
+      };
+      return;
+    }
+
+    if (this.requestCount === 2) {
+      const readResultMessage = request.messages.find(
+        (message) => message.role === "tool" && message.toolCallId === "call-read",
+      );
+      if (!readResultMessage || readResultMessage.role !== "tool") {
+        throw new Error("第二轮请求缺少 read_file Result");
+      }
+      const readResult = JSON.parse(readResultMessage.content) as {
+        success?: unknown;
+        data?: { content?: unknown };
+      };
+      if (readResult.success !== true || readResult.data?.content !== readThenWriteContent) {
+        throw new Error("第二轮请求未携带完整 read_file Result");
+      }
+      this.secondRequestReadResult = readResult.data.content;
+      yield { type: "tool_call_start", index: 0, id: "call-write", name: "write_file" };
+      yield {
+        type: "tool_call_delta",
+        index: 0,
+        argumentsDelta: JSON.stringify({
+          path: "result.txt",
+          content: readThenWriteContent,
+          overwrite: false,
+        }),
+      };
+      yield { type: "tool_call_end", index: 0 };
+      yield {
+        type: "message_end",
+        usage: { inputTokens: 1, outputTokens: 1 },
+        stopReason: "tool_use",
+      };
+      return;
+    }
+
+    if (this.requestCount === 3) {
+      yield { type: "text_delta", content: "result.txt 已创建" };
+      yield {
+        type: "message_end",
+        usage: { inputTokens: 1, outputTokens: 1 },
+        stopReason: "end_turn",
+      };
+      return;
+    }
+
+    throw new Error("Fake Provider 收到超出三轮的请求");
+  }
+
+  public async countTokens(
+    _messages: AgentMessage[],
+    _tools?: ToolSchema[],
+  ): Promise<number> {
+    return 1;
+  }
+}
+
+test("runAgentEvalCase verifies read_file Result before writing and captures the final file", async () => {
+  const provider = new ReadThenWriteFakeProvider();
+  const response = await runAgentEvalCase({
+    caseId: "read-then-write",
+    prompt: "请读取 source.txt 的完整内容，将内容原样写入新的 result.txt，不要修改 source.txt。",
+    enabledTools: ["read_file", "write_file"],
+    captureFiles: ["result.txt"],
+    provider,
+    model: "fake-model",
+    maxContextTokens: 1_000,
+    maxOutputTokens: 100,
+  });
+
+  assert.equal(response.output, "result.txt 已创建");
+  const metadata = response.metadata?.evalRun as AgentEvalRunMetadata;
+  assert.equal(metadata.runError, undefined);
+  assert.equal(provider.secondRequestReadResult, readThenWriteContent);
+  assert.deepEqual(provider.requests[0]?.tools?.map((tool) => tool.name), ["read_file", "write_file"]);
+  assert.deepEqual(selectToolCalls(metadata.traceEvents).map((call) => call.name), ["read_file", "write_file"]);
+  assert.deepEqual(findUnpairedToolCallIds(metadata.traceEvents), []);
+  const results = selectToolResults(metadata.traceEvents);
+  assert.deepEqual(results.map((result) => result.name), ["read_file", "write_file"]);
+  assert.equal(results.every((result) => result.result.success), true);
+  const writeCall = selectToolCalls(metadata.traceEvents).find((call) => call.name === "write_file");
+  assert.deepEqual(writeCall?.input, {
+    path: "result.txt",
+    content: readThenWriteContent,
+    overwrite: false,
+  });
+  const writeResult = results.find((result) => result.name === "write_file");
+  assert.equal(writeResult?.result.success, true);
+  assert.deepEqual(metadata.finalFiles, { "result.txt": readThenWriteContent });
+});
+
 class ModelFailureFakeProvider implements LLMProvider {
   public readonly name = "model-failure-fake";
 

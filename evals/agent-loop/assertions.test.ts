@@ -75,6 +75,58 @@ function completeToolTrace(
   ];
 }
 
+function completeSequenceTrace(
+  tools: Array<{
+    name: string;
+    input: Record<string, unknown>;
+    resultData: unknown;
+  }>,
+): TraceEvent[] {
+  const trace: TraceEvent[] = [];
+  let sequence = 1;
+  trace.push(event(sequence, "agent.turn", "start", { input: "执行多步文件操作" }));
+  sequence += 1;
+  tools.forEach((tool, index) => {
+    const toolCallId = `call-sequence-${index + 1}`;
+    trace.push(event(sequence, "tool.call", "start", {
+      input: { id: toolCallId, name: tool.name, input: tool.input },
+    }));
+    sequence += 1;
+    trace.push(event(sequence, "tool.result", "event", {
+      toolCallId,
+      name: tool.name,
+      input: tool.input,
+      result: { success: true, data: tool.resultData },
+    }));
+    sequence += 1;
+    trace.push(event(sequence, "tool.call", "end", {
+      output: { toolCallId, name: tool.name },
+    }));
+    sequence += 1;
+  });
+  trace.push(event(sequence, "agent.turn", "end", { output: { answer: "result.txt 已创建" } }));
+  return trace;
+}
+
+const writeEvaluationContent = "DKAgent write evaluation payload\nline two remains unchanged\n";
+const readThenWriteWorkspace = "/private/tmp/dkagent-agent-eval-123/workspace";
+const completeReadThenWriteTrace = completeSequenceTrace([
+  {
+    name: "read_file",
+    input: { path: "source.txt" },
+    resultData: { content: writeEvaluationContent },
+  },
+  {
+    name: "write_file",
+    input: { path: "result.txt", content: writeEvaluationContent, overwrite: false },
+    resultData: {
+      path: `${readThenWriteWorkspace}/result.txt`,
+      bytesWritten: Buffer.byteLength(writeEvaluationContent, "utf8"),
+      overwritten: false,
+    },
+  },
+]);
+
 test("selectors only count tool.call start and tool.result event", () => {
   assert.deepEqual(selectToolCalls(completeReadTrace), [{
     id: "call-1",
@@ -135,6 +187,7 @@ function gradeWithTrace(
   },
   output = "验证码是 DKAGENT_EVAL_7319",
   workspaceRoot?: string,
+  finalFiles?: Record<string, string>,
 ) {
   return gradeAgentRun(output, {
     vars: {},
@@ -146,6 +199,7 @@ function gradeWithTrace(
           caseId: "read-file",
           traceEvents,
           ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+          ...(finalFiles === undefined ? {} : { finalFiles }),
         },
       },
     },
@@ -405,4 +459,87 @@ test("grader requires a matching grep_files result", () => {
     },
   ), expected, "", workspaceRoot);
   assert.equal(missingPath.pass, false);
+});
+
+test("grader enforces the exact Tool call sequence by Trace sequence", () => {
+  const config = {
+    requiredTools: ["read_file", "write_file"],
+    expectedSequence: ["read_file", "write_file"],
+  };
+  const exact = gradeWithTrace(completeReadThenWriteTrace, config, "", readThenWriteWorkspace);
+  assert.equal(exact.pass, true);
+  assert.equal(
+    exact.componentResults?.find((item) => item.metadata?.component === "expectedSequence")?.pass,
+    true,
+  );
+
+  const reversed = completeReadThenWriteTrace.map((traceEvent) => {
+    if (traceEvent.name !== "tool.call" || traceEvent.phase !== "start") return traceEvent;
+    if (traceEvent.sequence === 2) return { ...traceEvent, sequence: 5 };
+    if (traceEvent.sequence === 5) return { ...traceEvent, sequence: 2 };
+    return traceEvent;
+  });
+  const reversedResult = gradeWithTrace(reversed, config, "", readThenWriteWorkspace);
+  assert.equal(reversedResult.pass, false);
+  assert.equal(
+    reversedResult.componentResults?.find((item) => item.metadata?.component === "expectedSequence")?.pass,
+    false,
+  );
+
+  const extraResult = gradeWithTrace(completeSequenceTrace([
+    { name: "read_file", input: { path: "source.txt" }, resultData: { content: writeEvaluationContent } },
+    {
+      name: "write_file",
+      input: { path: "result.txt", content: writeEvaluationContent, overwrite: false },
+      resultData: { path: `${readThenWriteWorkspace}/result.txt` },
+    },
+    { name: "find_files", input: { path: ".", pattern: "**/*" }, resultData: { path: readThenWriteWorkspace, files: [] } },
+  ]), config, "", readThenWriteWorkspace);
+  assert.equal(extraResult.pass, false);
+  assert.equal(
+    extraResult.componentResults?.find((item) => item.metadata?.component === "expectedSequence")?.pass,
+    false,
+  );
+});
+
+test("grader requires exact final-file contents and names missing files", () => {
+  const config = {
+    requiredTools: ["read_file", "write_file"],
+    expectedFinalFiles: { "result.txt": writeEvaluationContent },
+  };
+  const exact = gradeWithTrace(
+    completeReadThenWriteTrace,
+    config,
+    "",
+    readThenWriteWorkspace,
+    { "result.txt": writeEvaluationContent },
+  );
+  assert.equal(exact.pass, true);
+
+  const wrongContent = gradeWithTrace(
+    completeReadThenWriteTrace,
+    config,
+    "",
+    readThenWriteWorkspace,
+    { "result.txt": `${writeEvaluationContent}extra` },
+  );
+  assert.equal(wrongContent.pass, false);
+  assert.equal(
+    wrongContent.componentResults?.find((item) => item.metadata?.component === "expectedFinalFiles")?.pass,
+    false,
+  );
+
+  const missing = gradeWithTrace(
+    completeReadThenWriteTrace,
+    config,
+    "",
+    readThenWriteWorkspace,
+    {},
+  );
+  const missingComponent = missing.componentResults?.find(
+    (item) => item.metadata?.component === "expectedFinalFiles",
+  );
+  assert.equal(missing.pass, false);
+  assert.equal(missingComponent?.pass, false);
+  assert.match(missingComponent?.reason ?? "", /result\.txt/);
 });
