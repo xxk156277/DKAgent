@@ -7,25 +7,16 @@ import type {
     ContextSnapshot,
     ConversationContextState,
 } from "../../src/context/types.js";
-import type {
-    AgentMessage,
-    LLMProvider,
-    StreamEvent,
-    StreamParams,
-} from "../../src/query-engine/provider.js";
+import type { AgentMessage, LLMProvider, StreamEvent, StreamParams } from "../../src/query-engine/provider.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
-import type {
-    SessionSnapshot,
-    SessionStore,
-    SessionSummary,
-} from "../../src/session/types.js";
+import type { SessionSnapshot, SessionStore, SessionSummary } from "../../src/session/types.js";
 import { ToolRegistry } from "../../src/tools/registry.js";
 
 class FakeProvider implements LLMProvider {
     public readonly name = "fake";
     public readonly requests: StreamParams[] = [];
 
-    public constructor(private readonly responses: StreamEvent[][]) { }
+    public constructor(private readonly responses: StreamEvent[][]) {}
 
     public async *stream(params: StreamParams): AsyncIterable<StreamEvent> {
         this.requests.push(params);
@@ -45,7 +36,7 @@ class RecordingSessionStore implements SessionStore {
     public readonly appendedSessionIds: string[] = [];
     public readonly savedStates: ConversationContextState[] = [];
 
-    public constructor(public readonly snapshot: SessionSnapshot) { }
+    public constructor(public readonly snapshot: SessionSnapshot) {}
 
     public create(): SessionSnapshot {
         return this.snapshot;
@@ -56,11 +47,13 @@ class RecordingSessionStore implements SessionStore {
     }
 
     public list(): SessionSummary[] {
-        return [{
-            id: this.snapshot.id,
-            createdAt: this.snapshot.createdAt,
-            updatedAt: this.snapshot.updatedAt,
-        }];
+        return [
+            {
+                id: this.snapshot.id,
+                createdAt: this.snapshot.createdAt,
+                updatedAt: this.snapshot.updatedAt,
+            },
+        ];
     }
 
     public load(sessionId: string): SessionSnapshot | null {
@@ -76,10 +69,7 @@ class RecordingSessionStore implements SessionStore {
         this.appendedMessages.push(structuredClone(message));
     }
 
-    public saveContextState(
-        _sessionId: string,
-        state: ConversationContextState,
-    ): void {
+    public saveContextState(_sessionId: string, state: ConversationContextState): void {
         this.savedStates.push({ ...state });
     }
 }
@@ -185,11 +175,7 @@ test("AgentLoop 保存 ContextManager 返回的新压缩状态", async () => {
             };
         },
     };
-    const agent = createSessionAgent(
-        new FakeProvider([textResponse("回答")]),
-        store,
-        contextBuilder,
-    );
+    const agent = createSessionAgent(new FakeProvider([textResponse("回答")]), store, contextBuilder);
 
     await agent.run("问题");
 

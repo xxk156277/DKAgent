@@ -62,12 +62,7 @@ export interface TokenUsage {
 }
 
 /** 模型停止生成的统一原因。 */
-export type StopReason =
-    | "end_turn"
-    | "tool_use"
-    | "max_tokens"
-    | "content_filter"
-    | "unknown";
+export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "content_filter" | "unknown";
 
 /** Provider 中立的流事件协议。 */
 export type StreamEvent =
@@ -80,18 +75,18 @@ export type StreamEvent =
 /** 一次模型调用的最终结果。 */
 export type ModelResponse =
     | {
-        type: "text";
-        content: string;
-        usage: TokenUsage;
-        stopReason: StopReason;
-    }
+          type: "text";
+          content: string;
+          usage: TokenUsage;
+          stopReason: StopReason;
+      }
     | {
-        type: "tool_use";
-        content?: string;
-        toolCalls: ToolCall[];
-        usage: TokenUsage;
-        stopReason: StopReason;
-    };
+          type: "tool_use";
+          content?: string;
+          toolCalls: ToolCall[];
+          usage: TokenUsage;
+          stopReason: StopReason;
+      };
 
 /** 模型厂商适配器必须实现的最小能力。 */
 export interface LLMProvider {
@@ -100,10 +95,7 @@ export interface LLMProvider {
     /** 把一次请求转换成 Provider 中立流事件。 */
     stream(request: ModelRequest): AsyncIterable<StreamEvent>;
     /** 估算消息和 Tool Schema 占用的输入 Token。 */
-    countTokens(
-        messages: AgentMessage[],
-        tools?: ToolSchema[],
-    ): Promise<number>;
+    countTokens(messages: AgentMessage[], tools?: ToolSchema[]): Promise<number>;
 }
 
 /** 旧名称兼容别名，迁移完成后调用方统一使用 ModelRequest。 */

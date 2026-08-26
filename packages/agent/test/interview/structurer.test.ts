@@ -57,11 +57,13 @@ function validRelation(): ModelRelation {
             },
             {
                 title: "候选人反问",
-                questions: [{
-                    promptSegments: [{ turnId: "turn-0006", text: "你还有什么想问的吗？" }],
-                    answerTurnIds: ["turn-0007"],
-                    questionType: "procedural",
-                }],
+                questions: [
+                    {
+                        promptSegments: [{ turnId: "turn-0006", text: "你还有什么想问的吗？" }],
+                        answerTurnIds: ["turn-0007"],
+                        questionType: "procedural",
+                    },
+                ],
             },
         ],
         nonQuestionTurnIds: ["turn-0005"],
@@ -101,21 +103,23 @@ const interruptedAnswerSource = [
 
 function interruptedAnswerRelation(answerTurnIds: string[]): ModelRelation {
     return {
-        clusters: [{
-            title: "项目",
-            questions: [
-                {
-                    promptSegments: [{ turnId: "turn-0001", text: "请介绍这个项目。" }],
-                    answerTurnIds,
-                    questionType: "project",
-                },
-                {
-                    promptSegments: [{ turnId: "turn-0005", text: "为什么这样设计？" }],
-                    answerTurnIds: ["turn-0006"],
-                    questionType: "project",
-                },
-            ],
-        }],
+        clusters: [
+            {
+                title: "项目",
+                questions: [
+                    {
+                        promptSegments: [{ turnId: "turn-0001", text: "请介绍这个项目。" }],
+                        answerTurnIds,
+                        questionType: "project",
+                    },
+                    {
+                        promptSegments: [{ turnId: "turn-0005", text: "为什么这样设计？" }],
+                        answerTurnIds: ["turn-0006"],
+                        questionType: "project",
+                    },
+                ],
+            },
+        ],
         nonQuestionTurnIds: ["turn-0003"],
     };
 }
@@ -129,11 +133,7 @@ test("嵌套模型结果生成下游需要的扁平问题和问题簇", async ()
     const { result } = await runWith(validRelation());
 
     assert.equal(result.questions.length, 4);
-    assert.deepEqual(result.clusters[0]?.questionIds, [
-        "question-0001",
-        "question-0002",
-        "question-0003",
-    ]);
+    assert.deepEqual(result.clusters[0]?.questionIds, ["question-0001", "question-0002", "question-0003"]);
     assert.equal(result.questions[0]?.clusterId, "cluster-0001");
     assert.equal(result.questions[0]?.originalQuestion, "先介绍低代码项目。");
     assert.equal(result.questions[1]?.originalQuestion, "你负责什么？");
@@ -194,14 +194,18 @@ test("非问题插话不会截断候选人的完整回答窗口", async () => {
 test("实际问题没有候选人回答时保留空回答", async () => {
     const transcript = parseTranscript("面试官\n请介绍项目。");
     const relation: ModelRelation = {
-        clusters: [{
-            title: "项目",
-            questions: [{
-                promptSegments: [{ turnId: "turn-0001", text: "请介绍项目。" }],
-                answerTurnIds: [],
-                questionType: "project",
-            }],
-        }],
+        clusters: [
+            {
+                title: "项目",
+                questions: [
+                    {
+                        promptSegments: [{ turnId: "turn-0001", text: "请介绍项目。" }],
+                        answerTurnIds: [],
+                        questionType: "project",
+                    },
+                ],
+            },
+        ],
         nonQuestionTurnIds: [],
     };
     const { result } = await runWith(relation, { transcript });
@@ -210,33 +214,36 @@ test("实际问题没有候选人回答时保留空回答", async () => {
 });
 
 test("连续多个面试官提问共享其后紧邻的候选人回答块", async () => {
-    const transcript = parseTranscript([
-        "面试官 01:00", "先介绍项目。", "面试官 01:01", "你负责什么？",
-        "候选人 01:02", "我负责 DSL 渲染链路。",
-    ].join("\n"));
+    const transcript = parseTranscript(
+        ["面试官 01:00", "先介绍项目。", "面试官 01:01", "你负责什么？", "候选人 01:02", "我负责 DSL 渲染链路。"].join(
+            "\n",
+        ),
+    );
     const relation: ModelRelation = {
-        clusters: [{
-            title: "项目",
-            questions: [
-                {
-                    promptSegments: [{ turnId: "turn-0001", text: "先介绍项目。" }],
-                    answerTurnIds: ["turn-0003"],
-                    questionType: "project",
-                },
-                {
-                    promptSegments: [{ turnId: "turn-0002", text: "你负责什么？" }],
-                    answerTurnIds: ["turn-0003"],
-                    questionType: "project",
-                },
-            ],
-        }],
+        clusters: [
+            {
+                title: "项目",
+                questions: [
+                    {
+                        promptSegments: [{ turnId: "turn-0001", text: "先介绍项目。" }],
+                        answerTurnIds: ["turn-0003"],
+                        questionType: "project",
+                    },
+                    {
+                        promptSegments: [{ turnId: "turn-0002", text: "你负责什么？" }],
+                        answerTurnIds: ["turn-0003"],
+                        questionType: "project",
+                    },
+                ],
+            },
+        ],
         nonQuestionTurnIds: [],
     };
     const { result } = await runWith(relation, { transcript });
-    assert.deepEqual(result.questions.map((question) => question.answerTurnIds), [
-        ["turn-0003"],
-        ["turn-0003"],
-    ]);
+    assert.deepEqual(
+        result.questions.map((question) => question.answerTurnIds),
+        [["turn-0003"], ["turn-0003"]],
+    );
 });
 
 test("拒绝把主问题和回答后的追问合成同一题", async () => {
@@ -259,13 +266,15 @@ test("按原文位置规范化问题和问题簇顺序后生成稳定 ID", async
     relation.clusters[0]!.questions.reverse();
     relation.clusters.reverse();
     const { result } = await runWith(relation);
-    assert.deepEqual(result.questions.map((question) => question.id), [
-        "question-0001", "question-0002", "question-0003", "question-0004",
-    ]);
-    assert.deepEqual(result.clusters.map((item) => item.id), ["cluster-0001", "cluster-0002"]);
-    assert.deepEqual(result.clusters[0]?.questionIds, [
-        "question-0001", "question-0002", "question-0003",
-    ]);
+    assert.deepEqual(
+        result.questions.map((question) => question.id),
+        ["question-0001", "question-0002", "question-0003", "question-0004"],
+    );
+    assert.deepEqual(
+        result.clusters.map((item) => item.id),
+        ["cluster-0001", "cluster-0002"],
+    );
+    assert.deepEqual(result.clusters[0]?.questionIds, ["question-0001", "question-0002", "question-0003"]);
 });
 
 test("同一问题簇不能跨越其他问题簇后继续", async () => {
@@ -274,47 +283,69 @@ test("同一问题簇不能跨越其他问题簇后继续", async () => {
     const proceduralCluster = relation.clusters[1]!;
     const middleQuestion = projectCluster.questions.pop()!;
     projectCluster.questions.push(...proceduralCluster.questions);
-    relation.clusters = [projectCluster, {
-        title: "中间主题",
-        questions: [middleQuestion],
-    }];
+    relation.clusters = [
+        projectCluster,
+        {
+            title: "中间主题",
+            questions: [middleQuestion],
+        },
+    ];
     await assert.rejects(() => runWith(relation), /问题簇必须对应连续的问题区间/);
 });
 
 test("切换主题后回到旧主题时生成三个连续问题簇", async () => {
-    const transcript = parseTranscript([
-        "面试官", "介绍项目 A。", "候选人", "回答 A。",
-        "面试官", "介绍项目 B。", "候选人", "回答 B。",
-        "面试官", "回到项目 A，还有什么补充？", "候选人", "补充 A。",
-    ].join("\n"));
+    const transcript = parseTranscript(
+        [
+            "面试官",
+            "介绍项目 A。",
+            "候选人",
+            "回答 A。",
+            "面试官",
+            "介绍项目 B。",
+            "候选人",
+            "回答 B。",
+            "面试官",
+            "回到项目 A，还有什么补充？",
+            "候选人",
+            "补充 A。",
+        ].join("\n"),
+    );
     const relation: ModelRelation = {
         clusters: [
             {
                 title: "项目 A",
-                questions: [{
-                    promptSegments: [{ turnId: "turn-0001", text: "介绍项目 A。" }],
-                    answerTurnIds: ["turn-0002"],
-                    questionType: "project",
-                }],
+                questions: [
+                    {
+                        promptSegments: [{ turnId: "turn-0001", text: "介绍项目 A。" }],
+                        answerTurnIds: ["turn-0002"],
+                        questionType: "project",
+                    },
+                ],
             },
             {
                 title: "项目 B",
-                questions: [{
-                    promptSegments: [{ turnId: "turn-0003", text: "介绍项目 B。" }],
-                    answerTurnIds: ["turn-0004"],
-                    questionType: "project",
-                }],
+                questions: [
+                    {
+                        promptSegments: [{ turnId: "turn-0003", text: "介绍项目 B。" }],
+                        answerTurnIds: ["turn-0004"],
+                        questionType: "project",
+                    },
+                ],
             },
             {
                 title: "项目 A",
-                questions: [{
-                    promptSegments: [{
-                        turnId: "turn-0005",
-                        text: "回到项目 A，还有什么补充？",
-                    }],
-                    answerTurnIds: ["turn-0006"],
-                    questionType: "project",
-                }],
+                questions: [
+                    {
+                        promptSegments: [
+                            {
+                                turnId: "turn-0005",
+                                text: "回到项目 A，还有什么补充？",
+                            },
+                        ],
+                        answerTurnIds: ["turn-0006"],
+                        questionType: "project",
+                    },
+                ],
             },
         ],
         nonQuestionTurnIds: [],
@@ -322,12 +353,14 @@ test("切换主题后回到旧主题时生成三个连续问题簇", async () =>
 
     const { result } = await runWith(relation, { transcript });
 
-    assert.deepEqual(result.clusters.map((cluster) => cluster.title), [
-        "项目 A",
-        "项目 B",
-        "项目 A",
-    ]);
-    assert.deepEqual(result.clusters.map((cluster) => cluster.questionIds.length), [1, 1, 1]);
+    assert.deepEqual(
+        result.clusters.map((cluster) => cluster.title),
+        ["项目 A", "项目 B", "项目 A"],
+    );
+    assert.deepEqual(
+        result.clusters.map((cluster) => cluster.questionIds.length),
+        [1, 1, 1],
+    );
 });
 
 test("模型返回程序派生字段时只暴露固定输出错误", async () => {
@@ -347,26 +380,31 @@ test("非提问轮次不能同时承载具体问题", async () => {
 
 test("程序根据问题类型生成 scored", async () => {
     const { result } = await runWith(validRelation());
-    assert.deepEqual(result.questions.map((question) => question.scored), [true, true, true, false]);
+    assert.deepEqual(
+        result.questions.map((question) => question.scored),
+        [true, true, true, false],
+    );
 });
 
 test("系统 Prompt 说明 JSON 格式且模型看到不可修改的原文", async () => {
-    const transcript = parseTranscript([
-        "面试官", "请介绍 reat 项目。", "候选人", "这是一个前端项目。",
-    ].join("\n"));
+    const transcript = parseTranscript(["面试官", "请介绍 reat 项目。", "候选人", "这是一个前端项目。"].join("\n"));
     // const correctedTurns = transcript.turns.map((turn) => ({
     //     ...turn,
     //     content: turn.content.replace("reat", "React"),
     // }));
     const relation: ModelRelation = {
-        clusters: [{
-            title: "React 项目",
-            questions: [{
-                promptSegments: [{ turnId: "turn-0001", text: "请介绍 reat 项目。" }],
-                answerTurnIds: ["turn-0002"],
-                questionType: "project",
-            }],
-        }],
+        clusters: [
+            {
+                title: "React 项目",
+                questions: [
+                    {
+                        promptSegments: [{ turnId: "turn-0001", text: "请介绍 reat 项目。" }],
+                        answerTurnIds: ["turn-0002"],
+                        questionType: "project",
+                    },
+                ],
+            },
+        ],
         nonQuestionTurnIds: [],
     };
     const { provider } = await runWith(relation, { transcript /* correctedTurns */ });

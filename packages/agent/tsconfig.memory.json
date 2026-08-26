@@ -1,8 +1,4 @@
 {
-  "extends": "./tsconfig.json",
-  "include": [
-    "src/cli/run.ts",
-    "src/memory/**/*.ts",
-    "test/memory/**/*.test.ts"
-  ]
+    "extends": "./tsconfig.json",
+    "include": ["src/cli/run.ts", "src/memory/**/*.ts", "test/memory/**/*.test.ts"]
 }

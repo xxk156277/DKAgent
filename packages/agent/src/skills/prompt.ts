@@ -27,10 +27,7 @@ export function formatAvailableSkills(skills: SkillMetadata[]): string {
     ].join("\n");
 }
 
-export function appendAvailableSkills(
-    systemPrompt: string,
-    skills: SkillMetadata[],
-): string {
+export function appendAvailableSkills(systemPrompt: string, skills: SkillMetadata[]): string {
     const block = formatAvailableSkills(skills);
     return block ? `${systemPrompt}\n\n${block}` : systemPrompt;
 }

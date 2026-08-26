@@ -102,7 +102,8 @@ function createMemoryTraceResponse(response: ModelResponse) {
             name: call.name,
             candidates: (call.name === SUBMIT_MEMORY_CANDIDATES_TOOL.name
                 ? readCandidateIdentities(call.input.memories)
-                : []).map(({ type, key }) => ({
+                : []
+            ).map(({ type, key }) => ({
                 type,
                 key,
                 content: MEMORY_CONTENT_REDACTED,
@@ -119,19 +120,21 @@ export class MemoryExtractor {
         private readonly queryEngine: MemoryExtractionEngine,
         private readonly model: string,
         private readonly tracer: Tracer = new Tracer(),
-    ) { }
+    ) {}
 
     public async extract(input: MemoryCaptureInput): Promise<MemoryCandidate[]> {
         const request: ModelRequest = {
             model: this.model,
             systemPrompt: EXTRACTION_SYSTEM_PROMPT,
-            messages: [{
-                role: "user",
-                content: JSON.stringify({
-                    userInput: input.userInput,
-                    assistantAnswer: input.assistantAnswer,
-                }),
-            }],
+            messages: [
+                {
+                    role: "user",
+                    content: JSON.stringify({
+                        userInput: input.userInput,
+                        assistantAnswer: input.assistantAnswer,
+                    }),
+                },
+            ],
             tools: [SUBMIT_MEMORY_CANDIDATES_TOOL],
             maxTokens: 500,
             temperature: 0,
@@ -160,9 +163,10 @@ export class MemoryExtractor {
                     },
                     { module: "memory", operation: "extract" },
                 );
-                const parsed = response.type === "tool_use"
-                    ? this.parseCandidates(response.toolCalls)
-                    : { candidates: [], rejectedCount: 0 };
+                const parsed =
+                    response.type === "tool_use"
+                        ? this.parseCandidates(response.toolCalls)
+                        : { candidates: [], rejectedCount: 0 };
                 extractSpan.setOutput({
                     candidateCount: parsed.candidates.length,
                     rejectedCount: parsed.rejectedCount,
@@ -174,13 +178,14 @@ export class MemoryExtractor {
         );
     }
 
-    private parseCandidates(toolCalls: ReadonlyArray<{
-        name: string;
-        input: Record<string, unknown>;
-    }>): { candidates: MemoryCandidate[]; rejectedCount: number } {
-        const toolCall = toolCalls.find((call) =>
-            call.name === SUBMIT_MEMORY_CANDIDATES_TOOL.name
-            && Array.isArray(call.input.memories),
+    private parseCandidates(
+        toolCalls: ReadonlyArray<{
+            name: string;
+            input: Record<string, unknown>;
+        }>,
+    ): { candidates: MemoryCandidate[]; rejectedCount: number } {
+        const toolCall = toolCalls.find(
+            (call) => call.name === SUBMIT_MEMORY_CANDIDATES_TOOL.name && Array.isArray(call.input.memories),
         );
         if (!toolCall || !Array.isArray(toolCall.input.memories)) {
             return { candidates: [], rejectedCount: 0 };
@@ -232,18 +237,19 @@ export class MemoryExtractor {
             return false;
         }
 
-        const keys = Reflect.ownKeys(value).filter((key) =>
-            Object.prototype.propertyIsEnumerable.call(value, key),
-        );
-        if (keys.length !== 3 || !keys.every((key) =>
-            typeof key === "string" && ["type", "key", "content"].includes(key),
-        )) {
+        const keys = Reflect.ownKeys(value).filter((key) => Object.prototype.propertyIsEnumerable.call(value, key));
+        if (
+            keys.length !== 3 ||
+            !keys.every((key) => typeof key === "string" && ["type", "key", "content"].includes(key))
+        ) {
             return false;
         }
 
         const candidate = value as Record<string, unknown>;
-        return typeof candidate.type === "string"
-            && typeof candidate.key === "string"
-            && typeof candidate.content === "string";
+        return (
+            typeof candidate.type === "string" &&
+            typeof candidate.key === "string" &&
+            typeof candidate.content === "string"
+        );
     }
 }

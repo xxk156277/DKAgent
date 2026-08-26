@@ -125,10 +125,7 @@ export function validateMemoryCandidate(candidate: MemoryCandidate): MemoryCandi
     }
     const credentialText = normalizeCredentialText(`${key} ${content}`);
     const normalizedCredentialTerms = credentialText.replace(/[\s\p{P}\p{S}]/gu, "");
-    if (
-        CREDENTIAL_PATTERN.test(normalizedCredentialTerms)
-        || CREDENTIAL_VALUE_PREFIX_PATTERN.test(credentialText)
-    ) {
+    if (CREDENTIAL_PATTERN.test(normalizedCredentialTerms) || CREDENTIAL_VALUE_PREFIX_PATTERN.test(credentialText)) {
         throw new Error("Memory content 不能包含凭据语义");
     }
 

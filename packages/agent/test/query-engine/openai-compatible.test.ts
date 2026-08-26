@@ -38,9 +38,7 @@ test("普通 OpenAI 模型不发送 DeepSeek thinking 字段", async () => {
     assert.equal("thinking" in capturedRequest, false);
 });
 
-async function* chunksOf(
-    chunks: OpenAIStreamChunk[],
-): AsyncIterable<OpenAIStreamChunk> {
+async function* chunksOf(chunks: OpenAIStreamChunk[]): AsyncIterable<OpenAIStreamChunk> {
     for (const chunk of chunks) {
         yield chunk;
     }
@@ -60,10 +58,12 @@ async function captureOpenAIRequest(request: ModelRequest): Promise<Record<strin
     };
     client.client.chat.completions.create = async (input) => {
         capturedRequest = input;
-        return chunksOf([{
-            choices: [],
-            usage: { prompt_tokens: 1, completion_tokens: 1 },
-        }]);
+        return chunksOf([
+            {
+                choices: [],
+                usage: { prompt_tokens: 1, completion_tokens: 1 },
+            },
+        ]);
     };
 
     for await (const _event of provider.stream(request)) {
@@ -79,9 +79,7 @@ test("转换通用消息且不修改输入", () => {
         {
             role: "assistant",
             content: "准备读取",
-            toolCalls: [
-                { id: "call-1", name: "read_file", input: { path: "a.md" } },
-            ],
+            toolCalls: [{ id: "call-1", name: "read_file", input: { path: "a.md" } }],
         },
         { role: "tool", toolCallId: "call-1", content: "文件内容" },
     ];
@@ -165,9 +163,7 @@ test("将多个 OpenAI Tool Chunk 转为带 index 的统一事件和真实 Usage
                 choices: [
                     {
                         delta: {
-                            tool_calls: [
-                                { index: 0, function: { arguments: "1}" } },
-                            ],
+                            tool_calls: [{ index: 0, function: { arguments: "1}" } }],
                         },
                         finish_reason: "tool_calls",
                     },

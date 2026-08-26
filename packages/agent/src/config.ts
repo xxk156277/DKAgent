@@ -59,31 +59,15 @@ const PROVIDER_PROFILES: Record<ProviderName, ProviderProfile> = {
     },
 };
 
-export function loadConfig(
-    env: NodeJS.ProcessEnv = process.env,
-): AgentConfig {
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     const providerConfig = loadProviderConfig(env);
 
-    const maxContextTokens = parsePositiveInteger(
-        env.LLM_CONTEXT_WINDOW_TOKENS,
-        32_000,
-        "LLM_CONTEXT_WINDOW_TOKENS",
-    );
+    const maxContextTokens = parsePositiveInteger(env.LLM_CONTEXT_WINDOW_TOKENS, 32_000, "LLM_CONTEXT_WINDOW_TOKENS");
 
-    const maxOutputTokens = parsePositiveInteger(
-        env.LLM_MAX_OUTPUT_TOKENS,
-        4_096,
-        "LLM_MAX_OUTPUT_TOKENS",
-    );
+    const maxOutputTokens = parsePositiveInteger(env.LLM_MAX_OUTPUT_TOKENS, 4_096, "LLM_MAX_OUTPUT_TOKENS");
 
     if (maxOutputTokens >= maxContextTokens) {
-        throw new Error(
-            [
-                "LLM_MAX_OUTPUT_TOKENS",
-                "必须小于",
-                "LLM_CONTEXT_WINDOW_TOKENS",
-            ].join(" "),
-        );
+        throw new Error(["LLM_MAX_OUTPUT_TOKENS", "必须小于", "LLM_CONTEXT_WINDOW_TOKENS"].join(" "));
     }
 
     const knowledgeDatabasePath = env.KNOWLEDGE_DATABASE_PATH?.trim();
@@ -96,11 +80,8 @@ export function loadConfig(
         contextCompaction: {
             ...DEFAULT_CONTEXT_COMPACTION_OPTIONS,
         },
-        summaryModel:
-            env.LLM_SUMMARY_MODEL_ID?.trim() || providerConfig.model,
-        ...(providerConfig.baseURL
-            ? { baseURL: providerConfig.baseURL }
-            : {}),
+        summaryModel: env.LLM_SUMMARY_MODEL_ID?.trim() || providerConfig.model,
+        ...(providerConfig.baseURL ? { baseURL: providerConfig.baseURL } : {}),
         ...(knowledgeDatabasePath ? { knowledgeDatabasePath } : {}),
     };
 }
@@ -131,32 +112,20 @@ function loadProviderConfig(env: NodeJS.ProcessEnv): {
 
     const profile = PROVIDER_PROFILES[provider];
     const profileApiKey = env[profile.apiKeyVariable]?.trim();
-    const legacyApiKey = provider === "deepseek"
-        ? env.LLM_API_KEY?.trim()
-        : undefined;
+    const legacyApiKey = provider === "deepseek" ? env.LLM_API_KEY?.trim() : undefined;
     const apiKey = profileApiKey || legacyApiKey;
     if (!apiKey) {
         throw new Error(`缺少环境变量 ${profile.apiKeyVariable}`);
     }
 
     const usesLegacyDeepSeekProfile = provider === "deepseek" && !profileApiKey;
-    const legacyModel = usesLegacyDeepSeekProfile
-        ? env.LLM_MODEL_ID?.trim()
-        : undefined;
-    const legacyBaseUrl = usesLegacyDeepSeekProfile
-        ? env.LLM_BASE_URL?.trim()
-        : undefined;
+    const legacyModel = usesLegacyDeepSeekProfile ? env.LLM_MODEL_ID?.trim() : undefined;
+    const legacyBaseUrl = usesLegacyDeepSeekProfile ? env.LLM_BASE_URL?.trim() : undefined;
 
     return {
         apiKey,
-        model:
-            env[profile.modelVariable]?.trim()
-            || legacyModel
-            || profile.defaultModel,
-        baseURL:
-            env[profile.baseUrlVariable]?.trim()
-            || legacyBaseUrl
-            || profile.defaultBaseUrl,
+        model: env[profile.modelVariable]?.trim() || legacyModel || profile.defaultModel,
+        baseURL: env[profile.baseUrlVariable]?.trim() || legacyBaseUrl || profile.defaultBaseUrl,
     };
 }
 
@@ -165,19 +134,13 @@ function loadProviderConfig(env: NodeJS.ProcessEnv): {
  *
  * 未配置时使用默认值，配置错误时明确失败。
  */
-function parsePositiveInteger(
-    value: string | undefined,
-    defaultValue: number,
-    variableName: string,
-): number {
+function parsePositiveInteger(value: string | undefined, defaultValue: number, variableName: string): number {
     if (!value?.trim()) {
         return defaultValue;
     }
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed <= 0) {
-        throw new Error(
-            `${variableName} 必须是正整数`,
-        );
+        throw new Error(`${variableName} 必须是正整数`);
     }
     return parsed;
 }

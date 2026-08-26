@@ -23,10 +23,7 @@ class FakeProvider implements LLMProvider {
         };
     }
 
-    public async countTokens(
-        _messages: AgentMessage[],
-        _tools?: ToolSchema[],
-    ): Promise<number> {
+    public async countTokens(_messages: AgentMessage[], _tools?: ToolSchema[]): Promise<number> {
         return 0;
     }
 }

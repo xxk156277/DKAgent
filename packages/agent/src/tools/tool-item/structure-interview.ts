@@ -19,14 +19,10 @@ function isAbortError(error: unknown): boolean {
 
 function safeStructureFailureMessage(error: unknown): string {
     const message = error instanceof Error ? error.message : "";
-    return message === "结构化模型输出达到 Token 上限，JSON 可能被截断"
-        ? message
-        : "面试问题结构化失败";
+    return message === "结构化模型输出达到 Token 上限，JSON 可能被截断" ? message : "面试问题结构化失败";
 }
 
-export function createStructureInterviewTool(
-    model: string,
-): Tool<StructureInterviewInput, StructureInterviewOutput> {
+export function createStructureInterviewTool(model: string): Tool<StructureInterviewInput, StructureInterviewOutput> {
     return {
         name: "structure_interview",
         description: "将面试轮次组织为问题簇、具体问题和非问题轮次。",
@@ -88,15 +84,11 @@ export function createStructureInterviewTool(
                     tracer: context.tracer,
                 });
                 const interview: StructuredInterview = { transcript, ...output };
-                const artifactId = context.artifactStore.put(
-                    "structured_interview",
-                    interview,
-                    {
-                        producer: "structure_interview",
-                        characterCount: JSON.stringify(interview).length,
-                        itemCount: interview.questions.length,
-                    },
-                );
+                const artifactId = context.artifactStore.put("structured_interview", interview, {
+                    producer: "structure_interview",
+                    characterCount: JSON.stringify(interview).length,
+                    itemCount: interview.questions.length,
+                });
                 return {
                     success: true,
                     data: {

@@ -4,11 +4,7 @@ import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
 import type { ConversationContextState } from "../context/types.js";
 import type { AgentMessage } from "../query-engine/provider.js";
-import type {
-    SessionSnapshot,
-    SessionStore,
-    SessionSummary,
-} from "./types.js";
+import type { SessionSnapshot, SessionStore, SessionSummary } from "./types.js";
 
 /** sessions 表查询结果。 */
 interface SessionRow {
@@ -104,7 +100,9 @@ export class SqliteSessionStore implements SessionStore {
             updatedAt: timestamp,
         };
 
-        this.database.prepare(`
+        this.database
+            .prepare(
+                `
             INSERT INTO sessions (
                 id,
                 summary,
@@ -112,18 +110,24 @@ export class SqliteSessionStore implements SessionStore {
                 created_at,
                 updated_at
             ) VALUES (?, ?, ?, ?, ?)
-        `).run(snapshot.id, "", 0, timestamp, timestamp);
+        `,
+            )
+            .run(snapshot.id, "", 0, timestamp, timestamp);
 
         return snapshot;
     }
 
     /** 按更新时间从新到旧列出 Session，不读取消息正文。 */
     public list(): SessionSummary[] {
-        const rows = this.database.prepare(`
+        const rows = this.database
+            .prepare(
+                `
             SELECT id, created_at, updated_at
             FROM sessions
             ORDER BY updated_at DESC, rowid DESC
-        `).all() as SessionSummaryRow[];
+        `,
+            )
+            .all() as SessionSummaryRow[];
 
         return rows.map((row) => ({
             id: row.id,
@@ -134,7 +138,9 @@ export class SqliteSessionStore implements SessionStore {
 
     /** 按唯一标识加载 Session 及其完整消息。 */
     public load(sessionId: string): SessionSnapshot | null {
-        const row = this.database.prepare(`
+        const row = this.database
+            .prepare(
+                `
             SELECT
                 id,
                 summary,
@@ -143,14 +149,18 @@ export class SqliteSessionStore implements SessionStore {
                 updated_at
             FROM sessions
             WHERE id = ?
-        `).get(sessionId) as SessionRow | undefined;
+        `,
+            )
+            .get(sessionId) as SessionRow | undefined;
 
         return row ? this.buildSnapshot(row) : null;
     }
 
     /** 加载最近更新的 Session 及其完整消息。 */
     public loadLatest(): SessionSnapshot | null {
-        const row = this.database.prepare(`
+        const row = this.database
+            .prepare(
+                `
             SELECT
                 id,
                 summary,
@@ -160,7 +170,9 @@ export class SqliteSessionStore implements SessionStore {
             FROM sessions
             ORDER BY updated_at DESC, rowid DESC
             LIMIT 1
-        `).get() as SessionRow | undefined;
+        `,
+            )
+            .get() as SessionRow | undefined;
 
         if (!row) return null;
         return this.buildSnapshot(row);
@@ -169,15 +181,23 @@ export class SqliteSessionStore implements SessionStore {
     /** 以事务方式删除 Session 及其关联消息。 */
     public delete(sessionId: string): boolean {
         const remove = this.database.transaction(() => {
-            this.database.prepare(`
+            this.database
+                .prepare(
+                    `
                 DELETE FROM session_messages
                 WHERE session_id = ?
-            `).run(sessionId);
+            `,
+                )
+                .run(sessionId);
 
-            const result = this.database.prepare(`
+            const result = this.database
+                .prepare(
+                    `
                 DELETE FROM sessions
                 WHERE id = ?
-            `).run(sessionId);
+            `,
+                )
+                .run(sessionId);
 
             return result.changes === 1;
         });
@@ -186,19 +206,20 @@ export class SqliteSessionStore implements SessionStore {
     }
 
     /** 以事务方式追加消息并刷新 Session 更新时间。 */
-    public appendMessage(
-        sessionId: string,
-        message: AgentMessage,
-    ): void {
+    public appendMessage(sessionId: string, message: AgentMessage): void {
         const timestamp = new Date().toISOString();
         const write = this.database.transaction(() => {
-            this.database.prepare(`
+            this.database
+                .prepare(
+                    `
                 INSERT INTO session_messages (
                     session_id,
                     message_json,
                     created_at
                 ) VALUES (?, ?, ?)
-            `).run(sessionId, JSON.stringify(message), timestamp);
+            `,
+                )
+                .run(sessionId, JSON.stringify(message), timestamp);
             this.touch(sessionId, timestamp);
         });
 
@@ -206,23 +227,19 @@ export class SqliteSessionStore implements SessionStore {
     }
 
     /** 覆盖保存 Context 压缩状态，不修改原始消息。 */
-    public saveContextState(
-        sessionId: string,
-        state: ConversationContextState,
-    ): void {
-        const result = this.database.prepare(`
+    public saveContextState(sessionId: string, state: ConversationContextState): void {
+        const result = this.database
+            .prepare(
+                `
             UPDATE sessions
             SET
                 summary = ?,
                 first_kept_message_index = ?,
                 updated_at = ?
             WHERE id = ?
-        `).run(
-            state.summary,
-            state.firstKeptMessageIndex,
-            new Date().toISOString(),
-            sessionId,
-        );
+        `,
+            )
+            .run(state.summary, state.firstKeptMessageIndex, new Date().toISOString(), sessionId);
 
         if (result.changes !== 1) {
             throw new Error(`Session ${sessionId} 不存在`);
@@ -238,22 +255,22 @@ export class SqliteSessionStore implements SessionStore {
 
     /** 将 Session 行和关联消息组装为可恢复快照。 */
     private buildSnapshot(row: SessionRow): SessionSnapshot {
-        const messageRows = this.database.prepare(`
+        const messageRows = this.database
+            .prepare(
+                `
             SELECT message_json
             FROM session_messages
             WHERE session_id = ?
             ORDER BY id ASC
-        `).all(row.id) as MessageRow[];
+        `,
+            )
+            .all(row.id) as MessageRow[];
 
         let messages: AgentMessage[];
         try {
-            messages = messageRows.map((messageRow) =>
-                JSON.parse(messageRow.message_json) as AgentMessage,
-            );
+            messages = messageRows.map((messageRow) => JSON.parse(messageRow.message_json) as AgentMessage);
         } catch (error: unknown) {
-            const message = error instanceof Error
-                ? error.message
-                : String(error);
+            const message = error instanceof Error ? error.message : String(error);
             throw new Error(`Session ${row.id} 消息数据损坏：${message}`);
         }
 
@@ -271,11 +288,15 @@ export class SqliteSessionStore implements SessionStore {
 
     /** 刷新 Session 最近更新时间，并校验 Session 存在。 */
     private touch(sessionId: string, timestamp: string): void {
-        const result = this.database.prepare(`
+        const result = this.database
+            .prepare(
+                `
             UPDATE sessions
             SET updated_at = ?
             WHERE id = ?
-        `).run(timestamp, sessionId);
+        `,
+            )
+            .run(timestamp, sessionId);
 
         if (result.changes !== 1) {
             throw new Error(`Session ${sessionId} 不存在`);

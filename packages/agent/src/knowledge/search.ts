@@ -1,9 +1,6 @@
 import type { EmbeddingProvider } from "./embedding.js";
 import type { KnowledgeRepository } from "./repository.js";
-import type {
-    KnowledgeSearchOptions,
-    KnowledgeSearchResult,
-} from "./types.js";
+import type { KnowledgeSearchOptions, KnowledgeSearchResult } from "./types.js";
 
 interface RankedCandidate extends KnowledgeSearchResult {
     rank: number;
@@ -19,9 +16,7 @@ export class KnowledgeSearch {
     ) {}
 
     /** 根据 method 执行检索，默认使用混合检索。 */
-    public async search(
-        options: KnowledgeSearchOptions,
-    ): Promise<KnowledgeSearchResult[]> {
+    public async search(options: KnowledgeSearchOptions): Promise<KnowledgeSearchResult[]> {
         const query = options.query.trim();
         const method = options.method ?? "hybrid";
         const limit = options.limit ?? 10;
@@ -30,14 +25,12 @@ export class KnowledgeSearch {
         }
 
         if (method === "fts") {
-            return this.searchFts(query, limit, options.dimension).map(
-                ({ rank: _rank, ...result }) => result,
-            );
+            return this.searchFts(query, limit, options.dimension).map(({ rank: _rank, ...result }) => result);
         }
         if (method === "embedding") {
-            return (
-                await this.searchEmbedding(query, limit, options.dimension)
-            ).map(({ rank: _rank, ...result }) => result);
+            return (await this.searchEmbedding(query, limit, options.dimension)).map(
+                ({ rank: _rank, ...result }) => result,
+            );
         }
 
         // 两路多召回一些候选，再用排名融合，避免直接比较不同量纲的分数。
@@ -49,28 +42,18 @@ export class KnowledgeSearch {
         return fuseWithRrf(ftsCandidates, embeddingCandidates, limit);
     }
 
-    private searchFts(
-        query: string,
-        limit: number,
-        dimension?: string,
-    ): RankedCandidate[] {
-        return this.repository
-            .searchFts(query, limit, dimension)
-            .map((hit, index) => ({
-                entry: hit.entry,
-                matchType: "fts" as const,
-                // BM25 越小越相关，取负数后统一成“越大越相关”。
-                score: -hit.rank,
-                ftsRank: hit.rank,
-                rank: index + 1,
-            }));
+    private searchFts(query: string, limit: number, dimension?: string): RankedCandidate[] {
+        return this.repository.searchFts(query, limit, dimension).map((hit, index) => ({
+            entry: hit.entry,
+            matchType: "fts" as const,
+            // BM25 越小越相关，取负数后统一成“越大越相关”。
+            score: -hit.rank,
+            ftsRank: hit.rank,
+            rank: index + 1,
+        }));
     }
 
-    private async searchEmbedding(
-        query: string,
-        limit: number,
-        dimension?: string,
-    ): Promise<RankedCandidate[]> {
+    private async searchEmbedding(query: string, limit: number, dimension?: string): Promise<RankedCandidate[]> {
         if (!this.embeddingProvider) {
             throw new Error("Embedding 检索需要配置 Embedding Provider");
         }
@@ -80,25 +63,16 @@ export class KnowledgeSearch {
             throw new Error("Embedding Provider 未返回查询向量");
         }
 
-        const vectors = this.repository.listStoredVectors(
-            this.embeddingProvider.model,
-            dimension,
-        );
+        const vectors = this.repository.listStoredVectors(this.embeddingProvider.model, dimension);
         const ranked = vectors.map(({ entry, vector }) => {
             if (vector.length !== queryVector.length) {
-                throw new Error(
-                    `查询向量维度不一致：查询 ${queryVector.length}，知识 ${vector.length}`,
-                );
+                throw new Error(`查询向量维度不一致：查询 ${queryVector.length}，知识 ${vector.length}`);
             }
             return { entry, similarity: cosineSimilarity(queryVector, vector) };
         });
 
         return ranked
-            .sort(
-                (left, right) =>
-                    right.similarity - left.similarity ||
-                    left.entry.id.localeCompare(right.entry.id),
-            )
+            .sort((left, right) => right.similarity - left.similarity || left.entry.id.localeCompare(right.entry.id))
             .slice(0, limit)
             .map((item, index) => ({
                 entry: item.entry,
@@ -149,12 +123,8 @@ function fuseWithRrf(
                 entry: candidate.entry,
                 matchType: candidate.matchType,
                 score: rrfScore,
-                ...(candidate.ftsRank === undefined
-                    ? {}
-                    : { ftsRank: candidate.ftsRank }),
-                ...(candidate.similarity === undefined
-                    ? {}
-                    : { similarity: candidate.similarity }),
+                ...(candidate.ftsRank === undefined ? {} : { ftsRank: candidate.ftsRank }),
+                ...(candidate.similarity === undefined ? {} : { similarity: candidate.similarity }),
             });
             continue;
         }
@@ -170,9 +140,6 @@ function fuseWithRrf(
     }
 
     return [...fused.values()]
-        .sort(
-            (left, right) =>
-                right.score - left.score || left.entry.id.localeCompare(right.entry.id),
-        )
+        .sort((left, right) => right.score - left.score || left.entry.id.localeCompare(right.entry.id))
         .slice(0, limit);
 }

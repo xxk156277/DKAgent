@@ -1,24 +1,14 @@
+import type { KnowledgeEntry, ParseKnowledgeResult, SkippedKnowledgeBlock } from "./types.js";
 
-import type {
-    KnowledgeEntry,
-    ParseKnowledgeResult,
-    SkippedKnowledgeBlock
-} from './types.js'
-
-export function parseKnowledgeMarkdown(
-    markdown: string,
-    sourceFile: string
-): ParseKnowledgeResult {
-    const entries: KnowledgeEntry[] = []
-    const skipped: SkippedKnowledgeBlock[] = []
+export function parseKnowledgeMarkdown(markdown: string, sourceFile: string): ParseKnowledgeResult {
+    const entries: KnowledgeEntry[] = [];
+    const skipped: SkippedKnowledgeBlock[] = [];
 
     // 用前瞻切分，
     // 分割点前后的内容都会保留（因为前瞻不消耗字符）
     // ## Q: | ### Q: 切割，并保留Q
     // 再用filter过滤掉没有Q的前后
-    const blocks = markdown
-        .split(/(?=^#{2,3}\s*Q[：:])/gm)
-        .filter((block) => /^#{2,3}\s*Q[：:]/m.test(block));
+    const blocks = markdown.split(/(?=^#{2,3}\s*Q[：:])/gm).filter((block) => /^#{2,3}\s*Q[：:]/m.test(block));
 
     for (const [index, block] of blocks.entries()) {
         const blockIndex = index + 1;
@@ -26,20 +16,11 @@ export function parseKnowledgeMarkdown(
         // 后面依次完成：提取问题、答案、跳过判断和 KnowledgeEntry。
         const question = extractQuestion(block);
 
-        const noviceAnswer = extractSection(
-            block,
-            "新手答",
-        );
+        const noviceAnswer = extractSection(block, "新手答");
 
-        const expertAnswer = extractSection(
-            block,
-            "高手答",
-        );
+        const expertAnswer = extractSection(block, "高手答");
 
-        const gapAnalysis = extractSection(
-            block,
-            "差距在哪|考察点|关键差距",
-        );
+        const gapAnalysis = extractSection(block, "差距在哪|考察点|关键差距");
 
         if (!expertAnswer) {
             skipped.push({
@@ -64,19 +45,16 @@ export function parseKnowledgeMarkdown(
             ...(gapAnalysis ? { gapAnalysis } : {}),
 
             sourceFile: normalizedSourceFile,
-            content: buildSearchContent(
-                question,
-                expertAnswer,
-                gapAnalysis,
-            ),
+            content: buildSearchContent(question, expertAnswer, gapAnalysis),
         };
 
         entries.push(entry);
     }
 
     return {
-        entries, skipped
-    }
+        entries,
+        skipped,
+    };
 }
 
 /**
@@ -90,17 +68,13 @@ function extractQuestion(block: string): string {
 /**
  * 提取指定 Markdown 标记之后的多行内容。
  */
-function extractSection(
-    block: string,
-    labelPattern: string,
-): string | undefined {
+function extractSection(block: string, labelPattern: string): string | undefined {
     // 任一已知区块开始，都代表当前区块结束，避免“新手答”吞掉“高手答”。
-    const sectionLabels =
-        "新手答|高手答|差距在哪|差距分析|考察点|关键差距|追问";
+    const sectionLabels = "新手答|高手答|差距在哪|差距分析|考察点|关键差距|追问";
     const pattern = new RegExp(
         `\\*\\*(?:${labelPattern})\\*\\*[：:]\\s*` +
-        `([\\s\\S]*?)` +
-        `(?=\\n\\*\\*(?:${sectionLabels})\\*\\*[：:]|\\n---|$)`,
+            `([\\s\\S]*?)` +
+            `(?=\\n\\*\\*(?:${sectionLabels})\\*\\*[：:]|\\n---|$)`,
     );
 
     const value = block.match(pattern)?.[1]?.trim();
@@ -119,15 +93,8 @@ function getDimension(sourceFile: string): string {
  * 生成供 FTS5 检索的规范化文本。
  * 不加入 noviceAnswer，避免错误答案影响检索结果。
  */
-function buildSearchContent(
-    question: string,
-    expertAnswer: string,
-    gapAnalysis?: string,
-): string {
-    const sections = [
-        `问题：${question}`,
-        `高手答：${expertAnswer}`,
-    ];
+function buildSearchContent(question: string, expertAnswer: string, gapAnalysis?: string): string {
+    const sections = [`问题：${question}`, `高手答：${expertAnswer}`];
 
     if (gapAnalysis) {
         sections.push(`差距分析：${gapAnalysis}`);

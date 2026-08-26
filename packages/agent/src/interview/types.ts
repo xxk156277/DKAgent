@@ -28,13 +28,7 @@ export interface TranscriptSegment {
     text: string;
 }
 
-export type InterviewQuestionType =
-    | "project"
-    | "knowledge"
-    | "open"
-    | "behavior"
-    | "coding"
-    | "procedural";
+export type InterviewQuestionType = "project" | "knowledge" | "open" | "behavior" | "coding" | "procedural";
 
 export interface InterviewQuestion {
     id: string;

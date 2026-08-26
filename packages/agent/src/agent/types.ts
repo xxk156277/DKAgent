@@ -1,14 +1,8 @@
 import type { QueryEngine } from "../query-engine/query-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type {
-    ContextBuilder,
-    ContextCompactionOptions,
-} from "../context/types.js";
+import type { ContextBuilder, ContextCompactionOptions } from "../context/types.js";
 import type { Tracer } from "@dkagent/trace";
-import type {
-    SessionSnapshot,
-    SessionStore,
-} from "../session/types.js";
+import type { SessionSnapshot, SessionStore } from "../session/types.js";
 import type { MemoryReader, MemoryWriter } from "../memory/types.js";
 import type { ArtifactStore } from "../artifact/types.js";
 

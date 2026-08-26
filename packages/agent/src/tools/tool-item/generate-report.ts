@@ -13,39 +13,50 @@ import type {
 import { queryModelJson } from "../../interview/model-json.js";
 import type { QuestionAnalysisArtifact } from "../../interview/artifact-payloads.js";
 import { scoreInterview } from "../../interview/scoring.js";
-import type {
-    InterviewQuestionType,
-    StructuredInterview,
-} from "../../interview/types.js";
+import type { InterviewQuestionType, StructuredInterview } from "../../interview/types.js";
 import type { Tool, ToolResult } from "../types.js";
 
-const referenceItemSchema = z.object({
-    text: z.string().min(1),
-    questionIds: z.array(z.string().min(1)).min(1),
-}).strict();
+const referenceItemSchema = z
+    .object({
+        text: z.string().min(1),
+        questionIds: z.array(z.string().min(1)).min(1),
+    })
+    .strict();
 
-const summarySchema = z.object({
-    levelSummary: z.string().min(1),
-    strengths: z.array(referenceItemSchema),
-    coreIssues: z.array(referenceItemSchema),
-    priorityImprovements: z.array(referenceItemSchema).max(3),
-}).strict();
+const summarySchema = z
+    .object({
+        levelSummary: z.string().min(1),
+        strengths: z.array(referenceItemSchema),
+        coreIssues: z.array(referenceItemSchema),
+        priorityImprovements: z.array(referenceItemSchema).max(3),
+    })
+    .strict();
 
-const SUMMARY_JSON_EXAMPLE = JSON.stringify({
-    levelSummary: "基于逐题证据的整体水平判断",
-    strengths: [{
-        text: "跨题稳定出现的强项",
-        questionIds: ["question-0001"],
-    }],
-    coreIssues: [{
-        text: "跨题或高影响的核心问题",
-        questionIds: ["question-0002"],
-    }],
-    priorityImprovements: [{
-        text: "优先级最高的改进动作",
-        questionIds: ["question-0002"],
-    }],
-}, null, 2);
+const SUMMARY_JSON_EXAMPLE = JSON.stringify(
+    {
+        levelSummary: "基于逐题证据的整体水平判断",
+        strengths: [
+            {
+                text: "跨题稳定出现的强项",
+                questionIds: ["question-0001"],
+            },
+        ],
+        coreIssues: [
+            {
+                text: "跨题或高影响的核心问题",
+                questionIds: ["question-0002"],
+            },
+        ],
+        priorityImprovements: [
+            {
+                text: "优先级最高的改进动作",
+                questionIds: ["question-0002"],
+            },
+        ],
+    },
+    null,
+    2,
+);
 
 /* const jobMatchItemSchema = z.object({
     text: z.string().min(1),
@@ -121,9 +132,7 @@ function validateInput(input: ResolvedGenerateReportInput): void {
     // const turnById = new Map(
     //     input.structuredInterview.transcript.turns.map((turn) => [turn.id, turn]),
     // );
-    const knownTurnIds = new Set(
-        input.structuredInterview.transcript.turns.map((turn) => turn.id),
-    );
+    const knownTurnIds = new Set(input.structuredInterview.transcript.turns.map((turn) => turn.id));
     if (knownQuestionIds.size !== questionIds.length) {
         throw new Error("结构化面试包含重复问题 ID");
     }
@@ -145,48 +154,32 @@ function validateInput(input: ResolvedGenerateReportInput): void {
         }
     }
     for (const analysis of input.analyses) {
-        const question = input.structuredInterview.questions.find(
-            (item) => item.id === analysis.questionId,
-        );
+        const question = input.structuredInterview.questions.find((item) => item.id === analysis.questionId);
         if (question?.clusterId !== analysis.clusterId) {
             throw new Error(`逐题分析的问题簇不一致: ${analysis.questionId}`);
         }
         if (analysis.status === "completed") {
             for (const [dimension, value] of Object.entries(analysis.dimensionScores)) {
-                if (value !== null && (
-                    !Number.isFinite(value)
-                    || value < 0
-                    || value > 100
-                )) {
-                    throw new Error(
-                        `维度分数越界: ${analysis.questionId}.${dimension}`,
-                    );
+                if (value !== null && (!Number.isFinite(value) || value < 0 || value > 100)) {
+                    throw new Error(`维度分数越界: ${analysis.questionId}.${dimension}`);
                 }
             }
-            if (analysis.score !== null && (
-                !Number.isFinite(analysis.score)
-                || analysis.score < 0
-                || analysis.score > 100
-            )) {
+            if (
+                analysis.score !== null &&
+                (!Number.isFinite(analysis.score) || analysis.score < 0 || analysis.score > 100)
+            ) {
                 throw new Error(`单题分数越界: ${analysis.questionId}`);
             }
-            if (!Number.isFinite(analysis.confidence)
-                || analysis.confidence < 0
-                || analysis.confidence > 1) {
+            if (!Number.isFinite(analysis.confidence) || analysis.confidence < 0 || analysis.confidence > 1) {
                 throw new Error(`置信度越界: ${analysis.questionId}`);
             }
-            const allowedTurnIds = new Set([
-                ...question.promptTurnIds,
-                ...question.answerTurnIds,
-            ]);
+            const allowedTurnIds = new Set([...question.promptTurnIds, ...question.answerTurnIds]);
             const observations = [...analysis.strengths, ...analysis.issues];
             const emptyEvidenceObservation = observations.find(
                 (observation) => observation.evidenceTurnIds.length === 0,
             );
             if (emptyEvidenceObservation) {
-                throw new Error(
-                    `逐题分析证据不能为空: ${analysis.questionId}.${emptyEvidenceObservation.id}`,
-                );
+                throw new Error(`逐题分析证据不能为空: ${analysis.questionId}.${emptyEvidenceObservation.id}`);
             }
             const unknownEvidenceId = observations
                 .flatMap((observation) => observation.evidenceTurnIds)
@@ -269,24 +262,19 @@ function validateInput(input: ResolvedGenerateReportInput): void {
 
     const clarificationCandidates = [
         // ...input.projectFactSets.flatMap((set) => set.clarificationCandidates),
-        ...input.analyses.flatMap((analysis) => (
-            analysis.status === "completed" ? analysis.clarificationCandidates : []
-        )),
+        ...input.analyses.flatMap((analysis) =>
+            analysis.status === "completed" ? analysis.clarificationCandidates : [],
+        ),
     ];
     for (const candidate of clarificationCandidates) {
-        const unknownQuestionId = candidate.affectedQuestionIds.find(
-            (id) => !knownQuestionIds.has(id),
-        );
+        const unknownQuestionId = candidate.affectedQuestionIds.find((id) => !knownQuestionIds.has(id));
         if (unknownQuestionId) {
             throw new Error(`待确认项引用未知问题: ${unknownQuestionId}`);
         }
     }
 }
 
-function mergeClarifications(
-    candidates: ClarificationCandidate[],
-    questionOrder: string[],
-): ClarificationCandidate[] {
+function mergeClarifications(candidates: ClarificationCandidate[], questionOrder: string[]): ClarificationCandidate[] {
     const merged = new Map<string, ClarificationCandidate>();
     for (const candidate of candidates) {
         if (candidate.impact === "low") continue;
@@ -303,10 +291,7 @@ function mergeClarifications(
             factKey: candidate.factKey,
             question: useIncoming ? candidate.question : current.question,
             impact: useIncoming ? candidate.impact : current.impact,
-            affectedQuestionIds: [...new Set([
-                ...current.affectedQuestionIds,
-                ...candidate.affectedQuestionIds,
-            ])],
+            affectedQuestionIds: [...new Set([...current.affectedQuestionIds, ...candidate.affectedQuestionIds])],
         });
     }
 
@@ -318,11 +303,12 @@ function mergeClarifications(
                 (left, right) => (questionIndex.get(left) ?? Infinity) - (questionIndex.get(right) ?? Infinity),
             ),
         }))
-        .sort((left, right) => (
-            IMPACT_ORDER[right.impact] - IMPACT_ORDER[left.impact]
-            || right.affectedQuestionIds.length - left.affectedQuestionIds.length
-            || left.factKey.localeCompare(right.factKey)
-        ))
+        .sort(
+            (left, right) =>
+                IMPACT_ORDER[right.impact] - IMPACT_ORDER[left.impact] ||
+                right.affectedQuestionIds.length - left.affectedQuestionIds.length ||
+                left.factKey.localeCompare(right.factKey),
+        )
         .slice(0, 5);
 }
 
@@ -330,12 +316,8 @@ function createQuestionItems(
     structuredInterview: StructuredInterview,
     analyses: QuestionAnalysis[],
 ): ReportQuestionItem[] {
-    const analysisByQuestion = new Map(
-        analyses.map((analysis) => [analysis.questionId, analysis]),
-    );
-    const clusterById = new Map(
-        structuredInterview.clusters.map((cluster) => [cluster.id, cluster]),
-    );
+    const analysisByQuestion = new Map(analyses.map((analysis) => [analysis.questionId, analysis]));
+    const clusterById = new Map(structuredInterview.clusters.map((cluster) => [cluster.id, cluster]));
 
     return structuredInterview.questions.map((question) => {
         const analysis = analysisByQuestion.get(question.id)!;
@@ -368,10 +350,7 @@ function createQuestionItems(
     });
 }
 
-function validateSummaryEvidence(
-    items: ReportReferenceItem[],
-    knownQuestionIds: Set<string>,
-): void {
+function validateSummaryEvidence(items: ReportReferenceItem[], knownQuestionIds: Set<string>): void {
     for (const item of items) {
         const unknownQuestionId = item.questionIds.find((id) => !knownQuestionIds.has(id));
         if (unknownQuestionId) throw new Error(`总结引用未知问题: ${unknownQuestionId}`);
@@ -380,11 +359,7 @@ function validateSummaryEvidence(
 
 function renderReferences(title: string, items: ReportReferenceItem[]): string[] {
     if (!items.length) return [`### ${title}`, "", "- 无"];
-    return [
-        `### ${title}`,
-        "",
-        ...items.map((item) => `- ${item.text}（${item.questionIds.join("、")}）`),
-    ];
+    return [`### ${title}`, "", ...items.map((item) => `- ${item.text}（${item.questionIds.join("、")}）`)];
 }
 
 function renderQuestion(question: ReportQuestionItem, index: number): string[] {
@@ -406,9 +381,7 @@ function renderQuestion(question: ReportQuestionItem, index: number): string[] {
     if (question.status === "failed") return [...lines, "分数：分析失败"];
     lines.push(`分数：${question.score === null ? "不可评价" : `${question.score}/100`}`);
     lines.push("");
-    lines.push(
-        `置信度：${question.confidenceLabel}（${question.confidenceReason ?? "无说明"}）`,
-    );
+    lines.push(`置信度：${question.confidenceLabel}（${question.confidenceReason ?? "无说明"}）`);
     return lines;
 }
 
@@ -437,13 +410,12 @@ export function renderInterviewReport(report: InterviewReport): string {
         return `- ${label}：${value === null ? "不可评价" : `${value}/100`}`;
     });
     const pendingLines = report.pendingClarifications.length
-        ? report.pendingClarifications.map((item) => (
-            `- [${item.impact}] ${item.question}（${item.affectedQuestionIds.join("、")}）`
-        ))
+        ? report.pendingClarifications.map(
+              (item) => `- [${item.impact}] ${item.question}（${item.affectedQuestionIds.join("、")}）`,
+          )
         : ["- 无"];
-    const levelSummary = report.summaryStatus === "completed"
-        ? report.levelSummary
-        : "汇总失败；分数和逐题分析仍可使用。";
+    const levelSummary =
+        report.summaryStatus === "completed" ? report.levelSummary : "汇总失败；分数和逐题分析仍可使用。";
 
     return [
         "# 面试分析报告",
@@ -482,16 +454,13 @@ export function renderInterviewReport(report: InterviewReport): string {
         // ...renderJobMatch(report),
         "## 具体问题列表",
         "",
-        ...report.questions.flatMap((question, index) => [
-            ...renderQuestion(question, index),
-            "",
-        ]),
-    ].join("\n").trimEnd();
+        ...report.questions.flatMap((question, index) => [...renderQuestion(question, index), ""]),
+    ]
+        .join("\n")
+        .trimEnd();
 }
 
-export function createGenerateReportTool(
-    model: string,
-): Tool<GenerateReportInput, GenerateReportOutput> {
+export function createGenerateReportTool(model: string): Tool<GenerateReportInput, GenerateReportOutput> {
     return {
         name: "generate_report",
         description: "生成可追溯的面试分析结构化报告和确定性 Markdown。",
@@ -525,10 +494,7 @@ export function createGenerateReportTool(
             return result.data.markdown;
         },
         async execute(input, ctx) {
-            if (
-                input.returnDirectly !== undefined
-                && typeof input.returnDirectly !== "boolean"
-            ) {
+            if (input.returnDirectly !== undefined && typeof input.returnDirectly !== "boolean") {
                 return inputError("returnDirectly 必须是布尔值");
             }
             if (!ctx.artifactStore) {
@@ -537,10 +503,7 @@ export function createGenerateReportTool(
             if (!input.structuredInterviewArtifactId?.trim()) {
                 return inputError("structuredInterviewArtifactId 必填");
             }
-            if (
-                !Array.isArray(input.analysisArtifactIds)
-                || input.analysisArtifactIds.some((id) => !id?.trim())
-            ) {
+            if (!Array.isArray(input.analysisArtifactIds) || input.analysisArtifactIds.some((id) => !id?.trim())) {
                 return inputError("analysisArtifactIds 必须是 Artifact ID 数组");
             }
             if (new Set(input.analysisArtifactIds).size !== input.analysisArtifactIds.length) {
@@ -554,17 +517,18 @@ export function createGenerateReportTool(
                     "structured_interview",
                     "generate_report",
                 );
-                const analysisArtifacts = input.analysisArtifactIds.map((artifactId) => (
+                const analysisArtifacts = input.analysisArtifactIds.map((artifactId) =>
                     ctx.artifactStore!.get<QuestionAnalysisArtifact>(
                         artifactId,
                         "question_analysis",
                         "generate_report",
+                    ),
+                );
+                if (
+                    analysisArtifacts.some(
+                        (artifact) => artifact.structuredInterviewArtifactId !== input.structuredInterviewArtifactId,
                     )
-                ));
-                if (analysisArtifacts.some((artifact) => (
-                    artifact.structuredInterviewArtifactId
-                    !== input.structuredInterviewArtifactId
-                ))) {
+                ) {
                     throw new Error("逐题分析 Artifact 来自其他结构化面试");
                 }
                 resolvedInput = {
@@ -574,9 +538,7 @@ export function createGenerateReportTool(
                     ...(input.metadata ? { metadata: input.metadata } : {}),
                 };
             } catch (error) {
-                return inputError(
-                    error instanceof Error ? error.message : "报告 Artifact 读取失败",
-                );
+                return inputError(error instanceof Error ? error.message : "报告 Artifact 读取失败");
             }
 
             try {
@@ -598,8 +560,8 @@ export function createGenerateReportTool(
                     .map((question) => question.id),
             );
             const completedScoredAnalyses = resolvedInput.analyses.filter(
-                (analysis): analysis is CompletedQuestionAnalysis => analysis.status === "completed"
-                    && scoredQuestionIds.has(analysis.questionId),
+                (analysis): analysis is CompletedQuestionAnalysis =>
+                    analysis.status === "completed" && scoredQuestionIds.has(analysis.questionId),
             );
             let score: InterviewReport["score"];
             if (!completedScoredAnalyses.length) {
@@ -630,29 +592,22 @@ export function createGenerateReportTool(
                 }
             }
 
-            const pendingClarifications = mergeClarifications([
-                // ...input.projectFactSets.flatMap((set) => set.clarificationCandidates),
-                ...resolvedInput.analyses.flatMap((analysis) => (
-                    analysis.status === "completed" ? analysis.clarificationCandidates : []
-                )),
-            ], resolvedInput.structuredInterview.questions.map((question) => question.id));
-            if (
-                resolvedInput.stage === "final"
-                && pendingClarifications.some((item) => item.impact === "high")
-            ) {
+            const pendingClarifications = mergeClarifications(
+                [
+                    // ...input.projectFactSets.flatMap((set) => set.clarificationCandidates),
+                    ...resolvedInput.analyses.flatMap((analysis) =>
+                        analysis.status === "completed" ? analysis.clarificationCandidates : [],
+                    ),
+                ],
+                resolvedInput.structuredInterview.questions.map((question) => question.id),
+            );
+            if (resolvedInput.stage === "final" && pendingClarifications.some((item) => item.impact === "high")) {
                 return inputError("仍有高影响待确认项，不能生成最终报告");
             }
 
-            const questions = createQuestionItems(
-                resolvedInput.structuredInterview,
-                resolvedInput.analyses,
-            );
-            let summaryStatus: InterviewReport["summaryStatus"] = score.totalScore === null
-                ? "completed"
-                : "failed";
-            let levelSummary = score.totalScore === null
-                ? "无可评分数据，无法生成整体水平判断。"
-                : "";
+            const questions = createQuestionItems(resolvedInput.structuredInterview, resolvedInput.analyses);
+            let summaryStatus: InterviewReport["summaryStatus"] = score.totalScore === null ? "completed" : "failed";
+            let levelSummary = score.totalScore === null ? "无可评分数据，无法生成整体水平判断。" : "";
             let strengths: ReportReferenceItem[] = [];
             let coreIssues: ReportReferenceItem[] = [];
             let priorityImprovements: ReportReferenceItem[] = [];
@@ -681,11 +636,10 @@ export function createGenerateReportTool(
                     const knownQuestionIds = new Set(
                         resolvedInput.structuredInterview.questions.map((question) => question.id),
                     );
-                    validateSummaryEvidence([
-                        ...summary.strengths,
-                        ...summary.coreIssues,
-                        ...summary.priorityImprovements,
-                    ], knownQuestionIds);
+                    validateSummaryEvidence(
+                        [...summary.strengths, ...summary.coreIssues, ...summary.priorityImprovements],
+                        knownQuestionIds,
+                    );
                     summaryStatus = "completed";
                     levelSummary = summary.levelSummary;
                     strengths = summary.strengths;
@@ -701,7 +655,6 @@ export function createGenerateReportTool(
                     // 汇总是可降级步骤；确定性分数和逐题分析保持可用。
                 }
             }
-
 
             /* const knownQuestionIds = new Set(
                 input.structuredInterview.questions.map((question) => question.id),
@@ -748,11 +701,12 @@ export function createGenerateReportTool(
 
             const report: InterviewReport = {
                 stage: resolvedInput.stage,
-                notice: score.totalScore === null
-                    ? "无可评分数据：所有计分题均分析失败，或本次面试仅包含不计分题；总分不可评价。"
-                    : resolvedInput.stage === "provisional"
-                        ? "当前为暂定总分，补充待确认事实后可能调整。"
-                        : null,
+                notice:
+                    score.totalScore === null
+                        ? "无可评分数据：所有计分题均分析失败，或本次面试仅包含不计分题；总分不可评价。"
+                        : resolvedInput.stage === "provisional"
+                          ? "当前为暂定总分，补充待确认事实后可能调整。"
+                          : null,
                 metadata: {
                     company: resolvedInput.metadata?.company?.trim() || null,
                     position: resolvedInput.metadata?.position?.trim() || null,

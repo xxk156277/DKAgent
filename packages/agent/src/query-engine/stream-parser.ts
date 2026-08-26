@@ -1,10 +1,4 @@
-import type {
-    ModelResponse,
-    StopReason,
-    StreamEvent,
-    TokenUsage,
-    ToolCall,
-} from "./provider.js";
+import type { ModelResponse, StopReason, StreamEvent, TokenUsage, ToolCall } from "./provider.js";
 
 interface ToolCallState {
     id: string;
@@ -33,12 +27,9 @@ export class ToolInputParseError extends Error {
         /** 模型停止原因，用于判断是否发生截断。 */
         public readonly stopReason: StopReason,
     ) {
-        const reason = stopReason === "max_tokens"
-            ? "Tool 参数可能因达到 Token 上限而截断"
-            : "Tool 参数不是有效 JSON 对象";
-        super(
-            `${reason}：${toolName} (${toolCallId})，参数长度 ${argumentsLength}`,
-        );
+        const reason =
+            stopReason === "max_tokens" ? "Tool 参数可能因达到 Token 上限而截断" : "Tool 参数不是有效 JSON 对象";
+        super(`${reason}：${toolName} (${toolCallId})，参数长度 ${argumentsLength}`);
         this.name = "ToolInputParseError";
     }
 }
@@ -51,9 +42,7 @@ export async function parseModelStream(
     onTextDelta?: (text: string) => void,
 ): Promise<ModelResponse> {
     let textContent = "";
-    let messageEnd:
-        | { usage: TokenUsage; stopReason: StopReason }
-        | undefined;
+    let messageEnd: { usage: TokenUsage; stopReason: StopReason } | undefined;
     const toolStates = new Map<number, ToolCallState>();
 
     for await (const event of events) {
@@ -65,14 +54,10 @@ export async function parseModelStream(
 
             case "tool_call_start": {
                 if (toolStates.has(event.index)) {
-                    throw new StreamProtocolError(
-                        `Tool Call index ${event.index} 重复 Start`,
-                    );
+                    throw new StreamProtocolError(`Tool Call index ${event.index} 重复 Start`);
                 }
                 if (!event.id || !event.name) {
-                    throw new StreamProtocolError(
-                        `Tool Call index ${event.index} 缺少 ID 或名称`,
-                    );
+                    throw new StreamProtocolError(`Tool Call index ${event.index} 缺少 ID 或名称`);
                 }
                 toolStates.set(event.index, {
                     id: event.id,
@@ -86,14 +71,10 @@ export async function parseModelStream(
             case "tool_call_delta": {
                 const state = toolStates.get(event.index);
                 if (!state) {
-                    throw new StreamProtocolError(
-                        `Tool Call index ${event.index} 的 Delta 没有 Start`,
-                    );
+                    throw new StreamProtocolError(`Tool Call index ${event.index} 的 Delta 没有 Start`);
                 }
                 if (state.completed) {
-                    throw new StreamProtocolError(
-                        `Tool Call index ${event.index} 已结束但仍收到 Delta`,
-                    );
+                    throw new StreamProtocolError(`Tool Call index ${event.index} 已结束但仍收到 Delta`);
                 }
                 state.argumentsText += event.argumentsDelta;
                 break;
@@ -102,14 +83,10 @@ export async function parseModelStream(
             case "tool_call_end": {
                 const state = toolStates.get(event.index);
                 if (!state) {
-                    throw new StreamProtocolError(
-                        `Tool Call index ${event.index} 的 End 没有 Start`,
-                    );
+                    throw new StreamProtocolError(`Tool Call index ${event.index} 的 End 没有 Start`);
                 }
                 if (state.completed) {
-                    throw new StreamProtocolError(
-                        `Tool Call index ${event.index} 重复 End`,
-                    );
+                    throw new StreamProtocolError(`Tool Call index ${event.index} 重复 End`);
                 }
                 state.completed = true;
                 break;
@@ -132,13 +109,9 @@ export async function parseModelStream(
     }
 
     const toolCalls: ToolCall[] = [];
-    for (const [index, state] of [...toolStates.entries()].sort(
-        ([left], [right]) => left - right,
-    )) {
+    for (const [index, state] of [...toolStates.entries()].sort(([left], [right]) => left - right)) {
         if (!state.completed) {
-            throw new StreamProtocolError(
-                `Tool Call index ${index} 缺少 End`,
-            );
+            throw new StreamProtocolError(`Tool Call index ${index} 缺少 End`);
         }
 
         toolCalls.push({
@@ -166,10 +139,7 @@ export async function parseModelStream(
     };
 }
 
-function parseToolInput(
-    state: ToolCallState,
-    stopReason: StopReason,
-): Record<string, unknown> {
+function parseToolInput(state: ToolCallState, stopReason: StopReason): Record<string, unknown> {
     try {
         const input = JSON.parse(state.argumentsText) as unknown;
         if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -177,11 +147,6 @@ function parseToolInput(
         }
         return input as Record<string, unknown>;
     } catch {
-        throw new ToolInputParseError(
-            state.id,
-            state.name,
-            state.argumentsText.length,
-            stopReason,
-        );
+        throw new ToolInputParseError(state.id, state.name, state.argumentsText.length, stopReason);
     }
 }

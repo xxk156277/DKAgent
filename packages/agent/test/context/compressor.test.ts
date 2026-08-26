@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Compressor } from "../../src/context/compressor.js";
 import type { HistorySummaryEngine } from "../../src/context/types.js";
-import type {
-    ModelRequest,
-    ModelResponse,
-} from "../../src/query-engine/provider.js";
+import type { ModelRequest, ModelResponse } from "../../src/query-engine/provider.js";
 
 /** 测试用摘要引擎：记录请求并返回固定摘要。 */
 class FakeSummaryEngine implements HistorySummaryEngine {
@@ -56,11 +53,13 @@ test("Tool JSON 压缩时保留字段并只保留数组前三项", () => {
 
 test("历史序列化会截断摘要请求中的 Tool Result 但不修改原消息", () => {
     const compressor = new Compressor(new FakeSummaryEngine());
-    const messages = [{
-        role: "tool" as const,
-        toolCallId: "call-1",
-        content: "x".repeat(20),
-    }];
+    const messages = [
+        {
+            role: "tool" as const,
+            toolCallId: "call-1",
+            content: "x".repeat(20),
+        },
+    ];
     const original = structuredClone(messages);
 
     const serialized = compressor.serializeHistory(messages, 5);

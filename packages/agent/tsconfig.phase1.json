@@ -1,23 +1,23 @@
 {
-  "extends": "./tsconfig.json",
-  "include": [
-    "src/config.ts",
-    "src/index.ts",
-    "src/agent/loop.ts",
-    "src/agent/dispatcher.ts",
-    "src/agent/prompt.ts",
-    "src/memory/types.ts",
-    "src/cli/safe-prompt.ts",
-    "src/query-engine/index.ts",
-    "src/query-engine/provider.ts",
-    "src/query-engine/stream-parser.ts",
-    "src/query-engine/query-engine.ts",
-    "src/query-engine/providers/openai-compatible.ts",
-    "src/tools/types.ts",
-    "src/tools/registry.ts",
-    "src/tools/index.ts",
-    "src/tools/tool-item/split.ts",
-    "test/phase1/**/*.test.ts",
-    "test/query-engine/**/*.test.ts"
-  ]
+    "extends": "./tsconfig.json",
+    "include": [
+        "src/config.ts",
+        "src/index.ts",
+        "src/agent/loop.ts",
+        "src/agent/dispatcher.ts",
+        "src/agent/prompt.ts",
+        "src/memory/types.ts",
+        "src/cli/safe-prompt.ts",
+        "src/query-engine/index.ts",
+        "src/query-engine/provider.ts",
+        "src/query-engine/stream-parser.ts",
+        "src/query-engine/query-engine.ts",
+        "src/query-engine/providers/openai-compatible.ts",
+        "src/tools/types.ts",
+        "src/tools/registry.ts",
+        "src/tools/index.ts",
+        "src/tools/tool-item/split.ts",
+        "test/phase1/**/*.test.ts",
+        "test/query-engine/**/*.test.ts"
+    ]
 }

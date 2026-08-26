@@ -1,12 +1,12 @@
 {
-  "name": "@dkagent/trace",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "scripts": {
-    "test": "cd ../.. && tsx --test packages/trace/test/*.test.ts",
-    "typecheck": "tsc --noEmit"
-  }
+    "name": "@dkagent/trace",
+    "private": true,
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "scripts": {
+        "test": "cd ../.. && tsx --test packages/trace/test/*.test.ts",
+        "typecheck": "tsc --noEmit"
+    }
 }

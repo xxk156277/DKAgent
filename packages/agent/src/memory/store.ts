@@ -68,7 +68,9 @@ export class SqliteMemoryStore implements MemoryStore {
         }
         const candidate = validateMemoryCandidate(input);
         const write = this.database.transaction(() => {
-            const existing = this.database.prepare(`
+            const existing = this.database
+                .prepare(
+                    `
                 SELECT
                     id,
                     type,
@@ -80,7 +82,9 @@ export class SqliteMemoryStore implements MemoryStore {
                     updated_at
                 FROM memories
                 WHERE type = ? AND key = ?
-            `).get(candidate.type, candidate.key) as MemoryRow | undefined;
+            `,
+                )
+                .get(candidate.type, candidate.key) as MemoryRow | undefined;
 
             if (existing?.source === "explicit" && input.source === "automatic") {
                 return this.toMemoryEntry(existing);
@@ -98,7 +102,9 @@ export class SqliteMemoryStore implements MemoryStore {
                     createdAt: timestamp,
                     updatedAt: timestamp,
                 };
-                this.database.prepare(`
+                this.database
+                    .prepare(
+                        `
                     INSERT INTO memories (
                         id,
                         type,
@@ -109,20 +115,24 @@ export class SqliteMemoryStore implements MemoryStore {
                         created_at,
                         updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                `).run(
-                    memory.id,
-                    memory.type,
-                    memory.key,
-                    memory.content,
-                    memory.source,
-                    memory.sourceSessionId,
-                    memory.createdAt,
-                    memory.updatedAt,
-                );
+                `,
+                    )
+                    .run(
+                        memory.id,
+                        memory.type,
+                        memory.key,
+                        memory.content,
+                        memory.source,
+                        memory.sourceSessionId,
+                        memory.createdAt,
+                        memory.updatedAt,
+                    );
                 return memory;
             }
 
-            this.database.prepare(`
+            this.database
+                .prepare(
+                    `
                 UPDATE memories
                 SET
                     content = ?,
@@ -130,13 +140,9 @@ export class SqliteMemoryStore implements MemoryStore {
                     source_session_id = ?,
                     updated_at = ?
                 WHERE id = ?
-            `).run(
-                candidate.content,
-                input.source,
-                input.sourceSessionId,
-                timestamp,
-                existing.id,
-            );
+            `,
+                )
+                .run(candidate.content, input.source, input.sourceSessionId, timestamp, existing.id);
 
             return {
                 id: existing.id,
@@ -161,7 +167,9 @@ export class SqliteMemoryStore implements MemoryStore {
         }
 
         const rows = options.type
-            ? this.database.prepare(`
+            ? (this.database
+                  .prepare(
+                      `
                 SELECT
                     id,
                     type,
@@ -175,8 +183,12 @@ export class SqliteMemoryStore implements MemoryStore {
                 WHERE type = ?
                 ORDER BY updated_at DESC, rowid DESC
                 LIMIT ?
-            `).all(options.type, limit) as MemoryRow[]
-            : this.database.prepare(`
+            `,
+                  )
+                  .all(options.type, limit) as MemoryRow[])
+            : (this.database
+                  .prepare(
+                      `
                 SELECT
                     id,
                     type,
@@ -189,17 +201,23 @@ export class SqliteMemoryStore implements MemoryStore {
                 FROM memories
                 ORDER BY updated_at DESC, rowid DESC
                 LIMIT ?
-            `).all(limit) as MemoryRow[];
+            `,
+                  )
+                  .all(limit) as MemoryRow[]);
 
         return rows.map((row) => this.toMemoryEntry(row));
     }
 
     /** 按 ID 删除记忆，不存在时返回 false。 */
     public delete(id: string): boolean {
-        const result = this.database.prepare(`
+        const result = this.database
+            .prepare(
+                `
             DELETE FROM memories
             WHERE id = ?
-        `).run(id);
+        `,
+            )
+            .run(id);
 
         return result.changes === 1;
     }

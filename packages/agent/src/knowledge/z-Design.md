@@ -21,7 +21,6 @@
     └── index.ts        # 对外导出
 ```
 
-
 Parser 是纯函数，不读文件、不连接数据库。Repository 不解析 Markdown。Build 只负责编排。
 
 ## Parser 规则
@@ -33,6 +32,7 @@ Parser 是纯函数，不读文件、不连接数据库。Repository 不解析 M
 - 不调用模型修复格式，保证构建可重复。
 
 举例：
+
 ```text
 ### Q：ReAct 和 Plan-and-Execute 怎么选？
 

@@ -8,11 +8,7 @@ import { AgentLoop } from "../../src/agent/loop.js";
 import { InMemoryArtifactStore } from "../../src/artifact/index.js";
 import type { QuestionAnalysisArtifact } from "../../src/interview/artifact-payloads.js";
 import type { ParsedTranscript, StructuredInterview } from "../../src/interview/types.js";
-import type {
-    LLMProvider,
-    StreamEvent,
-    StreamParams,
-} from "../../src/query-engine/provider.js";
+import type { LLMProvider, StreamEvent, StreamParams } from "../../src/query-engine/provider.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { createToolRegistry } from "../../src/tools/index.js";
 import type { ToolContext, ToolResult } from "../../src/tools/types.js";
@@ -22,7 +18,7 @@ class SingleToolCallProvider implements LLMProvider {
     public readonly name = "single-tool-call";
     public readonly requests: StreamParams[] = [];
 
-    public constructor(private readonly input: Record<string, unknown>) { }
+    public constructor(private readonly input: Record<string, unknown>) {}
 
     public async *stream(params: StreamParams): AsyncIterable<StreamEvent> {
         this.requests.push(params);
@@ -53,19 +49,9 @@ class SingleToolCallProvider implements LLMProvider {
     }
 }
 
-type StructuredFailureMode =
-    | "provider"
-    | "json"
-    | "zod"
-    | "evidence"
-    | "improvement"
-    | "clarification";
+type StructuredFailureMode = "provider" | "json" | "zod" | "evidence" | "improvement" | "clarification";
 
-function toolCallEvents(
-    id: string,
-    name: string,
-    input: Record<string, unknown>,
-): StreamEvent[] {
+function toolCallEvents(id: string, name: string, input: Record<string, unknown>): StreamEvent[] {
     return [
         { type: "tool_call_start", index: 0, id, name },
         {
@@ -90,11 +76,13 @@ function analysisFailureContent(mode: StructuredFailureMode, secret: string): st
     if (mode === "evidence") {
         return JSON.stringify({
             ...successfulAnalysisResponse,
-            issues: [{
-                ...successfulAnalysisResponse.issues[0],
-                id: secret,
-                evidenceTurnIds: [`${secret}-turnId`],
-            }],
+            issues: [
+                {
+                    ...successfulAnalysisResponse.issues[0],
+                    id: secret,
+                    evidenceTurnIds: [`${secret}-turnId`],
+                },
+            ],
             improvements: [{ issueId: secret, text: "补充实现证据" }],
         });
     }
@@ -107,12 +95,14 @@ function analysisFailureContent(mode: StructuredFailureMode, secret: string): st
     if (mode === "clarification") {
         return JSON.stringify({
             ...successfulAnalysisResponse,
-            clarificationCandidates: [{
-                factKey: secret,
-                question: "请补充证据",
-                affectedQuestionIds: [`${secret}-questionId`],
-                impact: "high",
-            }],
+            clarificationCandidates: [
+                {
+                    factKey: secret,
+                    question: "请补充证据",
+                    affectedQuestionIds: [`${secret}-questionId`],
+                    impact: "high",
+                },
+            ],
         });
     }
     return JSON.stringify(successfulAnalysisResponse);
@@ -127,7 +117,7 @@ class StructuredFailureProvider implements LLMProvider {
         private readonly mode: StructuredFailureMode,
         private readonly secret: string,
         private readonly structuredInterviewArtifactId: string,
-    ) { }
+    ) {}
 
     public async *stream(params: StreamParams): AsyncIterable<StreamEvent> {
         this.requests.push(params);
@@ -168,7 +158,6 @@ class StructuredFailureProvider implements LLMProvider {
     public async countTokens(): Promise<number> {
         return 0;
     }
-
 }
 
 class StructureTurnIdFailureProvider implements LLMProvider {
@@ -179,7 +168,7 @@ class StructureTurnIdFailureProvider implements LLMProvider {
     public constructor(
         private readonly transcriptArtifactId: string,
         private readonly secret: string,
-    ) { }
+    ) {}
 
     public async *stream(params: StreamParams): AsyncIterable<StreamEvent> {
         this.requests.push(params);
@@ -187,17 +176,23 @@ class StructureTurnIdFailureProvider implements LLMProvider {
             yield {
                 type: "text_delta",
                 content: JSON.stringify({
-                    clusters: [{
-                        title: "恶意问题簇",
-                        questions: [{
-                            promptSegments: [{
-                                turnId: this.secret,
-                                text: "请介绍你的低代码项目。",
-                            }],
-                            answerTurnIds: ["turn-0002"],
-                            questionType: "project",
-                        }],
-                    }],
+                    clusters: [
+                        {
+                            title: "恶意问题簇",
+                            questions: [
+                                {
+                                    promptSegments: [
+                                        {
+                                            turnId: this.secret,
+                                            text: "请介绍你的低代码项目。",
+                                        },
+                                    ],
+                                    answerTurnIds: ["turn-0002"],
+                                    questionType: "project",
+                                },
+                            ],
+                        },
+                    ],
                     nonQuestionTurnIds: [],
                 }),
             };
@@ -243,7 +238,7 @@ class SaveReportProvider implements LLMProvider {
         private readonly structuredInterviewArtifactId: string,
         private readonly analysisArtifactId: string,
         private readonly reportPath: string,
-    ) { }
+    ) {}
 
     public async *stream(params: StreamParams): AsyncIterable<StreamEvent> {
         this.requests.push(params);
@@ -283,7 +278,6 @@ class SaveReportProvider implements LLMProvider {
     public async countTokens(): Promise<number> {
         return 0;
     }
-
 }
 
 function latestToolResult(params: StreamParams): ToolResult {
@@ -327,24 +321,28 @@ function singleQuestionInterview(): StructuredInterview {
                 },
             ],
         },
-        clusters: [{
-            id: "cluster-0001",
-            title: "低代码项目",
-            questionIds: ["question-0001"],
-        }],
-        questions: [{
-            id: "question-0001",
-            clusterId: "cluster-0001",
-            promptTurnIds: ["turn-0001"],
-            promptSegments: [{ turnId: "turn-0001", text: "请介绍你的低代码项目。" }],
-            answerTurnIds: ["turn-0002"],
-            originalQuestion: "请介绍你的低代码项目。",
-            originalAnswer: sourceSentence,
-            questionType: "project",
-            scored: true,
-            sourceStart: 0,
-            sourceEnd: source.length,
-        }],
+        clusters: [
+            {
+                id: "cluster-0001",
+                title: "低代码项目",
+                questionIds: ["question-0001"],
+            },
+        ],
+        questions: [
+            {
+                id: "question-0001",
+                clusterId: "cluster-0001",
+                promptTurnIds: ["turn-0001"],
+                promptSegments: [{ turnId: "turn-0001", text: "请介绍你的低代码项目。" }],
+                answerTurnIds: ["turn-0002"],
+                originalQuestion: "请介绍你的低代码项目。",
+                originalAnswer: sourceSentence,
+                questionType: "project",
+                scored: true,
+                sourceStart: 0,
+                sourceEnd: source.length,
+            },
+        ],
         nonQuestionTurnIds: [],
     };
 }
@@ -353,37 +351,45 @@ const structureResponse = {
     clusters: [
         {
             title: "低代码项目",
-            questions: [{
-                promptSegments: [{ turnId: "turn-0001", text: "请介绍你的低代码项目。" }],
-                answerTurnIds: ["turn-0002"],
-                questionType: "project",
-            }],
+            questions: [
+                {
+                    promptSegments: [{ turnId: "turn-0001", text: "请介绍你的低代码项目。" }],
+                    answerTurnIds: ["turn-0002"],
+                    questionType: "project",
+                },
+            ],
         },
         {
             title: "DSL 选型",
-            questions: [{
-                promptSegments: [{ turnId: "turn-0003", text: "为什么选择 DSL？" }],
-                answerTurnIds: ["turn-0004"],
-                questionType: "project",
-            }],
+            questions: [
+                {
+                    promptSegments: [{ turnId: "turn-0003", text: "为什么选择 DSL？" }],
+                    answerTurnIds: ["turn-0004"],
+                    questionType: "project",
+                },
+            ],
         },
     ],
     nonQuestionTurnIds: [],
 };
 
 const successfulAnalysisResponse = {
-    strengths: [{
-        id: "strength-1",
-        text: "说明了个人职责和量化结果",
-        impact: "能够判断候选人的直接贡献",
-        evidenceTurnIds: ["turn-0002"],
-    }],
-    issues: [{
-        id: "issue-1",
-        text: "缺少实现细节",
-        impact: "难以判断方案深度",
-        evidenceTurnIds: ["turn-0002"],
-    }],
+    strengths: [
+        {
+            id: "strength-1",
+            text: "说明了个人职责和量化结果",
+            impact: "能够判断候选人的直接贡献",
+            evidenceTurnIds: ["turn-0002"],
+        },
+    ],
+    issues: [
+        {
+            id: "issue-1",
+            text: "缺少实现细节",
+            impact: "难以判断方案深度",
+            evidenceTurnIds: ["turn-0002"],
+        },
+    ],
     improvements: [{ issueId: "issue-1", text: "补充关键实现和约束" }],
     dimensions: {
         contentQuality: 80,
@@ -431,51 +437,52 @@ test("Tool Registry Artifact 引用链隐藏中间大对象并在单题模型失
             artifactStore: artifacts,
         };
 
-        const readResult = await registry.resolve("read_file").execute(
-            { path: "interview.md", storeAsArtifact: true },
-            context,
-        );
+        const readResult = await registry
+            .resolve("read_file")
+            .execute({ path: "interview.md", storeAsArtifact: true }, context);
         const readData = requireData<{ artifactId: string }>(readResult);
-        const parseResult = await registry.resolve("parse_transcript").execute(
-            { sourceArtifactId: readData.artifactId },
-            context,
-        );
+        const parseResult = await registry
+            .resolve("parse_transcript")
+            .execute({ sourceArtifactId: readData.artifactId }, context);
         const parseData = requireData<{ artifactId: string }>(parseResult);
-        const structureResult = await registry.resolve("structure_interview").execute(
-            { transcriptArtifactId: parseData.artifactId },
-            context,
-        );
-        const structureData = requireData<{ artifactId: string; questionIds: string[] }>(
-            structureResult,
-        );
+        const structureResult = await registry
+            .resolve("structure_interview")
+            .execute({ transcriptArtifactId: parseData.artifactId }, context);
+        const structureData = requireData<{ artifactId: string; questionIds: string[] }>(structureResult);
 
         const analyzeResults = [];
         for (const questionId of structureData.questionIds) {
-            analyzeResults.push(await registry.resolve("analyze_answer").execute({
-                structuredInterviewArtifactId: structureData.artifactId,
-                questionId,
-            }, context));
+            analyzeResults.push(
+                await registry.resolve("analyze_answer").execute(
+                    {
+                        structuredInterviewArtifactId: structureData.artifactId,
+                        questionId,
+                    },
+                    context,
+                ),
+            );
         }
-        const analyzeData = analyzeResults.map((result) => requireData<{
-            artifactId: string;
-            status: "completed" | "failed" | "not_scored";
-        }>(result));
+        const analyzeData = analyzeResults.map((result) =>
+            requireData<{
+                artifactId: string;
+                status: "completed" | "failed" | "not_scored";
+            }>(result),
+        );
         const failed = analyzeData.find((item) => item.status === "failed");
         assert.ok(failed);
         assert.equal(
-            artifacts.get<QuestionAnalysisArtifact>(
-                failed.artifactId,
-                "question_analysis",
-                "test",
-            ).analysis.status,
+            artifacts.get<QuestionAnalysisArtifact>(failed.artifactId, "question_analysis", "test").analysis.status,
             "failed",
         );
 
-        const reportResult = await registry.resolve("generate_report").execute({
-            structuredInterviewArtifactId: structureData.artifactId,
-            analysisArtifactIds: analyzeData.map((item) => item.artifactId),
-            stage: "provisional",
-        }, context);
+        const reportResult = await registry.resolve("generate_report").execute(
+            {
+                structuredInterviewArtifactId: structureData.artifactId,
+                analysisArtifactIds: analyzeData.map((item) => item.artifactId),
+                stage: "provisional",
+            },
+            context,
+        );
         const reportData = requireData<{
             report: { score: { coverage: { analyzed: number; expected: number } } };
             markdown: string;
@@ -491,9 +498,9 @@ test("Tool Registry Artifact 引用链隐藏中间大对象并在单题模型失
         assert.match(reportData.markdown, /面试分析报告/);
         assert.match(reportData.markdown, new RegExp(sourceSentence));
 
-        const artifactEvents = traceStore.list().filter((event) => (
-            event.name === "artifact.created" || event.name === "artifact.resolved"
-        ));
+        const artifactEvents = traceStore
+            .list()
+            .filter((event) => event.name === "artifact.created" || event.name === "artifact.resolved");
         assert.ok(artifactEvents.length > 0);
         assert.ok(artifactEvents.every((event) => event.module === "artifact"));
         const allowedTraceFields = new Set([
@@ -507,28 +514,28 @@ test("Tool Registry Artifact 引用链隐藏中间大对象并在单题模型失
             "omittedCharacterCount",
             "hit",
         ]);
-        assert.ok(artifactEvents.every((event) => (
-            typeof event.data === "object"
-            && event.data !== null
-            && Object.keys(event.data).every((key) => allowedTraceFields.has(key))
-        )));
+        assert.ok(
+            artifactEvents.every(
+                (event) =>
+                    typeof event.data === "object" &&
+                    event.data !== null &&
+                    Object.keys(event.data).every((key) => allowedTraceFields.has(key)),
+            ),
+        );
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes(sourceSentence)));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("originalAnswer")));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("strengths")));
         assert.ok(artifactEvents.every((event) => !JSON.stringify(event).includes("issues")));
 
-        const modelEvents = traceStore.list().filter((event) => (
-            event.name === "model.request" || event.name === "model.response"
-        ));
+        const modelEvents = traceStore
+            .list()
+            .filter((event) => event.name === "model.request" || event.name === "model.response");
         assert.ok(modelEvents.length > 0);
         assert.ok(modelEvents.every((event) => event.module === "skill"));
         const serializedModelEvents = JSON.stringify(modelEvents);
         assert.doesNotMatch(serializedModelEvents, new RegExp(sourceSentence));
         assert.doesNotMatch(serializedModelEvents, /originalAnswer|"strengths"|"issues"/);
-        assert.doesNotMatch(
-            serializedModelEvents,
-            /"systemPrompt":|"messages":|"content":/,
-        );
+        assert.doesNotMatch(serializedModelEvents, /"systemPrompt":|"messages":|"content":/);
         assert.match(serializedModelEvents, /systemPromptCharacterCount/);
         assert.match(serializedModelEvents, /userContentCharacterCount/);
         assert.match(serializedModelEvents, /resultType/);
@@ -564,26 +571,26 @@ test("AgentLoop 在失败题报告生成后直接返回 Tool 的完整 Markdown"
             ],
         },
         clusters: [{ id: "cluster-0001", title: "低代码项目", questionIds: ["question-0001"] }],
-        questions: [{
-            id: "question-0001",
-            clusterId: "cluster-0001",
-            promptTurnIds: ["turn-0001"],
-            promptSegments: [{ turnId: "turn-0001", text: "请介绍你的低代码项目。" }],
-            answerTurnIds: ["turn-0002"],
-            originalQuestion: "请介绍你的低代码项目。",
-            originalAnswer: sourceSentence,
-            questionType: "project",
-            scored: true,
-            sourceStart: 0,
-            sourceEnd: source.length,
-        }],
+        questions: [
+            {
+                id: "question-0001",
+                clusterId: "cluster-0001",
+                promptTurnIds: ["turn-0001"],
+                promptSegments: [{ turnId: "turn-0001", text: "请介绍你的低代码项目。" }],
+                answerTurnIds: ["turn-0002"],
+                originalQuestion: "请介绍你的低代码项目。",
+                originalAnswer: sourceSentence,
+                questionType: "project",
+                scored: true,
+                sourceStart: 0,
+                sourceEnd: source.length,
+            },
+        ],
         nonQuestionTurnIds: [],
     };
-    const structuredInterviewArtifactId = artifacts.put(
-        "structured_interview",
-        structuredInterview,
-        { producer: "test" },
-    );
+    const structuredInterviewArtifactId = artifacts.put("structured_interview", structuredInterview, {
+        producer: "test",
+    });
     const analysisArtifactId = artifacts.put(
         "question_analysis",
         {
@@ -650,16 +657,10 @@ test("Provider、JSON、Zod 和业务校验错误不进入 Tool、Trace、Failed
         const traceStore = new MemoryTraceStore();
         const tracer = new Tracer(traceStore);
         const artifacts = new InMemoryArtifactStore(tracer);
-        const structuredInterviewArtifactId = artifacts.put(
-            "structured_interview",
-            singleQuestionInterview(),
-            { producer: "test" },
-        );
-        const provider = new StructuredFailureProvider(
-            mode,
-            secret,
-            structuredInterviewArtifactId,
-        );
+        const structuredInterviewArtifactId = artifacts.put("structured_interview", singleQuestionInterview(), {
+            producer: "test",
+        });
+        const provider = new StructuredFailureProvider(mode, secret, structuredInterviewArtifactId);
         const agent = new AgentLoop({
             queryEngine: new QueryEngine(provider),
             toolRegistry: createToolRegistry({ model: "fake-model" }),
@@ -676,7 +677,8 @@ test("Provider、JSON、Zod 和业务校验错误不进入 Tool、Trace、Failed
         });
 
         const answer = await agent.run("分析安全错误");
-        const toolResults = agent.getMessages()
+        const toolResults = agent
+            .getMessages()
             .filter((message) => message.role === "tool")
             .map((message) => JSON.parse(message.content) as ToolResult);
         const analyzeResult = toolResults[0]!;
@@ -707,14 +709,10 @@ test("structure_interview 业务校验不泄露模型可控 turnId", async () =>
     const tracer = new Tracer(traceStore);
     const artifacts = new InMemoryArtifactStore(tracer);
     const interview = singleQuestionInterview();
-    const transcriptArtifactId = artifacts.put(
-        "parsed_transcript",
-        interview.transcript satisfies ParsedTranscript,
-        { producer: "test" },
-    );
-    const artifactCountBefore = traceStore.list().filter(
-        (event) => event.name === "artifact.created",
-    ).length;
+    const transcriptArtifactId = artifacts.put("parsed_transcript", interview.transcript satisfies ParsedTranscript, {
+        producer: "test",
+    });
+    const artifactCountBefore = traceStore.list().filter((event) => event.name === "artifact.created").length;
     const provider = new StructureTurnIdFailureProvider(transcriptArtifactId, secret);
     const agent = new AgentLoop({
         queryEngine: new QueryEngine(provider),
@@ -737,15 +735,8 @@ test("structure_interview 业务校验不泄露模型可控 turnId", async () =>
     ) as ToolResult;
     assert.equal(toolResult.success, false);
     assert.equal(toolResult.error?.message, "面试问题结构化失败");
-    assert.equal(
-        traceStore.list().filter((event) => event.name === "artifact.created").length,
-        artifactCountBefore,
-    );
-    for (const downstream of [
-        JSON.stringify(toolResult),
-        JSON.stringify(traceStore.list()),
-        answer,
-    ]) {
+    assert.equal(traceStore.list().filter((event) => event.name === "artifact.created").length, artifactCountBefore);
+    for (const downstream of [JSON.stringify(toolResult), JSON.stringify(traceStore.list()), answer]) {
         assert.doesNotMatch(downstream, new RegExp(secret));
     }
 });
@@ -754,11 +745,9 @@ test("AgentLoop 同 Turn 在 generate_report(false) 后将完整报告写入新�
     const directory = await mkdtemp(join(tmpdir(), "dkagent-save-report-"));
     try {
         const artifacts = new InMemoryArtifactStore();
-        const structuredInterviewArtifactId = artifacts.put(
-            "structured_interview",
-            singleQuestionInterview(),
-            { producer: "test" },
-        );
+        const structuredInterviewArtifactId = artifacts.put("structured_interview", singleQuestionInterview(), {
+            producer: "test",
+        });
         const analysisArtifactId = artifacts.put(
             "question_analysis",
             {
@@ -772,11 +761,7 @@ test("AgentLoop 同 Turn 在 generate_report(false) 后将完整报告写入新�
             } satisfies QuestionAnalysisArtifact,
             { producer: "test" },
         );
-        const provider = new SaveReportProvider(
-            structuredInterviewArtifactId,
-            analysisArtifactId,
-            "saved-report.md",
-        );
+        const provider = new SaveReportProvider(structuredInterviewArtifactId, analysisArtifactId, "saved-report.md");
         const agent = new AgentLoop({
             queryEngine: new QueryEngine(provider),
             toolRegistry: createToolRegistry({ cwd: directory, model: "fake-model" }),
@@ -798,14 +783,10 @@ test("AgentLoop 同 Turn 在 generate_report(false) 后将完整报告写入新�
         assert.match(saved, /面试分析报告/);
         assert.match(saved, new RegExp(sourceSentence));
         assert.equal(provider.requests.length, 3);
-        assert.deepEqual(agent.getMessages().map((message) => message.role), [
-            "user",
-            "assistant",
-            "tool",
-            "assistant",
-            "tool",
-            "assistant",
-        ]);
+        assert.deepEqual(
+            agent.getMessages().map((message) => message.role),
+            ["user", "assistant", "tool", "assistant", "tool", "assistant"],
+        );
     } finally {
         await rm(directory, { recursive: true, force: true });
     }

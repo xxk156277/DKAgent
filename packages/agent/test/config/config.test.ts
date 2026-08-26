@@ -7,10 +7,7 @@ test("未配置 Provider 时默认加载千问配置档", () => {
 
     assert.equal(config.apiKey, "qwen-key");
     assert.equal(config.model, "qwen3.7-flash");
-    assert.equal(
-        config.baseURL,
-        "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    );
+    assert.equal(config.baseURL, "https://dashscope.aliyuncs.com/compatible-mode/v1");
     assert.equal(config.summaryModel, "qwen3.7-flash");
 });
 
@@ -65,26 +62,21 @@ test("未声明 Provider 的旧 LLM 配置保持原行为", () => {
 });
 
 test("拒绝未知 Provider", () => {
-    assert.throws(
-        () => loadConfig({ LLM_PROVIDER: "unknown" }),
-        /LLM_PROVIDER 必须是 qwen 或 deepseek/,
-    );
+    assert.throws(() => loadConfig({ LLM_PROVIDER: "unknown" }), /LLM_PROVIDER 必须是 qwen 或 deepseek/);
 });
 
 test("缺少当前千问配置档的 API Key 时明确失败", () => {
-    assert.throws(
-        () => loadConfig({ LLM_PROVIDER: "qwen" }),
-        /缺少环境变量 QWEN_API_KEY/,
-    );
+    assert.throws(() => loadConfig({ LLM_PROVIDER: "qwen" }), /缺少环境变量 QWEN_API_KEY/);
 });
 
 test("继续校验最大输出 Token 必须小于上下文窗口", () => {
     assert.throws(
-        () => loadConfig({
-            QWEN_API_KEY: "qwen-key",
-            LLM_CONTEXT_WINDOW_TOKENS: "100",
-            LLM_MAX_OUTPUT_TOKENS: "100",
-        }),
+        () =>
+            loadConfig({
+                QWEN_API_KEY: "qwen-key",
+                LLM_CONTEXT_WINDOW_TOKENS: "100",
+                LLM_MAX_OUTPUT_TOKENS: "100",
+            }),
         /LLM_MAX_OUTPUT_TOKENS 必须小于 LLM_CONTEXT_WINDOW_TOKENS/,
     );
 });

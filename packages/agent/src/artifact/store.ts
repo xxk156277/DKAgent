@@ -1,11 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Tracer } from "@dkagent/trace";
-import {
-    ArtifactAccessError,
-    type ArtifactKind,
-    type ArtifactMetadata,
-    type ArtifactStore,
-} from "./types.js";
+import { ArtifactAccessError, type ArtifactKind, type ArtifactMetadata, type ArtifactStore } from "./types.js";
 
 interface StoredArtifact {
     kind: ArtifactKind;

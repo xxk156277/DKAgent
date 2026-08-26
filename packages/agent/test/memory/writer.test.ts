@@ -2,16 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MemoryExtractor } from "../../src/memory/extractor.js";
 import { AutomaticMemoryWriter } from "../../src/memory/writer.js";
-import type {
-    MemoryEntry,
-    MemoryListOptions,
-    MemoryStore,
-    MemoryUpsertInput,
-} from "../../src/memory/types.js";
-import type {
-    ModelRequest,
-    ModelResponse,
-} from "../../src/query-engine/provider.js";
+import type { MemoryEntry, MemoryListOptions, MemoryStore, MemoryUpsertInput } from "../../src/memory/types.js";
+import type { ModelRequest, ModelResponse } from "../../src/query-engine/provider.js";
 import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 
 class FakeQueryEngine {
@@ -73,10 +65,7 @@ class TrackingMemoryStore implements MemoryStore {
     }
 }
 
-function toolResponse(
-    name: string,
-    input: Record<string, unknown>,
-): ModelResponse {
+function toolResponse(name: string, input: Record<string, unknown>): ModelResponse {
     return {
         type: "tool_use",
         toolCalls: [{ id: "call-1", name, input }],
@@ -103,16 +92,20 @@ test("Extractor 仅提供固定 Tool Schema，并且 text response 返回空候�
 
     assert.deepEqual(candidates, []);
     assert.equal(engine.requests.length, 1);
-    assert.deepEqual(engine.requests[0]?.tools?.map((tool) => tool.name), [
-        "submit_memory_candidates",
-    ]);
+    assert.deepEqual(
+        engine.requests[0]?.tools?.map((tool) => tool.name),
+        ["submit_memory_candidates"],
+    );
     assert.equal(engine.requests[0]?.maxTokens, 500);
     assert.equal(engine.requests[0]?.temperature, 0);
     assert.equal(engine.requests[0]?.messages.length, 1);
-    assert.equal(engine.requests[0]?.messages[0]?.content, JSON.stringify({
-        userInput: "今天帮我看一个 bug",
-        assistantAnswer: "好的",
-    }));
+    assert.equal(
+        engine.requests[0]?.messages[0]?.content,
+        JSON.stringify({
+            userInput: "今天帮我看一个 bug",
+            assistantAnswer: "好的",
+        }),
+    );
     assert.match(engine.requests[0]?.systemPrompt ?? "", /临时任务/);
     assert.match(engine.requests[0]?.systemPrompt ?? "", /凭据/);
     assert.match(engine.requests[0]?.systemPrompt ?? "", /不可信.*JSON/);
@@ -138,10 +131,13 @@ test("Extractor 把闭合标签和伪指令只作为 JSON 字段值传递", asyn
     await new MemoryExtractor(engine, "main-model").extract(input);
 
     const payload = engine.requests[0]?.messages[0]?.content;
-    assert.equal(payload, JSON.stringify({
-        userInput: input.userInput,
-        assistantAnswer: input.assistantAnswer,
-    }));
+    assert.equal(
+        payload,
+        JSON.stringify({
+            userInput: input.userInput,
+            assistantAnswer: input.assistantAnswer,
+        }),
+    );
     assert.deepEqual(JSON.parse(payload ?? ""), {
         userInput: input.userInput,
         assistantAnswer: input.assistantAnswer,
@@ -158,19 +154,12 @@ test("Extractor 将模型错误替换为固定安全错误后再写入 Trace", a
     const candidateContent = "候选正文不得出现在模型错误 Trace";
     const traceStore = new MemoryTraceStore();
     const extractor = new MemoryExtractor(
-        new ThrowingQueryEngine(new Error([
-            input.userInput,
-            input.assistantAnswer,
-            candidateContent,
-        ].join("; "))),
+        new ThrowingQueryEngine(new Error([input.userInput, input.assistantAnswer, candidateContent].join("; "))),
         "main-model",
         new Tracer(traceStore),
     );
 
-    await assert.rejects(
-        extractor.extract(input),
-        /Memory extraction model request failed/,
-    );
+    await assert.rejects(extractor.extract(input), /Memory extraction model request failed/);
 
     const events = traceStore.list();
     assert.deepEqual(
@@ -189,7 +178,11 @@ test("Extractor 只解析目标 Tool，并过滤非法、敏感、重复候选�
     const engine = new FakeQueryEngine({
         type: "tool_use",
         toolCalls: [
-            { id: "other", name: "other_tool", input: { memories: [{ type: "profile", key: "ignored", content: "忽略" }] } },
+            {
+                id: "other",
+                name: "other_tool",
+                input: { memories: [{ type: "profile", key: "ignored", content: "忽略" }] },
+            },
             {
                 id: "target",
                 name: "submit_memory_candidates",
@@ -211,11 +204,7 @@ test("Extractor 只解析目标 Tool，并过滤非法、敏感、重复候选�
     });
 
     const traceStore = new MemoryTraceStore();
-    const candidates = await new MemoryExtractor(
-        engine,
-        "main-model",
-        new Tracer(traceStore),
-    ).extract({
+    const candidates = await new MemoryExtractor(engine, "main-model", new Tracer(traceStore)).extract({
         userInput: "以后回答先讲架构",
         assistantAnswer: "好的",
         sessionId: "session-1",
@@ -226,9 +215,9 @@ test("Extractor 只解析目标 Tool，并过滤非法、敏感、重复候选�
         { type: "decision", key: "memory_v1", content: "采用 SQLite" },
         { type: "profile", key: "target_role", content: "前端 Agent 工程师" },
     ]);
-    const responseData = traceStore.list().find((event) => (
-        event.name === "model.response"
-    ))?.data as { toolCalls: unknown[] };
+    const responseData = traceStore.list().find((event) => event.name === "model.response")?.data as {
+        toolCalls: unknown[];
+    };
     assert.deepEqual(responseData.toolCalls[0], {
         id: "other",
         name: "other_tool",
@@ -238,10 +227,7 @@ test("Extractor 只解析目标 Tool，并过滤非法、敏感、重复候选�
 });
 
 test("Extractor 忽略没有 memories 数组的目标 Tool", async () => {
-    const engine = new FakeQueryEngine(toolResponse(
-        "submit_memory_candidates",
-        { memories: "不是数组" },
-    ));
+    const engine = new FakeQueryEngine(toolResponse("submit_memory_candidates", { memories: "不是数组" }));
 
     const candidates = await new MemoryExtractor(engine, "main-model").extract({
         userInput: "你好",
@@ -253,17 +239,18 @@ test("Extractor 忽略没有 memories 数组的目标 Tool", async () => {
 });
 
 test("Extractor 拒绝含额外字段的候选对象", async () => {
-    const engine = new FakeQueryEngine(toolResponse(
-        "submit_memory_candidates",
-        {
-            memories: [{
-                type: "preference",
-                key: "answer_style",
-                content: "回答时先讲顶层架构",
-                extra: true,
-            }],
-        },
-    ));
+    const engine = new FakeQueryEngine(
+        toolResponse("submit_memory_candidates", {
+            memories: [
+                {
+                    type: "preference",
+                    key: "answer_style",
+                    content: "回答时先讲顶层架构",
+                    extra: true,
+                },
+            ],
+        }),
+    );
 
     const candidates = await new MemoryExtractor(engine, "main-model").extract({
         userInput: "以后回答先讲架构",
@@ -279,9 +266,8 @@ test("Extractor Trace 只保留合法候选 type/key，不序列化畸形身份�
     const leakedKey = "畸形 key 原文";
     const leakedContent = "畸形候选正文";
     const traceStore = new MemoryTraceStore();
-    const engine = new FakeQueryEngine(toolResponse(
-        "submit_memory_candidates",
-        {
+    const engine = new FakeQueryEngine(
+        toolResponse("submit_memory_candidates", {
             memories: [
                 {
                     type: { nested: leakedType },
@@ -294,25 +280,17 @@ test("Extractor Trace 只保留合法候选 type/key，不序列化畸形身份�
                     content: "回答时先讲结论",
                 },
             ],
-        },
-    ));
+        }),
+    );
 
-    const candidates = await new MemoryExtractor(
-        engine,
-        "main-model",
-        new Tracer(traceStore),
-    ).extract({
+    const candidates = await new MemoryExtractor(engine, "main-model", new Tracer(traceStore)).extract({
         userInput: "提取候选",
         assistantAnswer: "好的",
         sessionId: "session-1",
     });
 
-    assert.deepEqual(candidates, [
-        { type: "preference", key: "answer_style", content: "回答时先讲结论" },
-    ]);
-    const responseData = traceStore.list().find((event) => (
-        event.name === "model.response"
-    ))?.data as {
+    assert.deepEqual(candidates, [{ type: "preference", key: "answer_style", content: "回答时先讲结论" }]);
+    const responseData = traceStore.list().find((event) => event.name === "model.response")?.data as {
         toolCalls: Array<{ candidates: Array<Record<string, unknown>> }>;
     };
     assert.deepEqual(responseData.toolCalls[0]?.candidates, [
@@ -331,17 +309,16 @@ test("Extractor Trace 只保留合法候选 type/key，不序列化畸形身份�
 
 test("Extractor 以脱敏嵌套 Span 记录模型提取，并统计其余有效候选为拒绝", async () => {
     const traceStore = new MemoryTraceStore();
-    const engine = new FakeQueryEngine(toolResponse(
-        "submit_memory_candidates",
-        {
+    const engine = new FakeQueryEngine(
+        toolResponse("submit_memory_candidates", {
             memories: [
                 { type: "profile", key: "target_role", content: "前端 Agent 工程师" },
                 { type: "preference", key: "answer_style", content: "回答时先讲顶层架构" },
                 { type: "decision", key: "memory_v1", content: "采用 SQLite" },
                 { type: "profile", key: "location", content: "上海" },
             ],
-        },
-    ));
+        }),
+    );
     const extractor = new MemoryExtractor(engine, "main-model", new Tracer(traceStore));
 
     const candidates = await extractor.extract({
@@ -356,7 +333,10 @@ test("Extractor 以脱敏嵌套 Span 记录模型提取，并统计其余有效�
     const modelRequestEvents = events.filter((event) => event.name === "model.request");
     const modelResponseEvent = events.find((event) => event.name === "model.response");
 
-    assert.deepEqual(extractEvents.map((event) => event.phase), ["start", "end"]);
+    assert.deepEqual(
+        extractEvents.map((event) => event.phase),
+        ["start", "end"],
+    );
     assert.deepEqual(extractEvents.at(-1)?.data, {
         output: {
             candidateCount: 3,
@@ -368,9 +348,7 @@ test("Extractor 以脱敏嵌套 Span 记录模型提取，并统计其余有效�
             ],
         },
     });
-    assert.ok(modelRequestEvents.every((event) => (
-        event.module === "memory" && event.operation === "extract"
-    )));
+    assert.ok(modelRequestEvents.every((event) => event.module === "memory" && event.operation === "extract"));
     assert.equal(modelResponseEvent?.module, "memory");
     assert.equal(modelResponseEvent?.operation, "extract");
 
@@ -381,27 +359,19 @@ test("Extractor 以脱敏嵌套 Span 记录模型提取，并统计其余有效�
 });
 
 test("Writer 统计保存、忽略和失败，尝试全部候选后抛出聚合错误", async () => {
-    const engine = new FakeQueryEngine(toolResponse(
-        "submit_memory_candidates",
-        {
+    const engine = new FakeQueryEngine(
+        toolResponse("submit_memory_candidates", {
             memories: [
                 { type: "preference", key: "answer_style", content: "回答时先讲顶层架构" },
                 { type: "decision", key: "broken", content: "这条写入会失败" },
                 { type: "profile", key: "target_role", content: "不应覆盖显式记忆" },
             ],
-        },
-    ));
-    const store = new TrackingMemoryStore(
-        new Set(["broken"]),
-        new Set(["target_role"]),
+        }),
     );
+    const store = new TrackingMemoryStore(new Set(["broken"]), new Set(["target_role"]));
     const traceStore = new MemoryTraceStore();
     const tracer = new Tracer(traceStore);
-    const writer = new AutomaticMemoryWriter(
-        new MemoryExtractor(engine, "main-model", tracer),
-        store,
-        tracer,
-    );
+    const writer = new AutomaticMemoryWriter(new MemoryExtractor(engine, "main-model", tracer), store, tracer);
 
     await assert.rejects(
         writer.capture({
@@ -442,7 +412,10 @@ test("Writer 统计保存、忽略和失败，尝试全部候选后抛出聚合�
     ]);
     const writeEvents = traceStore.list().filter((event) => event.name === "memory.write");
     const extractEvents = traceStore.list().filter((event) => event.name === "memory.extract");
-    assert.deepEqual(extractEvents.map((event) => event.phase), ["start", "end"]);
+    assert.deepEqual(
+        extractEvents.map((event) => event.phase),
+        ["start", "end"],
+    );
     assert.equal(writeEvents.length, 1);
     assert.equal(writeEvents[0]?.module, "memory");
     assert.equal(writeEvents[0]?.operation, "persist");
@@ -457,8 +430,5 @@ test("Writer 统计保存、忽略和失败，尝试全部候选后抛出聚合�
             { type: "profile", key: "target_role" },
         ],
     });
-    assert.doesNotMatch(
-        JSON.stringify(traceStore.list()),
-        /顶层架构|不应覆盖显式记忆|这条写入会失败/,
-    );
+    assert.doesNotMatch(JSON.stringify(traceStore.list()), /顶层架构|不应覆盖显式记忆|这条写入会失败/);
 });

@@ -19,7 +19,7 @@ test("关闭数据库后仍能恢复最近 Session 的消息和 Context 状态",
     firstStore.appendMessage(session.id, {
         role: "tool",
         toolCallId: "call-1",
-        content: "{\"ok\":true}",
+        content: '{"ok":true}',
     });
     firstStore.saveContextState(session.id, {
         summary: "已经讨论第一轮问题",
@@ -37,7 +37,7 @@ test("关闭数据库后仍能恢复最近 Session 的消息和 Context 状态",
             role: "assistant",
             toolCalls: [{ id: "call-1", name: "demo", input: { value: 1 } }],
         },
-        { role: "tool", toolCallId: "call-1", content: "{\"ok\":true}" },
+        { role: "tool", toolCallId: "call-1", content: '{"ok":true}' },
     ]);
     assert.deepEqual(restored?.contextState, {
         summary: "已经讨论第一轮问题",
@@ -78,9 +78,7 @@ test("可以列出 Session 并按 ID 加载完整快照", () => {
         sessions.map((session) => session.id),
         [secondSession.id, firstSession.id],
     );
-    assert.deepEqual(loaded?.messages, [
-        { role: "user", content: "第一条 Session 的问题" },
-    ]);
+    assert.deepEqual(loaded?.messages, [{ role: "user", content: "第一条 Session 的问题" }]);
     assert.equal(loaded?.id, firstSession.id);
     assert.equal(store.load("missing-session"), null);
     store.close();

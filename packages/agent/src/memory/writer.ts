@@ -1,10 +1,5 @@
 import { Tracer } from "@dkagent/trace";
-import type {
-    MemoryCaptureInput,
-    MemoryExtractorPort,
-    MemoryStore,
-    MemoryWriter,
-} from "./types.js";
+import type { MemoryCaptureInput, MemoryExtractorPort, MemoryStore, MemoryWriter } from "./types.js";
 
 /** 将自动提取到的候选逐条保存；单条失败不影响后续保存。 */
 export class AutomaticMemoryWriter implements MemoryWriter {
@@ -50,10 +45,7 @@ export class AutomaticMemoryWriter implements MemoryWriter {
         );
 
         if (failures.length > 0) {
-            throw new AggregateError(
-                failures,
-                `Memory 自动写入失败：${failures.length} 条`,
-            );
+            throw new AggregateError(failures, `Memory 自动写入失败：${failures.length} 条`);
         }
     }
 }

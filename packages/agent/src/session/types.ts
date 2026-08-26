@@ -40,8 +40,5 @@ export interface SessionStore {
     /** 向指定 Session 追加一条完整消息。 */
     appendMessage(sessionId: string, message: AgentMessage): void;
     /** 覆盖保存指定 Session 的最新 Context 压缩状态。 */
-    saveContextState(
-        sessionId: string,
-        state: ConversationContextState,
-    ): void;
+    saveContextState(sessionId: string, state: ConversationContextState): void;
 }

@@ -1,8 +1,4 @@
-import type {
-    LLMProvider,
-    ModelRequest,
-    ModelResponse,
-} from "./provider.js";
+import type { LLMProvider, ModelRequest, ModelResponse } from "./provider.js";
 import { parseModelStream } from "./stream-parser.js";
 
 /**
@@ -11,16 +7,11 @@ import { parseModelStream } from "./stream-parser.js";
  * Context 选择和 Tool 执行分别属于 ContextManager 与 AgentLoop。
  */
 export class QueryEngine {
-    public constructor(
-        private readonly provider: LLMProvider,
-    ) {}
+    public constructor(private readonly provider: LLMProvider) {}
 
     /** 发送请求并把 Provider Stream 组装成统一响应。 */
     public query(request: ModelRequest): Promise<ModelResponse> {
-        return parseModelStream(
-            this.provider.stream(request),
-            request.onTextDelta,
-        );
+        return parseModelStream(this.provider.stream(request), request.onTextDelta);
     }
 }
 

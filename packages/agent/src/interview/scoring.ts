@@ -18,9 +18,7 @@ export const DIMENSION_WEIGHTS: Record<GlobalDimension, number> = {
 const DIMENSIONS = Object.keys(DIMENSION_WEIGHTS) as GlobalDimension[];
 
 function mean(values: number[]): number | null {
-    return values.length
-        ? values.reduce((total, value) => total + value, 0) / values.length
-        : null;
+    return values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
 }
 
 function round(value: number | null): number | null {
@@ -28,10 +26,7 @@ function round(value: number | null): number | null {
 }
 
 function roundDimensions(scores: DimensionScores): DimensionScores {
-    return Object.fromEntries(DIMENSIONS.map((dimension) => [
-        dimension,
-        round(scores[dimension]),
-    ])) as DimensionScores;
+    return Object.fromEntries(DIMENSIONS.map((dimension) => [dimension, round(scores[dimension])])) as DimensionScores;
 }
 
 export function calculateQuestionScore(scores: DimensionScores): number | null {
@@ -55,38 +50,42 @@ export function scoreInterview(input: {
     analyses: QuestionAnalysis[];
 }): InterviewScore {
     const scoredQuestionIds = new Set(
-        input.questions
-            .filter((question) => question.scored)
-            .map((question) => question.id),
+        input.questions.filter((question) => question.scored).map((question) => question.id),
     );
     const completed = input.analyses.filter(
-        (item): item is CompletedQuestionAnalysis => item.status === "completed"
-            && scoredQuestionIds.has(item.questionId),
+        (item): item is CompletedQuestionAnalysis =>
+            item.status === "completed" && scoredQuestionIds.has(item.questionId),
     );
-    const completedByQuestion = new Map(
-        completed.map((item) => [item.questionId, item]),
-    );
+    const completedByQuestion = new Map(completed.map((item) => [item.questionId, item]));
     const rawClusterScores = input.clusters.flatMap((cluster) => {
         const items = cluster.questionIds
             .map((questionId) => completedByQuestion.get(questionId))
             .filter((item) => item !== undefined);
         if (!items.length) return [];
-        const dimensions = Object.fromEntries(DIMENSIONS.map((dimension) => [
-            dimension,
-            mean(items.flatMap((item) => {
-                const value = item.dimensionScores[dimension];
-                return value === null ? [] : [value];
-            })),
-        ])) as DimensionScores;
+        const dimensions = Object.fromEntries(
+            DIMENSIONS.map((dimension) => [
+                dimension,
+                mean(
+                    items.flatMap((item) => {
+                        const value = item.dimensionScores[dimension];
+                        return value === null ? [] : [value];
+                    }),
+                ),
+            ]),
+        ) as DimensionScores;
         return [{ clusterId: cluster.id, dimensions }];
     });
-    const rawDimensions = Object.fromEntries(DIMENSIONS.map((dimension) => [
-        dimension,
-        mean(rawClusterScores.flatMap((cluster) => {
-            const value = cluster.dimensions[dimension];
-            return value === null ? [] : [value];
-        })),
-    ])) as DimensionScores;
+    const rawDimensions = Object.fromEntries(
+        DIMENSIONS.map((dimension) => [
+            dimension,
+            mean(
+                rawClusterScores.flatMap((cluster) => {
+                    const value = cluster.dimensions[dimension];
+                    return value === null ? [] : [value];
+                }),
+            ),
+        ]),
+    ) as DimensionScores;
     const totalScore = calculateQuestionScore(rawDimensions);
     if (totalScore === null) throw new Error("没有可评分维度");
     return {

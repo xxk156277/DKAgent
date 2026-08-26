@@ -1,4 +1,4 @@
 interface:
-  display_name: "DKAgent Project Manager"
-  short_description: "汇总 DKAgent 多 Worktree 进度、证据与待办优先级"
-  default_prompt: "Use $dkagent-project-manager to synchronize verified DKAgent progress and backlog priorities."
+    display_name: "DKAgent Project Manager"
+    short_description: "汇总 DKAgent 多 Worktree 进度、证据与待办优先级"
+    default_prompt: "Use $dkagent-project-manager to synchronize verified DKAgent progress and backlog priorities."

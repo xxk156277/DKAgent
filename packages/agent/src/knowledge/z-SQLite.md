@@ -38,13 +38,13 @@ Node.js
 
 可以粗略类比前端：
 
-| 前端概念 | SQLite |
-|---|---|
-| IndexedDB | 本地结构化存储 |
-| Object Store | Table |
-| 一条对象 | 一行数据 |
-| 索引 | Database Index |
-| 事务 | Transaction |
+| 前端概念     | SQLite         |
+| ------------ | -------------- |
+| IndexedDB    | 本地结构化存储 |
+| Object Store | Table          |
+| 一条对象     | 一行数据       |
+| 索引         | Database Index |
+| 事务         | Transaction    |
 
 但 SQLite 的查询、约束和事务能力更完整。
 
@@ -439,14 +439,14 @@ tokenize = 'trigram'
 
 ## 11. 与 FTS 同类型的检索能力
 
-| 类型 | 适合场景 | 示例 |
-|---|---|---|
-| B-Tree 索引 | ID、分类、时间、范围 | SQLite/MySQL/PostgreSQL |
-| 全文检索 | 关键词和文本相关性 | SQLite FTS5、MySQL FULLTEXT |
-| Trigram | 中文子串、拼写模糊匹配 | FTS5 trigram、PostgreSQL pg_trgm |
-| 倒排搜索引擎 | 大规模全文搜索 | Elasticsearch、OpenSearch |
-| 向量检索 | 语义相似度 | pgvector、Milvus、Qdrant |
-| 混合检索 | 关键词 + 语义 | FTS/BM25 + Embedding |
+| 类型         | 适合场景               | 示例                             |
+| ------------ | ---------------------- | -------------------------------- |
+| B-Tree 索引  | ID、分类、时间、范围   | SQLite/MySQL/PostgreSQL          |
+| 全文检索     | 关键词和文本相关性     | SQLite FTS5、MySQL FULLTEXT      |
+| Trigram      | 中文子串、拼写模糊匹配 | FTS5 trigram、PostgreSQL pg_trgm |
+| 倒排搜索引擎 | 大规模全文搜索         | Elasticsearch、OpenSearch        |
+| 向量检索     | 语义相似度             | pgvector、Milvus、Qdrant         |
+| 混合检索     | 关键词 + 语义          | FTS/BM25 + Embedding             |
 
 ### 全文检索
 

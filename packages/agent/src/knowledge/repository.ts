@@ -69,9 +69,7 @@ export class KnowledgeRepository {
             `);
 
             const currentIds = new Set(nextEntries.map((entry) => entry.id));
-            const storedIds = this.database
-                .prepare("SELECT id FROM knowledge")
-                .all() as Array<{ id: string }>;
+            const storedIds = this.database.prepare("SELECT id FROM knowledge").all() as Array<{ id: string }>;
 
             for (const entry of nextEntries) {
                 upsert.run({
@@ -94,17 +92,15 @@ export class KnowledgeRepository {
 
     /** 返回知识总数。 */
     public count(): number {
-        const row = this.database
-            .prepare("SELECT count(*) AS count FROM knowledge")
-            .get() as { count: number };
+        const row = this.database.prepare("SELECT count(*) AS count FROM knowledge").get() as { count: number };
         return row.count;
     }
 
     /** 返回去重后的知识维度数量。 */
     public countDimensions(): number {
-        const row = this.database
-            .prepare("SELECT count(DISTINCT dimension) AS count FROM knowledge")
-            .get() as { count: number };
+        const row = this.database.prepare("SELECT count(DISTINCT dimension) AS count FROM knowledge").get() as {
+            count: number;
+        };
         return row.count;
     }
 
@@ -112,9 +108,10 @@ export class KnowledgeRepository {
      * 找出当前模型下缺失、内容变化或由其他模型生成的向量。
      */
     public findPendingEmbeddings(model: string): PendingEmbedding[] {
-        const entries = this.database
-            .prepare("SELECT id, content FROM knowledge ORDER BY id")
-            .all() as Array<{ id: string; content: string }>;
+        const entries = this.database.prepare("SELECT id, content FROM knowledge ORDER BY id").all() as Array<{
+            id: string;
+            content: string;
+        }>;
         const states = this.database
             .prepare("SELECT knowledge_id, model, content_hash FROM embeddings")
             .all() as EmbeddingStateRow[];
@@ -163,11 +160,7 @@ export class KnowledgeRepository {
     }
 
     /** 使用 FTS5 BM25 排名召回关键词候选。 */
-    public searchFts(
-        query: string,
-        limit = 10,
-        dimension?: string,
-    ): KnowledgeSearchHit[] {
+    public searchFts(query: string, limit = 10, dimension?: string): KnowledgeSearchHit[] {
         const normalizedQuery = query.trim();
         if (!normalizedQuery || limit <= 0) {
             return [];
@@ -177,7 +170,8 @@ export class KnowledgeRepository {
         const matchQuery = `"${normalizedQuery.replaceAll('"', '""')}"`;
         const dimensionClause = dimension ? "AND k.dimension = @dimension" : "";
         const rows = this.database
-            .prepare(`
+            .prepare(
+                `
                 SELECT
                     k.id, k.dimension, k.question, k.expert_answer,
                     k.novice_answer, k.gap_analysis, k.source_file, k.content,
@@ -188,20 +182,19 @@ export class KnowledgeRepository {
                 ${dimensionClause}
                 ORDER BY rank ASC, k.id ASC
                 LIMIT @limit
-            `)
+            `,
+            )
             .all({ query: matchQuery, dimension: dimension ?? null, limit }) as FtsRow[];
 
         return rows.map((row) => ({ entry: mapKnowledgeRow(row), rank: row.rank }));
     }
 
     /** 读取当前模型的全部知识向量，供小规模内存余弦排序。 */
-    public listStoredVectors(
-        model: string,
-        dimension?: string,
-    ): StoredKnowledgeVector[] {
+    public listStoredVectors(model: string, dimension?: string): StoredKnowledgeVector[] {
         const dimensionClause = dimension ? "AND k.dimension = @dimension" : "";
         const rows = this.database
-            .prepare(`
+            .prepare(
+                `
                 SELECT
                     k.id, k.dimension, k.question, k.expert_answer,
                     k.novice_answer, k.gap_analysis, k.source_file, k.content,
@@ -210,7 +203,8 @@ export class KnowledgeRepository {
                 JOIN knowledge AS k ON k.id = e.knowledge_id
                 WHERE e.model = @model ${dimensionClause}
                 ORDER BY k.id ASC
-            `)
+            `,
+            )
             .all({ model, dimension: dimension ?? null }) as VectorRow[];
 
         return rows.map((row) => ({

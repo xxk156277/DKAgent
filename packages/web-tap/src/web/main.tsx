@@ -7,13 +7,13 @@ import "./styles.css";
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {
-  throw new Error("TAP root element is missing");
+    throw new Error("TAP root element is missing");
 }
 
 createRoot(rootElement).render(
-  <ConfigProvider>
-    <AntdApp>
-      <WebTapRouter />
-    </AntdApp>
-  </ConfigProvider>,
+    <ConfigProvider>
+        <AntdApp>
+            <WebTapRouter />
+        </AntdApp>
+    </ConfigProvider>,
 );

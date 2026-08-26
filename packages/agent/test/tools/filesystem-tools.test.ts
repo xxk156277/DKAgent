@@ -30,10 +30,7 @@ const withTempDir = async (run: (dir: string) => Promise<void>): Promise<void> =
 test("read_file 基于 cwd 读取指定行范围", async () => {
     await withTempDir(async (cwd) => {
         await writeFile(join(cwd, "notes.txt"), "one\ntwo\nthree\nfour", "utf8");
-        const result = await createReadFileTool(cwd).execute(
-            { path: "notes.txt", offset: 2, limit: 2 },
-            context(),
-        );
+        const result = await createReadFileTool(cwd).execute({ path: "notes.txt", offset: 2, limit: 2 }, context());
 
         assert.equal(result.success, true);
         assert.deepEqual(result.data, {
@@ -120,10 +117,7 @@ test("read_file 的 Artifact 模式拒绝分页参数", async () => {
             { path: "interview.md", storeAsArtifact: true, offset: 1 },
             toolContext,
         );
-        const limitResult = await tool.execute(
-            { path: "interview.md", storeAsArtifact: true, limit: 1 },
-            toolContext,
-        );
+        const limitResult = await tool.execute({ path: "interview.md", storeAsArtifact: true, limit: 1 }, toolContext);
 
         assert.equal(offsetResult.success, false);
         assert.equal(offsetResult.error?.code, "input_error");
@@ -134,10 +128,7 @@ test("read_file 的 Artifact 模式拒绝分页参数", async () => {
 
 test("read_file 的 Artifact 模式要求 ArtifactStore", async () => {
     await withTempDir(async (cwd) => {
-        const result = await createReadFileTool(cwd).execute(
-            { path: "missing.md", storeAsArtifact: true },
-            context(),
-        );
+        const result = await createReadFileTool(cwd).execute({ path: "missing.md", storeAsArtifact: true }, context());
 
         assert.equal(result.success, false);
         assert.equal(result.error?.code, "input_error");
@@ -166,10 +157,7 @@ test("write_file 覆盖 cwd 外的既有文件", async () => {
         await mkdir(cwd);
         await writeFile(path, "old", "utf8");
 
-        const result = await createWriteFileTool(cwd).execute(
-            { path: "../result.txt", content: "new" },
-            context(),
-        );
+        const result = await createWriteFileTool(cwd).execute({ path: "../result.txt", content: "new" }, context());
 
         assert.equal(result.data?.overwritten, true);
         assert.equal(await readFile(path, "utf8"), "new");
@@ -198,10 +186,7 @@ test("find_files 按 glob 查找并尊重 limit", async () => {
         await writeFile(join(cwd, "src", "b.ts"), "b", "utf8");
         await writeFile(join(cwd, "src", "c.js"), "c", "utf8");
 
-        const result = await createFindFilesTool(cwd).execute(
-            { pattern: "**/*.ts", limit: 1 },
-            context(),
-        );
+        const result = await createFindFilesTool(cwd).execute({ pattern: "**/*.ts", limit: 1 }, context());
 
         assert.equal(result.success, true);
         assert.equal(result.data?.files.length, 1);
@@ -211,10 +196,7 @@ test("find_files 按 glob 查找并尊重 limit", async () => {
 
 test("find_files 无匹配时成功返回空数组", async () => {
     await withTempDir(async (cwd) => {
-        const result = await createFindFilesTool(cwd).execute(
-            { pattern: "**/*.missing" },
-            context(),
-        );
+        const result = await createFindFilesTool(cwd).execute({ pattern: "**/*.missing" }, context());
 
         assert.deepEqual(result.data?.files, []);
     });
@@ -222,10 +204,7 @@ test("find_files 无匹配时成功返回空数组", async () => {
 
 test("find_files 不存在的搜索目录返回 service_error", async () => {
     await withTempDir(async (cwd) => {
-        const result = await createFindFilesTool(cwd).execute(
-            { pattern: "**/*", path: "missing" },
-            context(),
-        );
+        const result = await createFindFilesTool(cwd).execute({ pattern: "**/*", path: "missing" }, context());
 
         assert.equal(result.success, false);
         assert.equal(result.error?.code, "service_error");
@@ -239,10 +218,7 @@ test("find_files 默认尊重 .gitignore", async () => {
         await writeFile(join(cwd, "visible.ts"), "visible", "utf8");
         await writeFile(join(cwd, "ignored.ts"), "ignored", "utf8");
 
-        const result = await createFindFilesTool(cwd).execute(
-            { pattern: "*.ts" },
-            context(),
-        );
+        const result = await createFindFilesTool(cwd).execute({ pattern: "*.ts" }, context());
 
         assert.deepEqual(result.data?.files, ["visible.ts"]);
     });
@@ -252,10 +228,7 @@ test("find_files 响应已中止的 AbortSignal", async () => {
     await withTempDir(async (cwd) => {
         const controller = new AbortController();
         controller.abort();
-        const result = await createFindFilesTool(cwd).execute(
-            { pattern: "**/*" },
-            context(controller.signal),
-        );
+        const result = await createFindFilesTool(cwd).execute({ pattern: "**/*" }, context(controller.signal));
 
         assert.equal(result.success, false);
         assert.equal(result.error?.code, "timeout");
@@ -265,10 +238,7 @@ test("find_files 响应已中止的 AbortSignal", async () => {
 test("find_files 执行期间中止返回 timeout", async () => {
     await withTempDir(async (cwd) => {
         const controller = new AbortController();
-        const resultPromise = createFindFilesTool(cwd).execute(
-            { pattern: "**/*" },
-            context(controller.signal),
-        );
+        const resultPromise = createFindFilesTool(cwd).execute({ pattern: "**/*" }, context(controller.signal));
         controller.abort();
         const result = await resultPromise;
 
@@ -282,10 +252,7 @@ test("find_files 支持只有排除项的 glob", async () => {
         await writeFile(join(cwd, "visible.ts"), "ts", "utf8");
         await writeFile(join(cwd, "hidden.js"), "js", "utf8");
 
-        const result = await createFindFilesTool(cwd).execute(
-            { pattern: "!**/*.js" },
-            context(),
-        );
+        const result = await createFindFilesTool(cwd).execute({ pattern: "!**/*.js" }, context());
 
         assert.deepEqual(result.data?.files, ["visible.ts"]);
     });
@@ -316,9 +283,7 @@ test("grep_files 支持 glob 和 ignoreCase", async () => {
             context(),
         );
 
-        assert.deepEqual(result.data?.matches, [
-            { path: "notes.md", line: 1, text: "Needle in markdown" },
-        ]);
+        assert.deepEqual(result.data?.matches, [{ path: "notes.md", line: 1, text: "Needle in markdown" }]);
     });
 });
 
@@ -326,10 +291,7 @@ test("grep_files 支持字面量搜索和 limit", async () => {
     await withTempDir(async (cwd) => {
         await writeFile(join(cwd, "special.txt"), "a.b\naxb\na.b", "utf8");
 
-        const result = await createGrepFilesTool(cwd).execute(
-            { pattern: "a.b", literal: true, limit: 1 },
-            context(),
-        );
+        const result = await createGrepFilesTool(cwd).execute({ pattern: "a.b", literal: true, limit: 1 }, context());
 
         assert.deepEqual(result.data?.matches, [{ path: "special.txt", line: 1, text: "a.b" }]);
         assert.equal(result.data?.total, 1);
@@ -353,10 +315,7 @@ test("grep_files 响应已中止的 AbortSignal", async () => {
         const controller = new AbortController();
         controller.abort();
 
-        const result = await createGrepFilesTool(cwd).execute(
-            { pattern: "needle" },
-            context(controller.signal),
-        );
+        const result = await createGrepFilesTool(cwd).execute({ pattern: "needle" }, context(controller.signal));
 
         assert.equal(result.success, false);
         assert.equal(result.error?.code, "timeout");

@@ -11,10 +11,7 @@ import { createToolRegistry } from "../../src/tools/index.js";
 import type { ToolContext } from "../../src/tools/types.js";
 import { FakeTextProvider } from "./fake-provider.js";
 
-const source = [
-    "面试官：请介绍项目",
-    "候选人：我负责渲染链路。",
-].join("\n");
+const source = ["面试官：请介绍项目", "候选人：我负责渲染链路。"].join("\n");
 
 test("diagnose-transcript 只把元数据注入系统 Prompt", async () => {
     const skills = createSkillRegistry();
@@ -66,14 +63,18 @@ test("ToolRegistry 暴露原子分析能力且不再暴露 analyze_interview", (
 
 test("parse_transcript 和 structure_interview 通过 Tool 契约串联", async () => {
     const relation = {
-        clusters: [{
-            title: "项目",
-            questions: [{
-                promptSegments: [{ turnId: "turn-0001", text: "请介绍项目" }],
-                answerTurnIds: ["turn-0002"],
-                questionType: "project",
-            }],
-        }],
+        clusters: [
+            {
+                title: "项目",
+                questions: [
+                    {
+                        promptSegments: [{ turnId: "turn-0001", text: "请介绍项目" }],
+                        answerTurnIds: ["turn-0002"],
+                        questionType: "project",
+                    },
+                ],
+            },
+        ],
         nonQuestionTurnIds: [],
     };
     const artifacts = new InMemoryArtifactStore();
@@ -89,24 +90,19 @@ test("parse_transcript 和 structure_interview 通过 Tool 契约串联", async 
     assert.equal(parsed.success, true);
     assert.equal("transcript" in (parsed.data ?? {}), false);
     assert.equal(parsed.data?.turnCount, 2);
-    const transcript = artifacts.get<ParsedTranscript>(
-        parsed.data!.artifactId,
-        "parsed_transcript",
-        "test",
-    );
+    const transcript = artifacts.get<ParsedTranscript>(parsed.data!.artifactId, "parsed_transcript", "test");
     assert.equal(transcript.turns.length, 2);
-    const structured = await registry.resolve("structure_interview").execute({
-        transcriptArtifactId: parsed.data!.artifactId,
-    }, context);
+    const structured = await registry.resolve("structure_interview").execute(
+        {
+            transcriptArtifactId: parsed.data!.artifactId,
+        },
+        context,
+    );
 
     assert.equal(structured.success, true);
     assert.deepEqual(structured.data?.questionIds, ["question-0001"]);
     assert.equal("questions" in (structured.data ?? {}), false);
-    const interview = artifacts.get<StructuredInterview>(
-        structured.data!.artifactId,
-        "structured_interview",
-        "test",
-    );
+    const interview = artifacts.get<StructuredInterview>(structured.data!.artifactId, "structured_interview", "test");
     assert.equal(interview.questions.length, 1);
 });
 
@@ -131,27 +127,31 @@ test("structure_interview 将 Artifact 读取失败作为输入错误", async ()
 
 test("structure_interview 将模型请求中止返回为 timeout", async () => {
     const artifacts = new InMemoryArtifactStore();
-    const transcriptArtifactId = artifacts.put("parsed_transcript", {
-        source,
-        turns: [
-            {
-                id: "turn-0001",
-                speaker: "interviewer",
-                speakerLabel: "面试官",
-                content: "请介绍项目",
-                sourceStart: 0,
-                sourceEnd: 9,
-            },
-            {
-                id: "turn-0002",
-                speaker: "candidate",
-                speakerLabel: "候选人",
-                content: "我负责渲染链路。",
-                sourceStart: 10,
-                sourceEnd: source.length,
-            },
-        ],
-    } satisfies ParsedTranscript, { producer: "test" });
+    const transcriptArtifactId = artifacts.put(
+        "parsed_transcript",
+        {
+            source,
+            turns: [
+                {
+                    id: "turn-0001",
+                    speaker: "interviewer",
+                    speakerLabel: "面试官",
+                    content: "请介绍项目",
+                    sourceStart: 0,
+                    sourceEnd: 9,
+                },
+                {
+                    id: "turn-0002",
+                    speaker: "candidate",
+                    speakerLabel: "候选人",
+                    content: "我负责渲染链路。",
+                    sourceStart: 10,
+                    sourceEnd: source.length,
+                },
+            ],
+        } satisfies ParsedTranscript,
+        { producer: "test" },
+    );
     const context: ToolContext = {
         queryEngine: {
             async query() {
@@ -175,51 +175,53 @@ test("structure_interview 预中止时不调用模型也不创建 Artifact", asy
     const traceStore = new MemoryTraceStore();
     const tracer = new Tracer(traceStore);
     const artifacts = new InMemoryArtifactStore(tracer);
-    const transcriptArtifactId = artifacts.put("parsed_transcript", {
-        source,
-        turns: [
-            {
-                id: "turn-0001",
-                speaker: "interviewer",
-                speakerLabel: "面试官",
-                content: "请介绍项目",
-                sourceStart: 0,
-                sourceEnd: 9,
-            },
-            {
-                id: "turn-0002",
-                speaker: "candidate",
-                speakerLabel: "候选人",
-                content: "我负责渲染链路。",
-                sourceStart: 10,
-                sourceEnd: source.length,
-            },
-        ],
-    } satisfies ParsedTranscript, { producer: "test" });
-    const artifactCountBefore = traceStore.list().filter(
-        (event) => event.name === "artifact.created",
-    ).length;
+    const transcriptArtifactId = artifacts.put(
+        "parsed_transcript",
+        {
+            source,
+            turns: [
+                {
+                    id: "turn-0001",
+                    speaker: "interviewer",
+                    speakerLabel: "面试官",
+                    content: "请介绍项目",
+                    sourceStart: 0,
+                    sourceEnd: 9,
+                },
+                {
+                    id: "turn-0002",
+                    speaker: "candidate",
+                    speakerLabel: "候选人",
+                    content: "我负责渲染链路。",
+                    sourceStart: 10,
+                    sourceEnd: source.length,
+                },
+            ],
+        } satisfies ParsedTranscript,
+        { producer: "test" },
+    );
+    const artifactCountBefore = traceStore.list().filter((event) => event.name === "artifact.created").length;
     const provider = new FakeTextProvider("{}");
     const controller = new AbortController();
     controller.abort();
 
     const result = await createToolRegistry({ model: "fake-model" })
         .resolve("structure_interview")
-        .execute({ transcriptArtifactId }, {
-            queryEngine: new QueryEngine(provider),
-            abortSignal: controller.signal,
-            artifactStore: artifacts,
-            tracer,
-        });
+        .execute(
+            { transcriptArtifactId },
+            {
+                queryEngine: new QueryEngine(provider),
+                abortSignal: controller.signal,
+                artifactStore: artifacts,
+                tracer,
+            },
+        );
 
     assert.equal(result.success, false);
     assert.equal(result.error?.code, "timeout");
     assert.equal(result.data, undefined);
     assert.equal(provider.request, undefined);
-    assert.equal(
-        traceStore.list().filter((event) => event.name === "artifact.created").length,
-        artifactCountBefore,
-    );
+    assert.equal(traceStore.list().filter((event) => event.name === "artifact.created").length, artifactCountBefore);
 });
 
 test("parse_transcript 将不存在的 Artifact ID 作为输入错误", async () => {

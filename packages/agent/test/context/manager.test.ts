@@ -2,23 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Compressor } from "../../src/context/compressor.js";
 import { ContextManager } from "../../src/context/manager.js";
-import type {
-    HistorySummaryEngine,
-    ContextTokenCountInput,
-    ContextTokenCounter,
-} from "../../src/context/types.js";
-import type {
-    AgentMessage,
-    ModelRequest,
-    ModelResponse,
-} from "../../src/query-engine/provider.js";
+import type { HistorySummaryEngine, ContextTokenCountInput, ContextTokenCounter } from "../../src/context/types.js";
+import type { AgentMessage, ModelRequest, ModelResponse } from "../../src/query-engine/provider.js";
 
 class DeterministicTokenCounter implements ContextTokenCounter {
     public count(input: ContextTokenCountInput): Promise<number> {
         const systemTokens = input.systemPrompt === undefined ? 0 : 1;
-        return Promise.resolve(
-            systemTokens + input.messages.length + input.tools.length,
-        );
+        return Promise.resolve(systemTokens + input.messages.length + input.tools.length);
     }
 }
 
@@ -26,9 +16,7 @@ class DeterministicTokenCounter implements ContextTokenCounter {
 class WeightedTokenCounter implements ContextTokenCounter {
     public count(input: ContextTokenCountInput): Promise<number> {
         const systemTokens = input.systemPrompt === undefined ? 0 : 10;
-        return Promise.resolve(
-            systemTokens + input.messages.length * 10 + input.tools.length * 10,
-        );
+        return Promise.resolve(systemTokens + input.messages.length * 10 + input.tools.length * 10);
     }
 }
 
@@ -127,9 +115,7 @@ test("裁剪时完整删除 Tool Call 和 Tool Result", async () => {
         reservedOutputTokens: 1,
     });
 
-    assert.deepEqual(snapshot.messages, [
-        { role: "user", content: "当前问题" },
-    ]);
+    assert.deepEqual(snapshot.messages, [{ role: "user", content: "当前问题" }]);
 });
 
 test("必留内容超过预算时明确失败", async () => {
@@ -163,10 +149,7 @@ test("拒绝非法 Token 预算", async () => {
 
 test("达到 80% 水位后摘要旧历史并尽量降低到 60%", async () => {
     const engine = new ConfigurableSummaryEngine();
-    const manager = new ContextManager(
-        new WeightedTokenCounter(),
-        new Compressor(engine),
-    );
+    const manager = new ContextManager(new WeightedTokenCounter(), new Compressor(engine));
     const messages = createTenMessages();
 
     const snapshot = await manager.build({
@@ -192,10 +175,7 @@ test("达到 80% 水位后摘要旧历史并尽量降低到 60%", async () => {
 
 test("连续压缩时只摘要上次边界后的新增历史并合并旧摘要", async () => {
     const engine = new ConfigurableSummaryEngine();
-    const manager = new ContextManager(
-        new WeightedTokenCounter(),
-        new Compressor(engine),
-    );
+    const manager = new ContextManager(new WeightedTokenCounter(), new Compressor(engine));
     const messages: AgentMessage[] = [
         { role: "user", content: "已经摘要的问题" },
         { role: "assistant", content: "已经摘要的回答" },
@@ -227,10 +207,7 @@ test("连续压缩时只摘要上次边界后的新增历史并合并旧摘要",
 
 test("摘要模型失败时保留旧状态并退回整组删除", async () => {
     const engine = new ConfigurableSummaryEngine(true);
-    const manager = new ContextManager(
-        new WeightedTokenCounter(),
-        new Compressor(engine),
-    );
+    const manager = new ContextManager(new WeightedTokenCounter(), new Compressor(engine));
     const previousState = {
         summary: "旧摘要",
         firstKeptMessageIndex: 0,

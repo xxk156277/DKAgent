@@ -1,32 +1,33 @@
 {
-  "name": "@dkagent/rag-v2",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/*.test.ts",
-    "rag": "tsx src/cli.ts",
-    "db:migrate": "tsx src/cli.ts db:migrate",
-    "ingest": "tsx src/cli.ts ingest",
-    "stats": "tsx src/cli.ts stats"
-  },
-  "dependencies": {
-    "@ai-sdk/openai-compatible": "3.0.37",
-    "ai": "7.0.79",
-    "dotenv": "17.2.3",
-    "fast-glob": "3.3.3",
-    "gray-matter": "4.0.3",
-    "pg": "8.23.0",
-    "pgvector": "0.3.0",
-    "remark-parse": "11.0.0",
-    "unified": "11.0.5",
-    "zod": "4.4.3"
-  },
-  "devDependencies": {
-    "@types/pg": "8.15.6"
-  },
-  "engines": {
-    "node": ">=22"
-  }
+    "name": "@dkagent/rag-v2",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "typecheck": "tsc --noEmit",
+        "test": "tsx --test test/*.test.ts",
+        "rag": "tsx src/cli.ts",
+        "db:migrate": "tsx src/cli.ts db:migrate",
+        "ingest": "tsx src/cli.ts ingest",
+        "stats": "tsx src/cli.ts stats",
+        "help": "tsx src/cli.ts help"
+    },
+    "dependencies": {
+        "@ai-sdk/openai-compatible": "3.0.37",
+        "ai": "7.0.79",
+        "dotenv": "17.2.3",
+        "fast-glob": "3.3.3",
+        "gray-matter": "4.0.3",
+        "pg": "8.23.0",
+        "pgvector": "0.3.0",
+        "remark-parse": "11.0.0",
+        "unified": "11.0.5",
+        "zod": "4.4.3"
+    },
+    "devDependencies": {
+        "@types/pg": "8.15.6"
+    },
+    "engines": {
+        "node": ">=22"
+    }
 }

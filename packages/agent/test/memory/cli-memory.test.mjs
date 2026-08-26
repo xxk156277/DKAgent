@@ -10,9 +10,7 @@ import test from "node:test";
 const testDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(testDirectory, "../../../..");
 const tsxLoaderPath = join(repositoryRoot, "node_modules/tsx/dist/loader.mjs");
-const cliModuleUrl = pathToFileURL(
-    join(repositoryRoot, "packages/agent/src/cli/run.ts"),
-).href;
+const cliModuleUrl = pathToFileURL(join(repositoryRoot, "packages/agent/src/cli/run.ts")).href;
 
 function cliScript() {
     return `
@@ -25,13 +23,7 @@ function cliScript() {
 }
 
 function runCli(workingDirectory, input) {
-    return spawnSync(process.execPath, [
-        "--import",
-        tsxLoaderPath,
-        "--input-type=module",
-        "-e",
-        cliScript(),
-    ], {
+    return spawnSync(process.execPath, ["--import", tsxLoaderPath, "--input-type=module", "-e", cliScript()], {
         cwd: workingDirectory,
         input,
         encoding: "utf8",
@@ -49,13 +41,7 @@ function assertCliSucceeded(result) {
 }
 
 function startCli(workingDirectory) {
-    const child = spawn(process.execPath, [
-        "--import",
-        tsxLoaderPath,
-        "--input-type=module",
-        "-e",
-        cliScript(),
-    ], {
+    const child = spawn(process.execPath, ["--import", tsxLoaderPath, "--input-type=module", "-e", cliScript()], {
         cwd: workingDirectory,
         stdio: ["pipe", "pipe", "pipe"],
         env: {
@@ -75,30 +61,31 @@ function startCli(workingDirectory) {
         stderr += chunk;
     });
 
-    const waitForOutput = (pattern, fromIndex = 0) => new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            cleanup();
-            reject(new Error(`等待 CLI 输出超时：${pattern}\nstdout:\n${stdout}\nstderr:\n${stderr}`));
-        }, 10_000);
-        const check = () => {
-            const match = stdout.slice(fromIndex).match(pattern);
-            if (!match) return;
-            cleanup();
-            resolve(match);
-        };
-        const onExit = (code) => {
-            cleanup();
-            reject(new Error(`CLI 提前退出：${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`));
-        };
-        const cleanup = () => {
-            clearTimeout(timeout);
-            child.stdout.off("data", check);
-            child.off("exit", onExit);
-        };
-        child.stdout.on("data", check);
-        child.on("exit", onExit);
-        check();
-    });
+    const waitForOutput = (pattern, fromIndex = 0) =>
+        new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error(`等待 CLI 输出超时：${pattern}\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+            }, 10_000);
+            const check = () => {
+                const match = stdout.slice(fromIndex).match(pattern);
+                if (!match) return;
+                cleanup();
+                resolve(match);
+            };
+            const onExit = (code) => {
+                cleanup();
+                reject(new Error(`CLI 提前退出：${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+            };
+            const cleanup = () => {
+                clearTimeout(timeout);
+                child.stdout.off("data", check);
+                child.off("exit", onExit);
+            };
+            child.stdout.on("data", check);
+            child.on("exit", onExit);
+            check();
+        });
 
     return {
         child,
@@ -111,51 +98,30 @@ function startCli(workingDirectory) {
 
 test("/remember 保存、跨进程列出，并按 type/key 覆盖且保留 ID", () => {
     const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-memory-"));
-    const created = runCli(
-        workingDirectory,
-        "/remember preference answer_style 先讲架构\n/memories\n",
-    );
+    const created = runCli(workingDirectory, "/remember preference answer_style 先讲架构\n/memories\n");
     assertCliSucceeded(created);
     const firstId = created.stdout.match(/已保存 Memory ([0-9a-f-]{36})/)?.[1];
     assert.ok(firstId, created.stdout);
-    assert.match(
-        created.stdout,
-        new RegExp(`\\[preference\\] answer_style = 先讲架构 \\(explicit, ${firstId}\\)`),
-    );
+    assert.match(created.stdout, new RegExp(`\\[preference\\] answer_style = 先讲架构 \\(explicit, ${firstId}\\)`));
 
     const restored = runCli(workingDirectory, "/memories\n");
     assertCliSucceeded(restored);
-    assert.match(
-        restored.stdout,
-        new RegExp(`\\[preference\\] answer_style = 先讲架构 \\(explicit, ${firstId}\\)`),
-    );
+    assert.match(restored.stdout, new RegExp(`\\[preference\\] answer_style = 先讲架构 \\(explicit, ${firstId}\\)`));
 
-    const updated = runCli(
-        workingDirectory,
-        "/remember preference answer_style 先给结论\n/memories\n",
-    );
+    const updated = runCli(workingDirectory, "/remember preference answer_style 先给结论\n/memories\n");
     assertCliSucceeded(updated);
     assert.match(updated.stdout, new RegExp(`已保存 Memory ${firstId}`));
-    assert.match(
-        updated.stdout,
-        new RegExp(`\\[preference\\] answer_style = 先给结论 \\(explicit, ${firstId}\\)`),
-    );
+    assert.match(updated.stdout, new RegExp(`\\[preference\\] answer_style = 先给结论 \\(explicit, ${firstId}\\)`));
 });
 
 test("/forget 删除 Memory，重复删除明确提示不存在", () => {
     const workingDirectory = mkdtempSync(join(tmpdir(), "dkagent-cli-memory-"));
-    const saved = runCli(
-        workingDirectory,
-        "/remember profile target_role 前端 Agent 工程师\n",
-    );
+    const saved = runCli(workingDirectory, "/remember profile target_role 前端 Agent 工程师\n");
     assertCliSucceeded(saved);
     const memoryId = saved.stdout.match(/已保存 Memory ([0-9a-f-]{36})/)?.[1];
     assert.ok(memoryId, saved.stdout);
 
-    const removed = runCli(
-        workingDirectory,
-        `/forget ${memoryId}\n/forget ${memoryId}\n/memories\n`,
-    );
+    const removed = runCli(workingDirectory, `/forget ${memoryId}\n/forget ${memoryId}\n/memories\n`);
     assertCliSucceeded(removed);
     assert.match(removed.stdout, new RegExp(`已删除 Memory ${memoryId}`));
     assert.match(removed.stdout, new RegExp(`Memory ${memoryId} 不存在`));
@@ -242,40 +208,26 @@ test("删除写入来源 Session 后仍保留跨 Session Memory", async () => {
     let secondSessionId;
 
     try {
-        const startup = await cli.waitForOutput(
-            /DKAgent 已创建 Session ([0-9a-f-]{36})/,
-        );
+        const startup = await cli.waitForOutput(/DKAgent 已创建 Session ([0-9a-f-]{36})/);
         const firstSessionId = startup[1];
 
         let outputIndex = cli.output().length;
         cli.child.stdin.write("/new\n");
-        const created = await cli.waitForOutput(
-            /已创建 Session ([0-9a-f-]{36})/,
-            outputIndex,
-        );
+        const created = await cli.waitForOutput(/已创建 Session ([0-9a-f-]{36})/, outputIndex);
         secondSessionId = created[1];
 
         outputIndex = cli.output().length;
         cli.child.stdin.write("/remember decision memory_mvp 使用 SQLite\n");
-        const saved = await cli.waitForOutput(
-            /已保存 Memory ([0-9a-f-]{36})/,
-            outputIndex,
-        );
+        const saved = await cli.waitForOutput(/已保存 Memory ([0-9a-f-]{36})/, outputIndex);
         memoryId = saved[1];
 
         outputIndex = cli.output().length;
         cli.child.stdin.write(`/switch ${firstSessionId}\n`);
-        await cli.waitForOutput(
-            new RegExp(`已切换到 Session ${firstSessionId}`),
-            outputIndex,
-        );
+        await cli.waitForOutput(new RegExp(`已切换到 Session ${firstSessionId}`), outputIndex);
 
         outputIndex = cli.output().length;
         cli.child.stdin.write(`/delete ${secondSessionId}\n`);
-        await cli.waitForOutput(
-            new RegExp(`已删除 Session ${secondSessionId}`),
-            outputIndex,
-        );
+        await cli.waitForOutput(new RegExp(`已删除 Session ${secondSessionId}`), outputIndex);
 
         outputIndex = cli.output().length;
         cli.child.stdin.write("/memories\n");
@@ -289,16 +241,17 @@ test("删除写入来源 Session 后仍保留跨 Session Memory", async () => {
         assert.equal(await exited, 0, cli.errorOutput());
     }
 
-    const database = new Database(
-        join(workingDirectory, ".dkagent/memory.db"),
-        { readonly: true },
-    );
+    const database = new Database(join(workingDirectory, ".dkagent/memory.db"), { readonly: true });
     try {
-        const memory = database.prepare(`
+        const memory = database
+            .prepare(
+                `
             SELECT source_session_id
             FROM memories
             WHERE id = ?
-        `).get(memoryId);
+        `,
+            )
+            .get(memoryId);
         assert.deepEqual(memory, { source_session_id: secondSessionId });
     } finally {
         database.close();
