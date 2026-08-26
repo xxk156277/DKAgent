@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseMarkdownDocument } from "../src/parser.js";
+import { parseMarkdownDocument } from "../src/ingestion/parser.js";
 
 const vault = "/vault";
 const modifiedAt = new Date("2026-08-25T00:00:00Z");

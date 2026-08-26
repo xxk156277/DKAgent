@@ -1,9 +1,9 @@
 import { generateText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { buildEvidenceContext } from "./context.js";
-import { RagDatabase } from "./database.js";
-import { EmbeddingService } from "./embedding.js";
-import { searchKnowledge } from "./search.js";
+import { EmbeddingService } from "../embedding/embedding.js";
+import { searchKnowledge } from "../retrieval/search.js";
+import { RagDatabase } from "../storage/database.js";
 
 /**
  * 校验答案中的引用：至少有一个 [n]，且所有 n 都在有效来源范围内。

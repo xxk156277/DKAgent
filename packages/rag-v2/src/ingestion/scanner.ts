@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import fg from "fast-glob";
 import { parseMarkdownDocument } from "./parser.js";
-import type { ParsedDocument } from "./types.js";
+import type { ParsedDocument } from "../domain/types.js";
 
 /**
  * 扫描结果：解析出的文档、扫描到的路径、需保留旧索引的路径与跳过的文件及原因。

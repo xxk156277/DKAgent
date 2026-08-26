@@ -4,7 +4,7 @@
 
 ## 第 1 天：父子切块
 
-阅读顺序：`types.ts` → `parser.ts` → `scanner.ts`。
+阅读顺序：`src/domain/types.ts` → `src/ingestion/parser.ts` → `src/ingestion/scanner.ts`。
 
 ```bash
 pnpm test
@@ -17,7 +17,7 @@ pnpm rag inspect --document "C-前端学习/node/SSE.md"
 
 ## 第 2 天：pgvector 检索
 
-阅读顺序：`embedding.ts` → `database.ts` → `ingest.ts` → `search.ts`。
+阅读顺序：`src/embedding/embedding.ts` → `src/storage/database.ts` → `src/ingestion/ingest.ts` → `src/retrieval/search.ts`。
 
 ```bash
 docker compose up -d
@@ -45,7 +45,7 @@ pnpm rag evaluate
 
 ## 第 4 天：生成、引用与拒答
 
-阅读顺序：`context.ts` → `ask.ts`。
+阅读顺序：`src/generation/context.ts` → `src/generation/ask.ts`。
 
 ```bash
 pnpm rag ask "Agent 为什么需要上下文压缩？"

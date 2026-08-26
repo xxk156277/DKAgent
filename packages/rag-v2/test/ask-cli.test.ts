@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasValidCitations } from "../src/ask.js";
-import { formatCliError } from "../src/errors.js";
+import { hasValidCitations } from "../src/generation/ask.js";
+import { formatCliError } from "../src/shared/errors.js";
 
 test("引用必须存在且落在实际来源编号内", () => {
     assert.equal(hasValidCitations("结论 [1]，补充 [3]", 3), true);

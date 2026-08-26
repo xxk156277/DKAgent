@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregateByParent } from "../src/search.js";
-import { selectParentContext } from "../src/context.js";
-import type { SearchHit } from "../src/types.js";
-import type { StoredDocument } from "../src/database.js";
+import type { SearchHit } from "../src/domain/types.js";
+import { selectParentContext } from "../src/generation/context.js";
+import { aggregateByParent } from "../src/retrieval/search.js";
+import type { StoredDocument } from "../src/storage/database.js";
 
 function hit(parentId: string, chunkId: string, similarity: number): SearchHit {
     return {

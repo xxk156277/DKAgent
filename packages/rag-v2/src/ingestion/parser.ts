@@ -10,8 +10,8 @@ import path from "node:path";
 import matter from "gray-matter";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
-import type { ChildChunk, ImageReference, ParsedDocument } from "./types.js";
-import { sha256 } from "./hash.js";
+import type { ChildChunk, ImageReference, ParsedDocument } from "../domain/types.js";
+import { sha256 } from "../shared/hash.js";
 
 /** remark AST 节点的最小结构（用于读取标题层级与文本、位置偏移）。 */
 interface AstNode {

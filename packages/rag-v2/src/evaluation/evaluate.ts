@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import { z } from "zod";
-import { RagDatabase } from "./database.js";
-import { EmbeddingService } from "./embedding.js";
-import { searchKnowledge } from "./search.js";
-import type { EvaluationQuestion } from "./types.js";
+import type { EvaluationQuestion } from "../domain/types.js";
+import { EmbeddingService } from "../embedding/embedding.js";
+import { searchKnowledge } from "../retrieval/search.js";
+import { RagDatabase } from "../storage/database.js";
 
 /** 评估用例的校验 Schema（读取 JSONL 时逐行校验）。 */
 const QuestionSchema = z.object({

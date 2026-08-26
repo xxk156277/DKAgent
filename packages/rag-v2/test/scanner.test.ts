@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { scanVault } from "../src/scanner.js";
+import { scanVault } from "../src/ingestion/scanner.js";
 
 test("空文件被报告但不会作为有效索引保留", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "rag-scanner-"));

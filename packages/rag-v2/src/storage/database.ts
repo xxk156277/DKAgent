@@ -9,7 +9,7 @@
  */
 import pg from "pg";
 import pgvector from "pgvector";
-import type { ChildChunk, ParentDocument, SearchHit } from "./types.js";
+import type { ChildChunk, ParentDocument, SearchHit } from "../domain/types.js";
 
 const { Pool } = pg;
 

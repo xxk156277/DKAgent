@@ -7,14 +7,14 @@
  */
 import path from "node:path";
 import { inspect } from "node:util";
-import { askKnowledgeBase } from "./ask.js";
 import { config, requireSecret } from "./config.js";
-import { RagDatabase } from "./database.js";
-import { EmbeddingService } from "./embedding.js";
-import { evaluateRetrieval, readEvaluationQuestions } from "./evaluate.js";
-import { formatCliError } from "./errors.js";
-import { ingestKnowledgeBase } from "./ingest.js";
-import { searchKnowledge } from "./search.js";
+import { EmbeddingService } from "./embedding/embedding.js";
+import { evaluateRetrieval, readEvaluationQuestions } from "./evaluation/evaluate.js";
+import { askKnowledgeBase } from "./generation/ask.js";
+import { ingestKnowledgeBase } from "./ingestion/ingest.js";
+import { searchKnowledge } from "./retrieval/search.js";
+import { formatCliError } from "./shared/errors.js";
+import { RagDatabase } from "./storage/database.js";
 
 /** 打印命令帮助信息。 */
 function printHelp(): void {

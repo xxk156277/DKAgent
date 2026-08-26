@@ -1,6 +1,5 @@
-import type { StoredDocument } from "./database.js";
-import type { SearchHit } from "./types.js";
-import { RagDatabase } from "./database.js";
+import type { SearchHit } from "../domain/types.js";
+import { RagDatabase, type StoredDocument } from "../storage/database.js";
 
 /**
  * 从父文档中选择与命中子块相关的上下文片段：

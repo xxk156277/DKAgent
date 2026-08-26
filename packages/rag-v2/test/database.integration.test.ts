@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { RagDatabase } from "../src/database.js";
-import type { ChildChunk, ParentDocument } from "../src/types.js";
+import type { ChildChunk, ParentDocument } from "../src/domain/types.js";
+import { RagDatabase } from "../src/storage/database.js";
 
 const connectionString = process.env.RAG_TEST_DATABASE_URL;
 

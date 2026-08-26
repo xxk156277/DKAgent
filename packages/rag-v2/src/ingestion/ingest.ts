@@ -1,8 +1,8 @@
 import { performance } from "node:perf_hooks";
-import { buildEmbeddingText, EmbeddingService } from "./embedding.js";
-import { RagDatabase } from "./database.js";
+import { buildEmbeddingText, EmbeddingService } from "../embedding/embedding.js";
+import { RagDatabase } from "../storage/database.js";
 import { scanVault } from "./scanner.js";
-import type { IngestReport } from "./types.js";
+import type { IngestReport } from "../domain/types.js";
 
 /**
  * 知识库摄入（索引）主流程：

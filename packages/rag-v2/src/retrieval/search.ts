@@ -1,6 +1,6 @@
-import type { SearchHit } from "./types.js";
-import { EmbeddingService } from "./embedding.js";
-import { RagDatabase } from "./database.js";
+import type { SearchHit } from "../domain/types.js";
+import { EmbeddingService } from "../embedding/embedding.js";
+import { RagDatabase } from "../storage/database.js";
 
 /**
  * 按父文档聚合去重：每篇文档只保留相似度最高的命中，再按相似度降序取 topK。

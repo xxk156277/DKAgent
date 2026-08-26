@@ -62,7 +62,7 @@ Embedding → pgvector → Top-K → 上下文 → LLM 回答
 
 ## 4. 两个核心数据结构
 
-代码位置：[`src/types.ts`](src/types.ts)
+代码位置：[`src/domain/types.ts`](src/domain/types.ts)
 
 ### ParentDocument
 
@@ -163,9 +163,9 @@ ChildChunk[] = [
 
 代码阅读顺序：
 
-1. [`src/scanner.ts`](src/scanner.ts)：根据白名单找到文件并读取原文。
-2. [`src/parser.ts`](src/parser.ts)：把一个文件转成一个父文档和多个子块。
-3. [`src/types.ts`](src/types.ts)：定义解析结果的形状。
+1. [`src/ingestion/scanner.ts`](src/ingestion/scanner.ts)：根据白名单找到文件并读取原文。
+2. [`src/ingestion/parser.ts`](src/ingestion/parser.ts)：把一个文件转成一个父文档和多个子块。
+3. [`src/domain/types.ts`](src/domain/types.ts)：定义解析结果的形状。
 
 核心调用关系：
 
