@@ -24,7 +24,10 @@ export interface AgentAssertionConfig {
   forbiddenTools?: string[];
   outputIncludes?: string;
   requireNoTools?: boolean;
-  expectedSequence?: string[];
+  mustHappenBefore?: {
+    before: { tool: string; path: string };
+    after: { tool: string; path: string };
+  };
   expectedFindFiles?: string[];
   expectedGrep?: { path: string; text: string };
   expectedFinalFiles?: Record<string, string>;
@@ -127,21 +130,23 @@ function hasExpectedGrep(
   });
 }
 
-function toolNamesByTraceSequence(
+function hasRequiredCausalOrder(
   calls: ReturnType<typeof selectToolCalls>,
-): string[] {
-  return [...calls]
-    .sort((left, right) => left.sequence - right.sequence)
-    .map((call) => call.name);
-}
-
-function hasExpectedSequence(
-  calls: ReturnType<typeof selectToolCalls>,
-  expected: string[],
+  expected: NonNullable<AgentAssertionConfig["mustHappenBefore"]>,
 ): boolean {
-  const actual = toolNamesByTraceSequence(calls);
-  return actual.length === expected.length
-    && actual.every((name, index) => name === expected[index]);
+  const orderedCalls = [...calls].sort((left, right) => left.sequence - right.sequence);
+  const firstAfter = orderedCalls.find((call) => (
+    call.name === expected.after.tool
+    && typeof call.input.path === "string"
+    && normalizePath(call.input.path) === normalizePath(expected.after.path)
+  ));
+  if (firstAfter === undefined) return false;
+  return orderedCalls.some((call) => (
+    call.sequence < firstAfter.sequence
+    && call.name === expected.before.tool
+    && typeof call.input.path === "string"
+    && normalizePath(call.input.path) === normalizePath(expected.before.path)
+  ));
 }
 
 function finalFileMismatches(
@@ -239,12 +244,12 @@ export function gradeAgentRun(
       "grep_files 返回包含目标路径和文本的匹配",
     ));
   }
-  if (config.expectedSequence !== undefined) {
-    const actual = toolNamesByTraceSequence(calls);
+  if (config.mustHappenBefore !== undefined) {
+    const { before, after } = config.mustHappenBefore;
     components.push(component(
-      "expectedSequence",
-      hasExpectedSequence(calls, config.expectedSequence),
-      `Tool 调用序列: ${actual.join(", ") || "无"}；预期: ${config.expectedSequence.join(", ") || "无"}`,
+      "mustHappenBefore",
+      hasRequiredCausalOrder(calls, config.mustHappenBefore),
+      `要求 ${before.tool}(${before.path}) 先于首次 ${after.tool}(${after.path})`,
     ));
   }
   if (config.expectedFinalFiles !== undefined) {

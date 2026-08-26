@@ -90,7 +90,10 @@ const config: UnifiedConfig = {
         value: gradeAgentRun,
         config: {
           requiredTools: ["read_file", "write_file"],
-          expectedSequence: ["read_file", "write_file"],
+          mustHappenBefore: {
+            before: { tool: "read_file", path: "source.txt" },
+            after: { tool: "write_file", path: "result.txt" },
+          },
           expectedFinalFiles: {
             "result.txt": "DKAgent write evaluation payload\nline two remains unchanged\n",
           },

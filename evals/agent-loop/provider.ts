@@ -23,7 +23,7 @@ import type { LLMProvider } from "../../packages/agent/src/query-engine/provider
 import type { TraceEvent } from "@dkagent/trace";
 import type { AgentEvalRunMetadata } from "./assertions.js";
 import { cleanupRunRoot } from "./internal/cleanup.js";
-import { findUnpairedToolCallIds, selectToolCalls, selectToolResults } from "./trace-selectors.js";
+import { findToolProtocolViolations, selectToolCalls, selectToolResults } from "./trace-selectors.js";
 
 export type AgentEvalToolName =
   | "read_file"
@@ -193,7 +193,8 @@ function assertTraceSelectorArray(
       result.name,
       result.result.success,
     ]))
-    || JSON.stringify(findUnpairedToolCallIds(original)) !== JSON.stringify(findUnpairedToolCallIds(redacted))
+    || JSON.stringify(findToolProtocolViolations(original))
+      !== JSON.stringify(findToolProtocolViolations(redacted))
   ) {
     throw new Error(UNSAFE_SECRET_ERROR);
   }

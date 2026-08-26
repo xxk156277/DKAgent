@@ -461,43 +461,69 @@ test("grader requires a matching grep_files result", () => {
   assert.equal(missingPath.pass, false);
 });
 
-test("grader enforces the exact Tool call sequence by Trace sequence", () => {
+test("grader enforces causal Tool order by Trace sequence and input path", () => {
   const config = {
     requiredTools: ["read_file", "write_file"],
-    expectedSequence: ["read_file", "write_file"],
+    mustHappenBefore: {
+      before: { tool: "read_file", path: "source.txt" },
+      after: { tool: "write_file", path: "result.txt" },
+    },
   };
-  const exact = gradeWithTrace(completeReadThenWriteTrace, config, "", readThenWriteWorkspace);
-  assert.equal(exact.pass, true);
-  assert.equal(
-    exact.componentResults?.find((item) => item.metadata?.component === "expectedSequence")?.pass,
-    true,
-  );
-
-  const reversed = completeReadThenWriteTrace.map((traceEvent) => {
-    if (traceEvent.name !== "tool.call" || traceEvent.phase !== "start") return traceEvent;
-    if (traceEvent.sequence === 2) return { ...traceEvent, sequence: 5 };
-    if (traceEvent.sequence === 5) return { ...traceEvent, sequence: 2 };
-    return traceEvent;
-  });
-  const reversedResult = gradeWithTrace(reversed, config, "", readThenWriteWorkspace);
-  assert.equal(reversedResult.pass, false);
-  assert.equal(
-    reversedResult.componentResults?.find((item) => item.metadata?.component === "expectedSequence")?.pass,
-    false,
-  );
-
-  const extraResult = gradeWithTrace(completeSequenceTrace([
+  const readThenWriteThenVerify = completeSequenceTrace([
     { name: "read_file", input: { path: "source.txt" }, resultData: { content: writeEvaluationContent } },
     {
       name: "write_file",
       input: { path: "result.txt", content: writeEvaluationContent, overwrite: false },
       resultData: { path: `${readThenWriteWorkspace}/result.txt` },
     },
-    { name: "find_files", input: { path: ".", pattern: "**/*" }, resultData: { path: readThenWriteWorkspace, files: [] } },
-  ]), config, "", readThenWriteWorkspace);
-  assert.equal(extraResult.pass, false);
+    { name: "read_file", input: { path: "result.txt" }, resultData: { content: writeEvaluationContent } },
+  ]);
+  const valid = gradeWithTrace(readThenWriteThenVerify, config, "", readThenWriteWorkspace);
+  assert.equal(valid.pass, true);
   assert.equal(
-    extraResult.componentResults?.find((item) => item.metadata?.component === "expectedSequence")?.pass,
+    valid.componentResults?.find((item) => item.metadata?.component === "mustHappenBefore")?.pass,
+    true,
+  );
+
+  const writeThenRead = gradeWithTrace(completeSequenceTrace([
+    {
+      name: "write_file",
+      input: { path: "result.txt", content: writeEvaluationContent, overwrite: false },
+      resultData: { path: `${readThenWriteWorkspace}/result.txt` },
+    },
+    { name: "read_file", input: { path: "source.txt" }, resultData: { content: writeEvaluationContent } },
+  ]), config, "", readThenWriteWorkspace);
+  assert.equal(writeThenRead.pass, false);
+  assert.equal(
+    writeThenRead.componentResults?.find((item) => item.metadata?.component === "mustHappenBefore")?.pass,
+    false,
+  );
+
+  const wrongReadPath = gradeWithTrace(completeSequenceTrace([
+    { name: "read_file", input: { path: "other.txt" }, resultData: { content: writeEvaluationContent } },
+    {
+      name: "write_file",
+      input: { path: "result.txt", content: writeEvaluationContent, overwrite: false },
+      resultData: { path: `${readThenWriteWorkspace}/result.txt` },
+    },
+  ]), config, "", readThenWriteWorkspace);
+  assert.equal(wrongReadPath.pass, false);
+  assert.equal(
+    wrongReadPath.componentResults?.find((item) => item.metadata?.component === "mustHappenBefore")?.pass,
+    false,
+  );
+
+  const wrongWritePath = gradeWithTrace(completeSequenceTrace([
+    { name: "read_file", input: { path: "source.txt" }, resultData: { content: writeEvaluationContent } },
+    {
+      name: "write_file",
+      input: { path: "other.txt", content: writeEvaluationContent, overwrite: false },
+      resultData: { path: `${readThenWriteWorkspace}/other.txt` },
+    },
+  ]), config, "", readThenWriteWorkspace);
+  assert.equal(wrongWritePath.pass, false);
+  assert.equal(
+    wrongWritePath.componentResults?.find((item) => item.metadata?.component === "mustHappenBefore")?.pass,
     false,
   );
 });

@@ -12,7 +12,7 @@ import type { AgentEvalRunMetadata } from "./assertions.js";
 import { setCleanupForTest } from "./internal/cleanup.js";
 import { redactMetadata, runAgentEvalCase } from "./provider.js";
 import {
-  findUnpairedToolCallIds,
+  findToolProtocolViolations,
   selectToolCalls,
   selectToolResults,
 } from "./trace-selectors.js";
@@ -76,7 +76,7 @@ test("runAgentEvalCase executes read_file through the production AgentLoop", asy
     selectToolCalls(metadata.traceEvents).map((call) => call.name),
     ["read_file"],
   );
-  assert.deepEqual(findUnpairedToolCallIds(metadata.traceEvents), []);
+  assert.deepEqual(findToolProtocolViolations(metadata.traceEvents), []);
   assert.deepEqual(provider.requests[0]?.tools?.map((tool) => tool.name), ["read_file"]);
   assert.equal(provider.requests[0]?.tools?.length, 1);
   const toolMessage = provider.requests[1]?.messages.find((message) => message.role === "tool");
@@ -155,6 +155,16 @@ class ReadThenWriteFakeProvider implements LLMProvider {
     }
 
     if (this.requestCount === 3) {
+      const writeResultMessage = request.messages.find(
+        (message) => message.role === "tool" && message.toolCallId === "call-write",
+      );
+      if (!writeResultMessage || writeResultMessage.role !== "tool") {
+        throw new Error("第三轮请求缺少 write_file Result");
+      }
+      const writeResult = JSON.parse(writeResultMessage.content) as { success?: unknown };
+      if (writeResult.success !== true) {
+        throw new Error("第三轮请求未携带成功的 write_file Result");
+      }
       yield { type: "text_delta", content: "result.txt 已创建" };
       yield {
         type: "message_end",
@@ -194,7 +204,7 @@ test("runAgentEvalCase verifies read_file Result before writing and captures the
   assert.equal(provider.secondRequestReadResult, readThenWriteContent);
   assert.deepEqual(provider.requests[0]?.tools?.map((tool) => tool.name), ["read_file", "write_file"]);
   assert.deepEqual(selectToolCalls(metadata.traceEvents).map((call) => call.name), ["read_file", "write_file"]);
-  assert.deepEqual(findUnpairedToolCallIds(metadata.traceEvents), []);
+  assert.deepEqual(findToolProtocolViolations(metadata.traceEvents), []);
   const results = selectToolResults(metadata.traceEvents);
   assert.deepEqual(results.map((result) => result.name), ["read_file", "write_file"]);
   assert.equal(results.every((result) => result.result.success), true);
