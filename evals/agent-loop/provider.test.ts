@@ -8,6 +8,7 @@ import type {
   ToolSchema,
 } from "../../packages/agent/src/query-engine/provider.js";
 import type { AgentEvalRunMetadata } from "./assertions.js";
+import { setCleanupForTest } from "./internal/cleanup.js";
 import { redactMetadata, runAgentEvalCase } from "./provider.js";
 import {
   findUnpairedToolCallIds,
@@ -160,9 +161,59 @@ test("non-missing capture failures retain the capture stage", async () => {
   assert.match(metadata.runError?.message ?? "", /ENOTDIR|not a directory/i);
 });
 
-test("dangerous short or structural secrets fail closed without returning Trace metadata", async () => {
-  const provider = new ReadFileFakeProvider();
+test("metadata key collisions fail closed without returning metadata", async () => {
+  const response = await runAgentEvalCase({
+    caseId: "read-file",
+    prompt: "请读取 notes.txt。",
+    enabledTools: ["read_file"],
+    provider: new ModelFailureFakeProvider(),
+    model: "fake-model",
+    maxContextTokens: 1_000,
+    maxOutputTokens: 100,
+    secrets: ["runError"],
+  });
+
+  assert.equal(response.metadata, undefined);
+  assert.match(response.error ?? "", /安全|配置/);
+});
+
+test("TraceEvent key collisions fail closed without returning metadata", async () => {
+  const response = await runAgentEvalCase({
+    caseId: "read-file",
+    prompt: "请读取 notes.txt，并告诉我其中的验证码。",
+    enabledTools: ["read_file"],
+    provider: new ReadFileFakeProvider(),
+    model: "fake-model",
+    maxContextTokens: 1_000,
+    maxOutputTokens: 100,
+    secrets: ["timestamp"],
+  });
+
+  assert.equal(response.metadata, undefined);
+  assert.match(response.error ?? "", /安全|配置/);
+});
+
+test("TraceEvent required field values fail closed without changing their structure", () => {
+  const secret = "timestamp-secret-7319";
+  const event: TraceEvent = {
+    id: "event-1",
+    traceId: "trace-1",
+    sequence: 1,
+    timestamp: `2026-08-26T00:00:00.000Z-${secret}`,
+    name: "agent.turn",
+    phase: "start",
+    data: {},
+  };
+
+  assert.throws(
+    () => redactMetadata([event], [secret]),
+    /安全|配置/,
+  );
+});
+
+test("TraceEvent structural values fail closed without heuristic secret filtering", async () => {
   for (const secret of ["tool", "tool.call"]) {
+    const provider = new ReadFileFakeProvider();
     const response = await runAgentEvalCase({
       caseId: "read-file",
       prompt: "请读取 notes.txt，并告诉我其中的验证码。",
@@ -178,7 +229,19 @@ test("dangerous short or structural secrets fail closed without returning Trace 
     assert.doesNotMatch(JSON.stringify(response), new RegExp(secret.replace(".", "\\.")));
     assert.match(response.error ?? "", /安全|配置/i);
   }
-  assert.equal(provider.requests.length, 0);
+});
+
+test("payload secrets are redacted exactly regardless of their shape", () => {
+  const secret = "a_b";
+  const redacted = redactMetadata({
+    payload: {
+      [`field-${secret}`]: `value-${secret}`,
+    },
+  }, [secret]) as { payload: Record<string, string> };
+
+  assert.deepEqual(redacted.payload, {
+    "field-[REDACTED]": "value-[REDACTED]",
+  });
 });
 
 test("redactMetadata removes exact secrets from nested keys and values without breaking Trace selectors", () => {
@@ -235,21 +298,64 @@ test("redactMetadata removes exact secrets from nested keys and values without b
   assert.match(String((result?.result.data as { content?: string } | undefined)?.content), /REDACTED/);
 });
 
+test("selector identity collisions fail closed even when both sides are redacted", () => {
+  const secret = "call-id-secret-7319";
+  const callEvent: TraceEvent = {
+    id: "event-call",
+    traceId: "trace-1",
+    sequence: 1,
+    timestamp: "2026-08-26T00:00:00.000Z",
+    name: "tool.call",
+    phase: "start",
+    data: {
+      input: {
+        id: secret,
+        name: "read_file",
+        input: { path: "notes.txt" },
+      },
+    },
+  };
+  const resultEvent: TraceEvent = {
+    id: "event-result",
+    traceId: "trace-1",
+    sequence: 2,
+    timestamp: "2026-08-26T00:00:00.000Z",
+    name: "tool.result",
+    phase: "event",
+    data: {
+      toolCallId: secret,
+      name: "read_file",
+      input: { path: "notes.txt" },
+      result: { success: true, data: { content: "ok" } },
+    },
+  };
+
+  assert.throws(
+    () => redactMetadata([callEvent, resultEvent], [secret]),
+    /安全|配置/,
+  );
+});
+
 test("cleanup error takes precedence over a prior model error", async () => {
-  const response = await runAgentEvalCase({
-    caseId: "read-file",
-    prompt: "请读取 notes.txt。",
-    enabledTools: ["read_file"],
-    provider: new ModelFailureFakeProvider(),
-    model: "fake-model",
-    maxContextTokens: 1_000,
-    maxOutputTokens: 100,
-  }, async () => {
+  setCleanupForTest(async () => {
     throw new Error("cleanup contains secret SHOULD NOT LEAK");
   });
+  try {
+    const response = await runAgentEvalCase({
+      caseId: "read-file",
+      prompt: "请读取 notes.txt。",
+      enabledTools: ["read_file"],
+      provider: new ModelFailureFakeProvider(),
+      model: "fake-model",
+      maxContextTokens: 1_000,
+      maxOutputTokens: 100,
+    });
 
-  const metadata = response.metadata?.evalRun as AgentEvalRunMetadata;
-  assert.equal(metadata.runError?.stage, "cleanup");
-  assert.match(metadata.runError?.message ?? "", /清理|cleanup/i);
-  assert.doesNotMatch(metadata.runError?.message ?? "", /SHOULD NOT LEAK|model exploded/);
+    const metadata = response.metadata?.evalRun as AgentEvalRunMetadata;
+    assert.equal(metadata.runError?.stage, "cleanup");
+    assert.match(metadata.runError?.message ?? "", /清理|cleanup/i);
+    assert.doesNotMatch(metadata.runError?.message ?? "", /SHOULD NOT LEAK|model exploded/);
+  } finally {
+    setCleanupForTest(undefined);
+  }
 });

@@ -3,7 +3,7 @@ import type {
   CallApiContextParams,
   ProviderResponse,
 } from "promptfoo";
-import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,7 @@ import { ToolRegistry } from "../../packages/agent/src/tools/registry.js";
 import type { LLMProvider } from "../../packages/agent/src/query-engine/provider.js";
 import type { TraceEvent } from "@dkagent/trace";
 import type { AgentEvalRunMetadata } from "./assertions.js";
+import { cleanupRunRoot } from "./internal/cleanup.js";
 import { findUnpairedToolCallIds, selectToolCalls, selectToolResults } from "./trace-selectors.js";
 
 export type AgentEvalToolName =
@@ -44,27 +45,15 @@ export interface RunAgentEvalCaseOptions {
 
 const FIXTURES_ROOT = fileURLToPath(new URL("./fixtures/", import.meta.url));
 const REDACTED = "[REDACTED]";
-const MIN_REDACTABLE_SECRET_LENGTH = 8;
-const STRUCTURAL_SECRET_SHAPE = /^[a-z]+(?:[._][a-z]+)+$/;
 const UNSAFE_SECRET_ERROR = "评测配置不安全，无法安全返回运行结果";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isUnsafeSecret(secret: unknown): boolean {
-  return typeof secret !== "string"
-    || (secret.length > 0
-      && (
-        secret.trim().length === 0
-        || secret.length < MIN_REDACTABLE_SECRET_LENGTH
-        || STRUCTURAL_SECRET_SHAPE.test(secret)
-      ));
-}
-
 function redactionSecrets(secrets: readonly string[]): string[] {
   return [...new Set(secrets)]
-    .filter((secret) => secret.length > 0)
+    .filter((secret) => secret !== "")
     .sort((left, right) => right.length - left.length);
 }
 
@@ -73,27 +62,50 @@ function redactText(value: string, secrets: readonly string[]): string {
     .reduce((text, secret) => text.split(secret).join(REDACTED), value);
 }
 
+type RedactionScope = "payload" | "metadata" | "trace";
+
+function isAgentEvalRunMetadata(value: unknown): value is AgentEvalRunMetadata {
+  return typeof value === "object"
+    && value !== null
+    && !Array.isArray(value)
+    && typeof (value as Record<string, unknown>).caseId === "string"
+    && Array.isArray((value as Record<string, unknown>).traceEvents);
+}
+
 export function redactMetadata<T>(value: T, secrets: readonly string[]): T {
-  if (secrets.some((secret) => isUnsafeSecret(secret))) {
-    throw new Error(UNSAFE_SECRET_ERROR);
-  }
   const usableSecrets = redactionSecrets(secrets);
-  const redacted = redactMetadataValue(value, usableSecrets);
+  const redacted = redactMetadataValue(value, usableSecrets, "payload");
   assertTraceSelectorsRemainParseable(value, redacted);
   return redacted as T;
 }
 
-function redactMetadataValue(value: unknown, secrets: readonly string[]): unknown {
+function redactMetadataValue(
+  value: unknown,
+  secrets: readonly string[],
+  scope: RedactionScope,
+): unknown {
   if (typeof value === "string") {
     return redactText(value, secrets);
   }
   if (Array.isArray(value)) {
-    return value.map((item) => redactMetadataValue(item, secrets));
+    return value.map((item) => redactMetadataValue(item, secrets, scope));
   }
   if (value && typeof value === "object") {
+    const objectScope = isAgentEvalRunMetadata(value)
+      ? "metadata"
+      : isTraceEvent(value) ? "trace" : scope;
     const redacted: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      redacted[redactText(key, secrets)] = redactMetadataValue(item, secrets);
+      const redactedKey = redactText(key, secrets);
+      if (objectScope !== "payload" && redactedKey !== key) {
+        throw new Error(UNSAFE_SECRET_ERROR);
+      }
+      const childScope = objectScope === "trace" && key === "data"
+        ? "payload"
+        : objectScope === "metadata" && key === "traceEvents"
+          ? "trace"
+          : objectScope;
+      redacted[redactedKey] = redactMetadataValue(item, secrets, childScope);
     }
     return redacted;
   }
@@ -101,20 +113,58 @@ function redactMetadataValue(value: unknown, secrets: readonly string[]): unknow
 }
 
 function isTraceEvent(value: unknown): value is TraceEvent {
-  return typeof value === "object"
-    && value !== null
-    && !Array.isArray(value)
-    && typeof (value as Record<string, unknown>).id === "string"
-    && typeof (value as Record<string, unknown>).traceId === "string"
-    && typeof (value as Record<string, unknown>).sequence === "number"
-    && typeof (value as Record<string, unknown>).name === "string"
-    && typeof (value as Record<string, unknown>).phase === "string";
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.id === "string"
+    && typeof record.traceId === "string"
+    && typeof record.sequence === "number"
+    && typeof record.timestamp === "string"
+    && typeof record.name === "string"
+    && typeof record.phase === "string"
+    && Object.hasOwn(record, "data");
+}
+
+function assertTraceEventStructure(original: TraceEvent, redacted: unknown): void {
+  if (!isTraceEvent(redacted)) {
+    throw new Error(UNSAFE_SECRET_ERROR);
+  }
+  const originalStructure = { ...original } as Record<string, unknown>;
+  const redactedStructure = { ...redacted } as Record<string, unknown>;
+  delete originalStructure.data;
+  delete redactedStructure.data;
+  if (JSON.stringify(originalStructure) !== JSON.stringify(redactedStructure)) {
+    throw new Error(UNSAFE_SECRET_ERROR);
+  }
+}
+
+function assertAgentEvalRunStructure(
+  original: AgentEvalRunMetadata,
+  redacted: unknown,
+): void {
+  if (!isAgentEvalRunMetadata(redacted)) {
+    throw new Error(UNSAFE_SECRET_ERROR);
+  }
+  const redactedMetadata = redacted as AgentEvalRunMetadata;
+  if (original.caseId !== redactedMetadata.caseId
+    || original.traceEvents.length !== redactedMetadata.traceEvents.length) {
+    throw new Error(UNSAFE_SECRET_ERROR);
+  }
+  original.traceEvents.forEach((event, index) => {
+    assertTraceEventStructure(event, redactedMetadata.traceEvents[index]);
+  });
+  if (original.runError !== undefined
+    && original.runError.stage !== redactedMetadata.runError?.stage) {
+    throw new Error(UNSAFE_SECRET_ERROR);
+  }
 }
 
 function assertTraceSelectorArray(
   original: readonly TraceEvent[],
   redacted: readonly TraceEvent[],
 ): void {
+  original.forEach((event, index) => {
+    assertTraceEventStructure(event, redacted[index]);
+  });
   if (original.some((event, index) => (
     event.name !== redacted[index]?.name || event.phase !== redacted[index]?.phase
   ))) {
@@ -127,6 +177,17 @@ function assertTraceSelectorArray(
   if (
     originalCalls.length !== redactedCalls.length
     || originalResults.length !== redactedResults.length
+    || JSON.stringify(originalCalls.map((call) => [call.id, call.name]))
+      !== JSON.stringify(redactedCalls.map((call) => [call.id, call.name]))
+    || JSON.stringify(originalResults.map((result) => [
+      result.toolCallId,
+      result.name,
+      result.result.success,
+    ])) !== JSON.stringify(redactedResults.map((result) => [
+      result.toolCallId,
+      result.name,
+      result.result.success,
+    ]))
     || JSON.stringify(findUnpairedToolCallIds(original)) !== JSON.stringify(findUnpairedToolCallIds(redacted))
   ) {
     throw new Error(UNSAFE_SECRET_ERROR);
@@ -134,6 +195,9 @@ function assertTraceSelectorArray(
 }
 
 function assertTraceSelectorsRemainParseable(original: unknown, redacted: unknown): void {
+  if (isAgentEvalRunMetadata(original)) {
+    assertAgentEvalRunStructure(original, redacted);
+  }
   if (Array.isArray(original) && original.every(isTraceEvent)) {
     if (!Array.isArray(redacted) || redacted.length !== original.length || !redacted.every(isTraceEvent)) {
       throw new Error(UNSAFE_SECRET_ERROR);
@@ -235,20 +299,13 @@ function safeProviderSetupMessage(error: unknown): string {
     process.env.QWEN_API_KEY,
     process.env.DEEPSEEK_API_KEY,
   ].filter((value): value is string => Boolean(value));
-  if (values.some((value) => isUnsafeSecret(value))) return "Provider setup 失败";
   return redactText(errorMessage(error), redactionSecrets(values));
 }
 
-type RemoveRunRoot = (runRoot: string) => Promise<void>;
-
 export async function runAgentEvalCase(
   options: RunAgentEvalCaseOptions,
-  removeRunRoot: RemoveRunRoot = (runRoot) => rm(runRoot, { recursive: true, force: true }),
 ): Promise<ProviderResponse> {
   const secrets = options.secrets ?? [];
-  if (secrets.some((secret) => isUnsafeSecret(secret))) {
-    return { error: UNSAFE_SECRET_ERROR };
-  }
   const evalRun: AgentEvalRunMetadata = {
     caseId: options.caseId,
     traceEvents: [],
@@ -345,7 +402,7 @@ export async function runAgentEvalCase(
     refreshTrace();
     if (runRoot !== undefined) {
       try {
-        await removeRunRoot(runRoot);
+        await cleanupRunRoot(runRoot);
       } catch (error: unknown) {
         recordRunError("cleanup", error);
       }
