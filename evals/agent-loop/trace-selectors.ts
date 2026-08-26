@@ -21,8 +21,21 @@ export interface EvalToolResult {
   step?: number;
 }
 
+export type ToolProtocolViolationKind =
+  | "unpaired-call"
+  | "orphan-result"
+  | "duplicate-call-id"
+  | "duplicate-result-id"
+  | "tool-name-mismatch";
+
+export interface ToolProtocolViolation {
+  kind: ToolProtocolViolationKind;
+  id: string;
+  message: string;
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null
+  return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
 }
@@ -67,10 +80,85 @@ export function selectToolResults(events: readonly TraceEvent[]): EvalToolResult
 }
 
 export function findUnpairedToolCallIds(events: readonly TraceEvent[]): string[] {
-  const resultIds = new Set(selectToolResults(events).map((item) => item.toolCallId));
-  return selectToolCalls(events)
+  const calls = selectToolCalls(events);
+  const results = selectToolResults(events);
+  const resultIds = new Set(results.map((item) => item.toolCallId));
+  return [...new Set(calls
     .filter((call) => !resultIds.has(call.id))
-    .map((call) => call.id);
+    .map((call) => call.id))];
+}
+
+export function findToolProtocolViolations(
+  events: readonly TraceEvent[],
+): ToolProtocolViolation[] {
+  const calls = selectToolCalls(events);
+  const results = selectToolResults(events);
+  const callsById = new Map<string, EvalToolCall[]>();
+  const resultsById = new Map<string, EvalToolResult[]>();
+
+  for (const call of calls) {
+    const items = callsById.get(call.id) ?? [];
+    items.push(call);
+    callsById.set(call.id, items);
+  }
+  for (const result of results) {
+    const items = resultsById.get(result.toolCallId) ?? [];
+    items.push(result);
+    resultsById.set(result.toolCallId, items);
+  }
+
+  const violations: ToolProtocolViolation[] = [];
+  for (const [id, items] of callsById) {
+    if (items.length > 1) {
+      violations.push({
+        kind: "duplicate-call-id",
+        id,
+        message: `重复 Tool Call ID: ${id} (${items.length} 次)`,
+      });
+    }
+  }
+  for (const [id, items] of resultsById) {
+    if (items.length > 1) {
+      violations.push({
+        kind: "duplicate-result-id",
+        id,
+        message: `重复 Tool Result ID: ${id} (${items.length} 次)`,
+      });
+    }
+  }
+  for (const [id, items] of resultsById) {
+    if (!callsById.has(id)) {
+      violations.push({
+        kind: "orphan-result",
+        id,
+        message: `孤立 Tool Result，无对应 Call: ${id}`,
+      });
+    }
+  }
+  for (const [id, items] of callsById) {
+    if (!resultsById.has(id)) {
+      violations.push({
+        kind: "unpaired-call",
+        id,
+        message: `孤立 Tool Call，无对应 Result: ${id}`,
+      });
+    }
+  }
+  for (const [id, callItems] of callsById) {
+    const resultItems = resultsById.get(id);
+    if (!resultItems) continue;
+    const callNames = new Set(callItems.map((call) => call.name));
+    const resultNames = new Set(resultItems.map((result) => result.name));
+    if ([...callNames].some((name) => !resultNames.has(name))
+      || [...resultNames].some((name) => !callNames.has(name))) {
+      violations.push({
+        kind: "tool-name-mismatch",
+        id,
+        message: `Tool 名称不一致 (${id}): Call=${[...callNames].join(", ")}, Result=${[...resultNames].join(", ")}`,
+      });
+    }
+  }
+  return violations;
 }
 
 export function hasNormalTermination(events: readonly TraceEvent[]): boolean {
