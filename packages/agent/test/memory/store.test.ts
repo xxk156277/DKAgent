@@ -147,14 +147,8 @@ test("非法候选记忆会被拒绝", () => {
 
     assert.throws(() => store.upsert({ ...input, key: "Answer Style", content: "简洁" }), /key/);
     assert.throws(() => store.upsert({ ...input, key: "style", content: "   " }), /content/);
-    assert.throws(
-        () => store.upsert({ ...input, key: "style", content: "x".repeat(501) }),
-        /content/,
-    );
-    assert.throws(
-        () => store.upsert({ ...input, key: "style", content: "保存 api key" }),
-        /凭据/,
-    );
+    assert.throws(() => store.upsert({ ...input, key: "style", content: "x".repeat(501) }), /content/);
+    assert.throws(() => store.upsert({ ...input, key: "style", content: "保存 api key" }), /凭据/);
     for (const credential of [
         "api-key",
         "api_key",
@@ -166,10 +160,7 @@ test("非法候选记忆会被拒绝", () => {
         "refresh_token",
         "refreshtoken",
     ]) {
-        assert.throws(
-            () => store.upsert({ ...input, key: "style", content: `保存 ${credential}` }),
-            /凭据/,
-        );
+        assert.throws(() => store.upsert({ ...input, key: "style", content: `保存 ${credential}` }), /凭据/);
     }
     store.close();
 });
@@ -190,11 +181,7 @@ test("凭据语义会联合扫描 key/content 并抵抗分隔符与零宽字符�
         { key: "note", content: "保存 a\u200bpi.key：值" },
         { key: "pass", content: "word 不应该跨字段绕过" },
     ]) {
-        assert.throws(
-            () => store.upsert({ ...input, ...candidate }),
-            /凭据/,
-            JSON.stringify(candidate),
-        );
+        assert.throws(() => store.upsert({ ...input, ...candidate }), /凭据/, JSON.stringify(candidate));
     }
 
     store.close();
@@ -234,18 +221,17 @@ test("常见凭据值前缀会被拒绝，普通 token 预算仍可保存", () =
         "AWS：AKIAEXAMPLE",
         "标点绕过：s\u200bk-example",
     ]) {
-        assert.throws(
-            () => store.upsert({ ...input, content }),
-            /凭据/,
-            content,
-        );
+        assert.throws(() => store.upsert({ ...input, content }), /凭据/, content);
     }
 
-    assert.equal(store.upsert({
-        ...input,
-        key: "token_budget",
-        content: "每轮保留 500 token 预算",
-    }).content, "每轮保留 500 token 预算");
+    assert.equal(
+        store.upsert({
+            ...input,
+            key: "token_budget",
+            content: "每轮保留 500 token 预算",
+        }).content,
+        "每轮保留 500 token 预算",
+    );
     store.close();
 });
 

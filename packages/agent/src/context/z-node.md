@@ -10,7 +10,6 @@ Compress：压缩
 从哪里收集：
 系统提示词、当前用户画像、长期记忆、工具列表、RAG外部知识
 
-
 下一阶段进入“上下文工程”。先把核心概念定死：
 
 > 上下文不是 `messages[]`。  
@@ -34,9 +33,9 @@ flowchart LR
 
 ```typescript
 queryEngine.query({
-  systemPrompt,
-  messages: [...this.messages],
-  tools,
+    systemPrompt,
+    messages: [...this.messages],
+    tools,
 });
 ```
 
@@ -68,10 +67,10 @@ flowchart LR
 
 ```typescript
 const context = await contextManager.build({
-  messages,
-  systemPrompt,
-  tools,
-  currentInput,
+    messages,
+    systemPrompt,
+    tools,
+    currentInput,
 });
 
 await queryEngine.query(context);
@@ -102,9 +101,9 @@ flowchart TB
 
 ```typescript
 [
-  { role: "user", content: "你好" },
-  { role: "assistant", content: "你好，我是 DKAgent" },
-]
+    { role: "user", content: "你好" },
+    { role: "assistant", content: "你好，我是 DKAgent" },
+];
 ```
 
 它只是上下文的一个来源。
@@ -113,12 +112,12 @@ flowchart TB
 
 ```typescript
 [
-  {
-    question: "闭包是什么？",
-    expertAnswer: "闭包是函数与词法环境的组合。",
-    sourceFile: "javascript/closure.md",
-  },
-]
+    {
+        question: "闭包是什么？",
+        expertAnswer: "闭包是函数与词法环境的组合。",
+        sourceFile: "javascript/closure.md",
+    },
+];
 ```
 
 它是外部知识，不应该永久塞进聊天历史。
@@ -222,35 +221,29 @@ flowchart LR
 ## 1. Gather：从哪里收集
 
 ```typescript
-const packets = [
-  systemPromptPacket,
-  currentUserPacket,
-  ...historyPackets,
-  ...toolResultPackets,
-  ...ragPackets,
-];
+const packets = [systemPromptPacket, currentUserPacket, ...historyPackets, ...toolResultPackets, ...ragPackets];
 ```
 
 统一成一种中间类型：
 
 ```typescript
 interface ContextPacket {
-  id: string;
+    id: string;
 
-  // system、message、tool、rag
-  kind: ContextKind;
+    // system、message、tool、rag
+    kind: ContextKind;
 
-  // 最终准备交给模型的内容
-  content: string;
+    // 最终准备交给模型的内容
+    content: string;
 
-  // 越大越不能删除
-  priority: number;
+    // 越大越不能删除
+    priority: number;
 
-  // 估算占用多少 Token
-  estimatedTokens: number;
+    // 估算占用多少 Token
+    estimatedTokens: number;
 
-  // 是否必须保留
-  required: boolean;
+    // 是否必须保留
+    required: boolean;
 }
 ```
 
@@ -274,34 +267,29 @@ flowchart TD
 伪代码：
 
 ```typescript
-function selectPackets(
-  packets: ContextPacket[],
-  tokenBudget: number,
-): ContextPacket[] {
-  const selected = [];
-  let usedTokens = 0;
+function selectPackets(packets: ContextPacket[], tokenBudget: number): ContextPacket[] {
+    const selected = [];
+    let usedTokens = 0;
 
-  // System Prompt、当前用户任务一定保留
-  for (const packet of packets.filter(item => item.required)) {
-    selected.push(packet);
-    usedTokens += packet.estimatedTokens;
-  }
-
-  // 其他内容按优先级和时间选择
-  const candidates = packets
-    .filter(item => !item.required)
-    .sort(comparePriorityAndRecency);
-
-  for (const packet of candidates) {
-    if (usedTokens + packet.estimatedTokens > tokenBudget) {
-      continue;
+    // System Prompt、当前用户任务一定保留
+    for (const packet of packets.filter((item) => item.required)) {
+        selected.push(packet);
+        usedTokens += packet.estimatedTokens;
     }
 
-    selected.push(packet);
-    usedTokens += packet.estimatedTokens;
-  }
+    // 其他内容按优先级和时间选择
+    const candidates = packets.filter((item) => !item.required).sort(comparePriorityAndRecency);
 
-  return selected;
+    for (const packet of candidates) {
+        if (usedTokens + packet.estimatedTokens > tokenBudget) {
+            continue;
+        }
+
+        selected.push(packet);
+        usedTokens += packet.estimatedTokens;
+    }
+
+    return selected;
 }
 ```
 
@@ -334,18 +322,14 @@ flowchart LR
 伪代码：
 
 ```typescript
-function structureContext(
-  packets: ContextPacket[],
-): ContextSnapshot {
-  return {
-    systemPrompt: buildSystemPrompt(packets),
+function structureContext(packets: ContextPacket[]): ContextSnapshot {
+    return {
+        systemPrompt: buildSystemPrompt(packets),
 
-    messages: packets
-      .filter(canConvertToMessage)
-      .map(convertToAgentMessage),
+        messages: packets.filter(canConvertToMessage).map(convertToAgentMessage),
 
-    estimatedTokens: sumTokens(packets),
-  };
+        estimatedTokens: sumTokens(packets),
+    };
 }
 ```
 
@@ -380,11 +364,11 @@ flowchart TD
 
 ```typescript
 function compressPackets(packets, budget) {
-  return packets
-    .map(truncateLongToolResults)
-    .filter(removeOldLowPriorityMessages)
-    .filter(removeLowRankedRagEvidence)
-    .sliceUntilTokenBudget(budget);
+    return packets
+        .map(truncateLongToolResults)
+        .filter(removeOldLowPriorityMessages)
+        .filter(removeLowRankedRagEvidence)
+        .sliceUntilTokenBudget(budget);
 }
 ```
 
@@ -452,24 +436,24 @@ flowchart LR
 
 ```typescript
 interface ContextBuildInput {
-  systemPrompt?: string;
-  messages: readonly AgentMessage[];
-  tools: readonly ToolSchema[];
-  maxInputTokens: number;
-  reservedOutputTokens: number;
+    systemPrompt?: string;
+    messages: readonly AgentMessage[];
+    tools: readonly ToolSchema[];
+    maxInputTokens: number;
+    reservedOutputTokens: number;
 }
 
 interface ContextSnapshot {
-  systemPrompt?: string;
-  messages: AgentMessage[];
-  tools: ToolSchema[];
+    systemPrompt?: string;
+    messages: AgentMessage[];
+    tools: ToolSchema[];
 
-  estimatedInputTokens: number;
-  droppedMessageCount: number;
+    estimatedInputTokens: number;
+    droppedMessageCount: number;
 }
 
 interface ContextManager {
-  build(input: ContextBuildInput): Promise<ContextSnapshot>;
+    build(input: ContextBuildInput): Promise<ContextSnapshot>;
 }
 ```
 
@@ -481,10 +465,10 @@ interface ContextManager {
 
 ```typescript
 const response = await queryEngine.query({
-  model,
-  messages: [...this.messages],
-  tools,
-  systemPrompt,
+    model,
+    messages: [...this.messages],
+    tools,
+    systemPrompt,
 });
 ```
 
@@ -492,22 +476,22 @@ const response = await queryEngine.query({
 
 ```typescript
 const snapshot = await contextManager.build({
-  systemPrompt,
-  messages: this.messages,
-  tools: toolRegistry.getSchemas(),
+    systemPrompt,
+    messages: this.messages,
+    tools: toolRegistry.getSchemas(),
 
-  // 模型最大上下文预算
-  maxInputTokens: 16_000,
+    // 模型最大上下文预算
+    maxInputTokens: 16_000,
 
-  // 给模型输出预留空间
-  reservedOutputTokens: 2_000,
+    // 给模型输出预留空间
+    reservedOutputTokens: 2_000,
 });
 
 const response = await queryEngine.query({
-  model,
-  systemPrompt: snapshot.systemPrompt,
-  messages: snapshot.messages,
-  tools: snapshot.tools,
+    model,
+    systemPrompt: snapshot.systemPrompt,
+    messages: snapshot.messages,
+    tools: snapshot.tools,
 });
 ```
 
@@ -533,9 +517,8 @@ flowchart LR
 
 这就是上下文模块第一阶段最重要的边界。
 
-
-
 # 问题
+
 ### 如何理解每轮计算前，都需要「模型最大TOKEN-本轮预留TOKEN」
 
 假设：
@@ -545,6 +528,7 @@ flowchart LR
 可用TOKEN = 10_000 - 2_000;
 
 整体容量分配：
+
 ```text
 模型最大上下文：10000 Token
 ├── 本次输入最多：8000 Token
@@ -556,6 +540,7 @@ flowchart LR
 ```
 
 ### 为什么必须预留输出
+
 假如不减：
 输入已经占用 10000 Token
 模型最大容量 10000 Token

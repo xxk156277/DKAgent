@@ -1,11 +1,7 @@
 export { QueryEngine } from "./query-engine.js";
 export type { QueryParams } from "./query-engine.js";
 
-export {
-    parseModelStream,
-    StreamProtocolError,
-    ToolInputParseError,
-} from "./stream-parser.js";
+export { parseModelStream, StreamProtocolError, ToolInputParseError } from "./stream-parser.js";
 
 export {
     OpenAICompatibleProvider,

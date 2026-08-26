@@ -15,16 +15,14 @@ test("解析多种角色标题和时间格式，并保留原文位置", () => {
     const result = parseTranscript(source);
 
     assert.equal(result.source, source);
-    assert.deepEqual(result.turns.map((turn) => turn.speaker), [
-        "interviewer",
-        "candidate",
-        "interviewer",
-    ]);
-    assert.deepEqual(result.turns.map((turn) => turn.timestamp), [
-        "00:01:02",
-        "00:01:08",
-        undefined,
-    ]);
+    assert.deepEqual(
+        result.turns.map((turn) => turn.speaker),
+        ["interviewer", "candidate", "interviewer"],
+    );
+    assert.deepEqual(
+        result.turns.map((turn) => turn.timestamp),
+        ["00:01:02", "00:01:08", undefined],
+    );
     assert.equal(result.turns[1]?.content, "嗯，我主要负责 DSL 接入。");
     assert.equal(
         source.slice(result.turns[1]!.sourceStart, result.turns[1]!.sourceEnd),
@@ -65,8 +63,5 @@ test("支持冒号同行内容和 CRLF，字符位置仍对应原文", () => {
 });
 
 test("没有角色标题时明确拒绝，而不是猜测角色", () => {
-    assert.throws(
-        () => parseTranscript("请介绍项目\n我做了性能优化"),
-        /没有识别到说话人标题/,
-    );
+    assert.throws(() => parseTranscript("请介绍项目\n我做了性能优化"), /没有识别到说话人标题/);
 });

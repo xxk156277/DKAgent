@@ -1,7 +1,7 @@
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "include": ["src/knowledge/**/*.ts", "test/knowledge/**/*.test.ts"]
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "noEmit": true
+    },
+    "include": ["src/knowledge/**/*.ts", "test/knowledge/**/*.test.ts"]
 }

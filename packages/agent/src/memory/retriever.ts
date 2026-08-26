@@ -7,11 +7,7 @@ import type { MemoryEntry, MemoryReader, MemoryStore } from "./types.js";
  * 3. 返回 `Set` 而不是数组：自动去重，查找效率高
  */
 function tokenize(value: string): Set<string> {
-    const tokens = new Set<string>(
-        value
-            .toLowerCase()
-            .match(/[a-z0-9]+/g) ?? []
-    );
+    const tokens = new Set<string>(value.toLowerCase().match(/[a-z0-9]+/g) ?? []);
     const chineseChars = value.match(/[\u3400-\u9fff]/gu) ?? [];
 
     for (let index = 0; index + 1 < chineseChars.length; index += 1) {
@@ -41,17 +37,13 @@ function relevanceScore(queryTokens: ReadonlySet<string>, entry: MemoryEntry): n
 export class MemoryRetriever implements MemoryReader {
     private readonly formatter = new MemoryFormatter();
 
-    public constructor(private readonly store: MemoryStore) { }
+    public constructor(private readonly store: MemoryStore) {}
 
     public async recall(query: string): Promise<string> {
         const entries = this.store.list({ limit: 100 });
 
-        const profile = entries
-            .filter((entry) => entry.type === "profile")
-            .slice(0, 4);
-        const preference = entries
-            .filter((entry) => entry.type === "preference")
-            .slice(0, 4);
+        const profile = entries.filter((entry) => entry.type === "profile").slice(0, 4);
+        const preference = entries.filter((entry) => entry.type === "preference").slice(0, 4);
 
         const queryTokens = tokenize(query);
 
@@ -59,14 +51,15 @@ export class MemoryRetriever implements MemoryReader {
             .filter((entry) => entry.type === "decision")
             .map((entry) => ({
                 entry,
-                score: relevanceScore(queryTokens, entry)
+                score: relevanceScore(queryTokens, entry),
             }))
             .filter(({ score }) => score > 0)
-            .sort((left, right) => (
-                right.score - left.score
-                || right.entry.updatedAt.localeCompare(left.entry.updatedAt)
-                || left.entry.id.localeCompare(right.entry.id)
-            ))
+            .sort(
+                (left, right) =>
+                    right.score - left.score ||
+                    right.entry.updatedAt.localeCompare(left.entry.updatedAt) ||
+                    left.entry.id.localeCompare(right.entry.id),
+            )
             .slice(0, 3)
             .map(({ entry }) => entry);
 

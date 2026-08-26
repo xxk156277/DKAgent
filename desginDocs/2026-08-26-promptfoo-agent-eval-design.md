@@ -118,13 +118,13 @@ Provider 复用 `@dkagent/trace` 的 `TraceEvent`，只增加测评运行所必�
 
 ```ts
 interface AgentEvalRunMetadata {
-  caseId: string;
-  traceEvents: TraceEvent[];
-  runError?: {
-    stage: "setup" | "model" | "agent" | "cleanup";
-    message: string;
-  };
-  finalFiles?: Record<string, string>;
+    caseId: string;
+    traceEvents: TraceEvent[];
+    runError?: {
+        stage: "setup" | "model" | "agent" | "cleanup";
+        message: string;
+    };
+    finalFiles?: Record<string, string>;
 }
 ```
 
@@ -196,14 +196,14 @@ Fixture `notes.txt` 包含稳定标记 `DKAGENT_EVAL_7319`。
 
 ## 9. 失败分类
 
-| 类型 | 例子 | Promptfoo 表现 |
-|---|---|---|
-| Setup Failure | Fixture 复制或配置加载失败 | Provider Error |
-| Model Failure | 远程 API 超时或协议错误 | Run Error，并保留已有 Trace |
-| Tool Selection Failure | 选择错误 Tool 或 `no-tool` 发生调用 | Tool 组件失败 |
-| Tool Execution Failure | Tool Result 为失败 | Result 组件失败 |
-| Protocol Failure | Call 没有对应 Result | Integrity 组件失败 |
-| Outcome Failure | 回答缺少标记或 `result.txt` 错误 | Outcome 组件失败 |
+| 类型                   | 例子                                | Promptfoo 表现              |
+| ---------------------- | ----------------------------------- | --------------------------- |
+| Setup Failure          | Fixture 复制或配置加载失败          | Provider Error              |
+| Model Failure          | 远程 API 超时或协议错误             | Run Error，并保留已有 Trace |
+| Tool Selection Failure | 选择错误 Tool 或 `no-tool` 发生调用 | Tool 组件失败               |
+| Tool Execution Failure | Tool Result 为失败                  | Result 组件失败             |
+| Protocol Failure       | Call 没有对应 Result                | Integrity 组件失败          |
+| Outcome Failure        | 回答缺少标记或 `result.txt` 错误    | Outcome 组件失败            |
 
 失败消息只包含脱敏后的必要诊断，不写入 API Key、环境变量或未脱敏请求头。
 

@@ -1,15 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StreamEvent } from "../../src/query-engine/provider.js";
-import {
-    parseModelStream,
-    StreamProtocolError,
-    ToolInputParseError,
-} from "../../src/query-engine/stream-parser.js";
+import { parseModelStream, StreamProtocolError, ToolInputParseError } from "../../src/query-engine/stream-parser.js";
 
-async function* eventsOf(
-    events: StreamEvent[],
-): AsyncIterable<StreamEvent> {
+async function* eventsOf(events: StreamEvent[]): AsyncIterable<StreamEvent> {
     for (const event of events) {
         yield event;
     }
@@ -108,12 +102,9 @@ test("截断的 Tool JSON 提供诊断但不泄露原文", async () => {
 });
 
 test("Stream 缺少 Message End 时明确失败", async () => {
-    await assert.rejects(
-        parseModelStream(eventsOf([{ type: "text_delta", content: "未完成" }])),
-        (error: unknown) => {
-            assert.ok(error instanceof StreamProtocolError);
-            assert.match(error.message, /Message End/);
-            return true;
-        },
-    );
+    await assert.rejects(parseModelStream(eventsOf([{ type: "text_delta", content: "未完成" }])), (error: unknown) => {
+        assert.ok(error instanceof StreamProtocolError);
+        assert.match(error.message, /Message End/);
+        return true;
+    });
 });

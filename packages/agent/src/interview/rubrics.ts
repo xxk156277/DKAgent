@@ -6,10 +6,7 @@ export interface QuestionRubric {
     applicableDimensions: Array<Exclude<GlobalDimension, "expressionQuality">>;
 }
 
-export const QUESTION_RUBRICS: Record<
-    Exclude<InterviewQuestionType, "procedural">,
-    QuestionRubric
-> = {
+export const QUESTION_RUBRICS: Record<Exclude<InterviewQuestionType, "procedural">, QuestionRubric> = {
     project: {
         prompt: "评价项目背景、本人职责、决策依据、实施细节、结果证据和追问一致性，不与标准答案比较。",
         applicableDimensions: ["contentQuality", "depthAndEvidence", "analysisAndTradeoffs"],

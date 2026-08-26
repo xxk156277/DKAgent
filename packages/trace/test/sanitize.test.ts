@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-    sanitizeTraceEvent,
-    Tracer,
-    type TraceEvent,
-    type TraceSink,
-} from "../src/index.js";
+import { sanitizeTraceEvent, Tracer, type TraceEvent, type TraceSink } from "../src/index.js";
 
 const memoryFact = "用户偏好先讲结论";
 
@@ -22,15 +17,17 @@ function traceEvent(data: unknown): TraceEvent {
 }
 
 test("sanitizeTraceEvent 替换任意字符串中的 recalled memory 块", () => {
-    const sanitized = sanitizeTraceEvent(traceEvent({
-        systemPrompt: [
-            "规则",
-            `<recalled_memory>${memoryFact}</recalled_memory>`,
-            `<recalled_memory>${memoryFact}</recalled_memory>`,
-        ].join("\n"),
-        nested: { value: `<recalled_memory>${memoryFact}</recalled_memory>` },
-        ordinaryText: "普通用户文本保持原样",
-    }));
+    const sanitized = sanitizeTraceEvent(
+        traceEvent({
+            systemPrompt: [
+                "规则",
+                `<recalled_memory>${memoryFact}</recalled_memory>`,
+                `<recalled_memory>${memoryFact}</recalled_memory>`,
+            ].join("\n"),
+            nested: { value: `<recalled_memory>${memoryFact}</recalled_memory>` },
+            ordinaryText: "普通用户文本保持原样",
+        }),
+    );
 
     assert.doesNotMatch(JSON.stringify(sanitized), new RegExp(memoryFact));
     assert.match(JSON.stringify(sanitized), /\[RECALLED_MEMORY_REDACTED\]/);

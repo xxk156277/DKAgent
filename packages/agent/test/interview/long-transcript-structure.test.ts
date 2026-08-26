@@ -4,10 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { parseTranscript } from "../../src/interview/transcript-parser.js";
 import { structureInterview } from "../../src/interview/structurer.js";
-import type {
-    InterviewQuestionType,
-    ParsedTranscript,
-} from "../../src/interview/types.js";
+import type { InterviewQuestionType, ParsedTranscript } from "../../src/interview/types.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import { FakeTextProvider } from "./fake-provider.js";
 
@@ -41,17 +38,11 @@ function buildFixtureRelation(transcript: ParsedTranscript): string {
     let activeClusterKey = "";
     let clusterRun = 0;
     const nonQuestionTurnIds = transcript.turns
-        .filter((turn) => (
-            turn.speaker === "interviewer"
-            && turn.content === "好的，我们继续。"
-        ))
+        .filter((turn) => turn.speaker === "interviewer" && turn.content === "好的，我们继续。")
         .map((turn) => turn.id);
     const actualQuestionTurnIds = new Set(
         transcript.turns
-            .filter((turn) => (
-                turn.speaker === "interviewer"
-                && !nonQuestionTurnIds.includes(turn.id)
-            ))
+            .filter((turn) => turn.speaker === "interviewer" && !nonQuestionTurnIds.includes(turn.id))
             .map((turn) => turn.id),
     );
 
@@ -66,16 +57,9 @@ function buildFixtureRelation(transcript: ParsedTranscript): string {
             interviewerRunEnd += 1;
         }
         const answerTurnIds: string[] = [];
-        for (
-            let index = interviewerRunEnd + 1;
-            index < transcript.turns.length;
-            index += 1
-        ) {
+        for (let index = interviewerRunEnd + 1; index < transcript.turns.length; index += 1) {
             const next = transcript.turns[index]!;
-            if (
-                next.speaker === "interviewer"
-                && actualQuestionTurnIds.has(next.id)
-            ) break;
+            if (next.speaker === "interviewer" && actualQuestionTurnIds.has(next.id)) break;
             if (next.speaker === "candidate") answerTurnIds.push(next.id);
         }
         const type = questionType(turn.content);
@@ -108,10 +92,7 @@ function buildFixtureRelation(transcript: ParsedTranscript): string {
 }
 
 test("长项目面试稿不会丢题、改写原文或删除口头表达", async () => {
-    const source = await readFile(
-        resolve("packages/agent/test/fixtures/long-project-interview.md"),
-        "utf8",
-    );
+    const source = await readFile(resolve("packages/agent/test/fixtures/long-project-interview.md"), "utf8");
     const transcript = parseTranscript(source);
     assert.ok(transcript.turns.length >= 80);
     const mistakenTurn = transcript.turns.find((turn) => turn.content.includes("reat"));
@@ -119,16 +100,12 @@ test("长项目面试稿不会丢题、改写原文或删除口头表达", async
 
     const structured = await structureInterview({
         transcript,
-        queryEngine: new QueryEngine(
-            new FakeTextProvider(buildFixtureRelation(transcript)),
-        ),
+        queryEngine: new QueryEngine(new FakeTextProvider(buildFixtureRelation(transcript))),
         model: "fake-model",
         abortSignal: new AbortController().signal,
     });
 
-    const interviewerCount = transcript.turns.filter(
-        (turn) => turn.speaker === "interviewer",
-    ).length;
+    const interviewerCount = transcript.turns.filter((turn) => turn.speaker === "interviewer").length;
     const classifiedTurnIds = new Set([
         ...structured.questions.flatMap((question) => question.promptTurnIds),
         ...structured.nonQuestionTurnIds,
@@ -136,10 +113,7 @@ test("长项目面试稿不会丢题、改写原文或删除口头表达", async
     assert.equal(classifiedTurnIds.size, interviewerCount);
     assert.ok(structured.questions.length > interviewerCount - 1);
     assert.equal(transcript.source, source);
-    assert.match(
-        transcript.turns.map((turn) => turn.content).join("\n"),
-        /嗯|呃|然后然后/,
-    );
+    assert.match(transcript.turns.map((turn) => turn.content).join("\n"), /嗯|呃|然后然后/);
     assert.match(mistakenTurn.content, /reat/);
     assert.ok(structured.clusters.some((cluster) => cluster.questionIds.length >= 4));
     assert.ok(structured.questions.some((question) => !question.scored));
@@ -151,8 +125,6 @@ test("长项目面试稿不会丢题、改写原文或删除口头表达", async
         }
     }
 
-    const collaboration = structured.questions.find(
-        (question) => question.originalQuestion === "你如何推动上线？",
-    );
+    const collaboration = structured.questions.find((question) => question.originalQuestion === "你如何推动上线？");
     assert.deepEqual(collaboration?.answerTurnIds.length, 2);
 });

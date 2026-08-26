@@ -43,7 +43,7 @@ export class ContextManager implements ContextBuilder {
         private readonly tokenCounter: ContextTokenCounter,
         private readonly compressor?: Compressor,
         private readonly tracer: Tracer = new Tracer(),
-    ) { }
+    ) {}
 
     public build(input: ContextBuildInput): Promise<ContextSnapshot> {
         return this.tracer.span("context.build", input, async (span) => {
@@ -53,17 +53,17 @@ export class ContextManager implements ContextBuilder {
             const built = compaction?.options.enabled
                 ? await this.buildWithCompaction(input, availableInputTokens, span)
                 : await this.buildWithDeletionFallback({
-                    input,
-                    messages: input.messages,
-                    systemPrompt: input.systemPrompt,
-                    tokenLimit: availableInputTokens,
-                    hardTokenLimit: availableInputTokens,
-                    availableInputTokens,
-                    compactionAttempted: false,
-                    compacted: false,
-                    fallbackUsed: false,
-                    summarizedMessageCount: 0,
-                });
+                      input,
+                      messages: input.messages,
+                      systemPrompt: input.systemPrompt,
+                      tokenLimit: availableInputTokens,
+                      hardTokenLimit: availableInputTokens,
+                      availableInputTokens,
+                      compactionAttempted: false,
+                      compacted: false,
+                      fallbackUsed: false,
+                      summarizedMessageCount: 0,
+                  });
 
             span.event("context.snapshot.created", {
                 context: built.snapshot,
@@ -84,10 +84,11 @@ export class ContextManager implements ContextBuilder {
                     tokensBefore: built.tokensBeforeCompaction,
                     tokensAfter: built.estimatedInputTokens,
                     tokensSaved: Math.max(0, built.tokensBeforeCompaction - built.estimatedInputTokens),
-                    savedRatio: built.tokensBeforeCompaction === 0
-                        ? 0
-                        : Math.max(0, built.tokensBeforeCompaction - built.estimatedInputTokens)
-                            / built.tokensBeforeCompaction,
+                    savedRatio:
+                        built.tokensBeforeCompaction === 0
+                            ? 0
+                            : Math.max(0, built.tokensBeforeCompaction - built.estimatedInputTokens) /
+                              built.tokensBeforeCompaction,
                     summarizedMessageCount: built.summarizedMessageCount,
                     retainedMessageCount: built.retainedMessageCount,
                     fallbackUsed: built.fallbackUsed,
@@ -115,11 +116,7 @@ export class ContextManager implements ContextBuilder {
         const targetTokens = Math.floor(availableInputTokens * compaction.options.targetRatio);
         const activeMessages = input.messages.slice(compaction.state.firstKeptMessageIndex);
         const currentSystemPrompt = this.createSystemPrompt(input.systemPrompt, compaction.state.summary);
-        const tokensBeforeCompaction = await this.countCompleteMessages(
-            input,
-            activeMessages,
-            currentSystemPrompt,
-        );
+        const tokensBeforeCompaction = await this.countCompleteMessages(input, activeMessages, currentSystemPrompt);
         span.event("context.tokens.counted", {
             stage: "before_compaction",
             tokens: tokensBeforeCompaction,
@@ -155,10 +152,7 @@ export class ContextManager implements ContextBuilder {
             messages: [],
             tools: input.tools,
         });
-        const rawMessageBudget = Math.max(
-            0,
-            targetTokens - fixedTokens - compaction.options.maxSummaryTokens,
-        );
+        const rawMessageBudget = Math.max(0, targetTokens - fixedTokens - compaction.options.maxSummaryTokens);
         const cutGroupIndex = this.findSummaryCutGroupIndex(groups, rawMessageBudget);
 
         if (cutGroupIndex === 0) {
@@ -183,12 +177,8 @@ export class ContextManager implements ContextBuilder {
             });
         }
 
-        const messagesToSummarize = groups
-            .slice(0, cutGroupIndex)
-            .flatMap((group) => group.messages);
-        const retainedMessages = groups
-            .slice(cutGroupIndex)
-            .flatMap((group) => group.messages);
+        const messagesToSummarize = groups.slice(0, cutGroupIndex).flatMap((group) => group.messages);
+        const retainedMessages = groups.slice(cutGroupIndex).flatMap((group) => group.messages);
         span.event("context.compaction.planned", {
             strategy: "summary",
             rawMessageBudget,
@@ -207,8 +197,7 @@ export class ContextManager implements ContextBuilder {
             });
             const nextContextState: ConversationContextState = {
                 summary,
-                firstKeptMessageIndex:
-                    compaction.state.firstKeptMessageIndex + messagesToSummarize.length,
+                firstKeptMessageIndex: compaction.state.firstKeptMessageIndex + messagesToSummarize.length,
             };
             return this.buildWithDeletionFallback({
                 input,
@@ -273,28 +262,22 @@ export class ContextManager implements ContextBuilder {
     }): Promise<BuiltContext> {
         const measuredGroups = await this.measureGroups(groupContextMessages(params.messages));
         const selectedGroups = [...measuredGroups];
-        let estimatedInputTokens = await this.countCompleteInput(
-            params.input,
-            selectedGroups,
-            params.systemPrompt,
-        );
+        let estimatedInputTokens = await this.countCompleteInput(params.input, selectedGroups, params.systemPrompt);
 
         while (estimatedInputTokens > params.tokenLimit) {
             const removableIndex = selectedGroups.findIndex((group) => !group.required);
             if (removableIndex < 0) {
                 if (estimatedInputTokens <= params.hardTokenLimit) break;
-                throw new Error([
-                    "必留上下文超过可用 Token 预算",
-                    `可用：${params.hardTokenLimit}`,
-                    `需要：${estimatedInputTokens}`,
-                ].join("；"));
+                throw new Error(
+                    [
+                        "必留上下文超过可用 Token 预算",
+                        `可用：${params.hardTokenLimit}`,
+                        `需要：${estimatedInputTokens}`,
+                    ].join("；"),
+                );
             }
             selectedGroups.splice(removableIndex, 1);
-            estimatedInputTokens = await this.countCompleteInput(
-                params.input,
-                selectedGroups,
-                params.systemPrompt,
-            );
+            estimatedInputTokens = await this.countCompleteInput(params.input, selectedGroups, params.systemPrompt);
         }
 
         const selectedMessages = selectedGroups.flatMap((group) => group.messages);
@@ -311,22 +294,22 @@ export class ContextManager implements ContextBuilder {
             ...(params.tokensBeforeCompaction === undefined
                 ? {}
                 : { tokensBeforeCompaction: params.tokensBeforeCompaction }),
-            ...(params.nextContextState === undefined
-                ? {}
-                : { nextContextState: params.nextContextState }),
+            ...(params.nextContextState === undefined ? {} : { nextContextState: params.nextContextState }),
             summarizedMessageCount: params.summarizedMessageCount,
         });
     }
 
     private measureGroups(groups: ContextMessageGroup[]): Promise<ContextMessageGroup[]> {
-        return Promise.all(groups.map(async (group) => ({
-            ...group,
-            messages: [...group.messages],
-            estimatedTokens: await this.tokenCounter.count({
-                messages: group.messages,
-                tools: [],
-            }),
-        })));
+        return Promise.all(
+            groups.map(async (group) => ({
+                ...group,
+                messages: [...group.messages],
+                estimatedTokens: await this.tokenCounter.count({
+                    messages: group.messages,
+                    tools: [],
+                }),
+            })),
+        );
     }
 
     private countCompleteInput(
@@ -380,9 +363,7 @@ export class ContextManager implements ContextBuilder {
             ...(params.systemPrompt === undefined ? {} : { systemPrompt: params.systemPrompt }),
             messages: [...params.messages],
             tools: [...params.input.tools],
-            ...(params.nextContextState === undefined
-                ? {}
-                : { nextContextState: params.nextContextState }),
+            ...(params.nextContextState === undefined ? {} : { nextContextState: params.nextContextState }),
         };
         return {
             snapshot,
@@ -424,9 +405,9 @@ export class ContextManager implements ContextBuilder {
         }
         if (!compaction.summaryModel.trim()) throw new Error("summaryModel 不能为空");
         if (
-            !Number.isInteger(state.firstKeptMessageIndex)
-            || state.firstKeptMessageIndex < 0
-            || state.firstKeptMessageIndex > input.messages.length
+            !Number.isInteger(state.firstKeptMessageIndex) ||
+            state.firstKeptMessageIndex < 0 ||
+            state.firstKeptMessageIndex > input.messages.length
         ) {
             throw new Error("firstKeptMessageIndex 超出消息历史范围");
         }

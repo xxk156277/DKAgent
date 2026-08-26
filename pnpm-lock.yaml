@@ -14,6 +14,9 @@ importers:
       '@types/node':
         specifier: ^26.1.2
         version: 26.2.0
+      prettier:
+        specifier: ^3.9.6
+        version: 3.9.6
       tsx:
         specifier: ^4.23.1
         version: 4.23.12
@@ -1862,6 +1865,11 @@ packages:
   postgres-interval@1.1.0:
     resolution: {integrity: sha512-txJzyrdoPw5F06xk3BEtzl46JCr6qU2DM8gfulxBFgqGKmfREbrcFyVqllttHuqWtafoBmowgJtGjm6kPGA/bg==}
     engines: {node: '>=0.10.0'}
+
+  prettier@3.9.6:
+    resolution: {integrity: sha512-OpN0zzVdiaiAhxpuuj5efpIS4sY9j7bY6uR5mnj5yPzGkdkjNKSJeUThPb60Jw29QuAZgA4o+/iB49kFiaBX6g==}
+    engines: {node: '>=14'}
+    hasBin: true
 
   pretty-format@27.0.2:
     resolution: {integrity: sha512-mXKbbBPnYTG7Yra9qFBtqj+IXcsvxsvOBco3QHxtxTl+hHKq6QdzMZ+q0CtL4ORHZgwGImRr2XZUX2EWzORxig==}
@@ -3961,6 +3969,8 @@ snapshots:
   postgres-interval@1.1.0:
     dependencies:
       xtend: 4.0.2
+
+  prettier@3.9.6: {}
 
   pretty-format@27.0.2:
     dependencies:

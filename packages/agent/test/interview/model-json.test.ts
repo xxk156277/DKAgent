@@ -22,24 +22,25 @@ test("结构化模型请求开启 DeepSeek json_object", async () => {
 
     assert.deepEqual(result, { value: "ok" });
     assert.equal(provider.request?.responseFormat, "json_object");
-    assert.equal(
-        (provider.request as (typeof provider.request & { thinking?: string }))?.thinking,
-        "disabled",
-    );
+    assert.equal((provider.request as typeof provider.request & { thinking?: string })?.thinking, "disabled");
 });
 
 test("结构化模型达到输出上限时返回清晰截断错误", async () => {
     const provider = new FakeTextProvider('{"value":"partial"}', "max_tokens");
 
-    await assert.rejects(() => queryModelJson({
-        queryEngine: new QueryEngine(provider),
-        model: "deepseek-v4-pro",
-        systemPrompt: "只输出 JSON。",
-        userContent: "输入",
-        schema: z.object({ value: z.string() }).strict(),
-        abortSignal: new AbortController().signal,
-        traceOperation: "test_json_output",
-    }), /结构化模型输出达到 Token 上限，JSON 可能被截断/);
+    await assert.rejects(
+        () =>
+            queryModelJson({
+                queryEngine: new QueryEngine(provider),
+                model: "deepseek-v4-pro",
+                systemPrompt: "只输出 JSON。",
+                userContent: "输入",
+                schema: z.object({ value: z.string() }).strict(),
+                abortSignal: new AbortController().signal,
+                traceOperation: "test_json_output",
+            }),
+        /结构化模型输出达到 Token 上限，JSON 可能被截断/,
+    );
 });
 
 test("queryModelJson 的所有模型 Trace 只记录元数据", async () => {
@@ -49,9 +50,13 @@ test("queryModelJson 的所有模型 Trace 只记录元数据", async () => {
     const traceStore = new MemoryTraceStore();
 
     await queryModelJson({
-        queryEngine: new QueryEngine(new FakeTextProvider(JSON.stringify({
-            value: secretOutput,
-        }))),
+        queryEngine: new QueryEngine(
+            new FakeTextProvider(
+                JSON.stringify({
+                    value: secretOutput,
+                }),
+            ),
+        ),
         model: "deepseek-v4-pro",
         systemPrompt: secretPrompt,
         userContent: secretInput,
@@ -61,14 +66,17 @@ test("queryModelJson 的所有模型 Trace 只记录元数据", async () => {
         traceOperation: "test_json_trace",
     });
 
-    const events = traceStore.list().filter((event) => (
-        event.name === "model.request" || event.name === "model.response"
-    ));
-    assert.deepEqual(events.map((event) => [event.name, event.phase]), [
-        ["model.request", "start"],
-        ["model.response", "event"],
-        ["model.request", "end"],
-    ]);
+    const events = traceStore
+        .list()
+        .filter((event) => event.name === "model.request" || event.name === "model.response");
+    assert.deepEqual(
+        events.map((event) => [event.name, event.phase]),
+        [
+            ["model.request", "start"],
+            ["model.response", "event"],
+            ["model.request", "end"],
+        ],
+    );
     const serialized = JSON.stringify(events);
     assert.doesNotMatch(serialized, new RegExp(secretPrompt));
     assert.doesNotMatch(serialized, new RegExp(secretInput));
@@ -97,16 +105,17 @@ test("Provider 异常对调用方和 Trace 都使用固定安全错误", async (
     const traceStore = new MemoryTraceStore();
 
     await assert.rejects(
-        () => queryModelJson({
-            queryEngine: new QueryEngine(provider),
-            model: "deepseek-v4-pro",
-            systemPrompt: "只输出 JSON。",
-            userContent: "输入",
-            schema: z.object({ value: z.string() }).strict(),
-            abortSignal: new AbortController().signal,
-            tracer: new Tracer(traceStore),
-            traceOperation: "test_provider_error",
-        }),
+        () =>
+            queryModelJson({
+                queryEngine: new QueryEngine(provider),
+                model: "deepseek-v4-pro",
+                systemPrompt: "只输出 JSON。",
+                userContent: "输入",
+                schema: z.object({ value: z.string() }).strict(),
+                abortSignal: new AbortController().signal,
+                tracer: new Tracer(traceStore),
+                traceOperation: "test_provider_error",
+            }),
         (error: unknown) => {
             assert.equal((error as Error).message, "结构化模型请求失败");
             return true;
@@ -114,7 +123,10 @@ test("Provider 异常对调用方和 Trace 都使用固定安全错误", async (
     );
 
     const events = traceStore.list().filter((event) => event.name === "model.request");
-    assert.deepEqual(events.map((event) => event.phase), ["start", "error"]);
+    assert.deepEqual(
+        events.map((event) => event.phase),
+        ["start", "error"],
+    );
     const serialized = JSON.stringify(events);
     assert.doesNotMatch(serialized, new RegExp(secret));
     assert.match(serialized, /结构化模型请求失败/);
@@ -122,20 +134,18 @@ test("Provider 异常对调用方和 Trace 都使用固定安全错误", async (
 
 test("JSON 解析和 Zod Schema 失败只抛固定输出错误", async () => {
     const secret = "MODEL_OUTPUT_SECRET_20260822";
-    for (const response of [
-        `${secret} not-json`,
-        JSON.stringify({ value: "ok", [secret]: true }),
-    ]) {
+    for (const response of [`${secret} not-json`, JSON.stringify({ value: "ok", [secret]: true })]) {
         await assert.rejects(
-            () => queryModelJson({
-                queryEngine: new QueryEngine(new FakeTextProvider(response)),
-                model: "deepseek-v4-pro",
-                systemPrompt: "只输出 JSON。",
-                userContent: "输入",
-                schema: z.object({ value: z.string() }).strict(),
-                abortSignal: new AbortController().signal,
-                traceOperation: "test_invalid_output",
-            }),
+            () =>
+                queryModelJson({
+                    queryEngine: new QueryEngine(new FakeTextProvider(response)),
+                    model: "deepseek-v4-pro",
+                    systemPrompt: "只输出 JSON。",
+                    userContent: "输入",
+                    schema: z.object({ value: z.string() }).strict(),
+                    abortSignal: new AbortController().signal,
+                    traceOperation: "test_invalid_output",
+                }),
             (error: unknown) => {
                 assert.equal((error as Error).message, "结构化模型输出无效");
                 assert.doesNotMatch((error as Error).message, new RegExp(secret));
@@ -164,16 +174,17 @@ test("AbortError、ABORT_ERR 和已中止 Signal 保持安全取消语义", asyn
         } satisfies LLMProvider;
         const traceStore = new MemoryTraceStore();
         await assert.rejects(
-            () => queryModelJson({
-                queryEngine: new QueryEngine(provider),
-                model: "deepseek-v4-pro",
-                systemPrompt: "只输出 JSON。",
-                userContent: "输入",
-                schema: z.object({ value: z.string() }).strict(),
-                abortSignal: new AbortController().signal,
-                tracer: new Tracer(traceStore),
-                traceOperation: "test_abort",
-            }),
+            () =>
+                queryModelJson({
+                    queryEngine: new QueryEngine(provider),
+                    model: "deepseek-v4-pro",
+                    systemPrompt: "只输出 JSON。",
+                    userContent: "输入",
+                    schema: z.object({ value: z.string() }).strict(),
+                    abortSignal: new AbortController().signal,
+                    tracer: new Tracer(traceStore),
+                    traceOperation: "test_abort",
+                }),
             (error: unknown) => {
                 assert.equal((error as Error).name, "AbortError");
                 assert.equal((error as Error).message, "操作已中止");
@@ -197,15 +208,16 @@ test("AbortError、ABORT_ERR 和已中止 Signal 保持安全取消语义", asyn
         },
     } satisfies LLMProvider;
     await assert.rejects(
-        () => queryModelJson({
-            queryEngine: new QueryEngine(provider),
-            model: "deepseek-v4-pro",
-            systemPrompt: "只输出 JSON。",
-            userContent: "输入",
-            schema: z.object({ value: z.string() }).strict(),
-            abortSignal: controller.signal,
-            traceOperation: "test_pre_aborted",
-        }),
+        () =>
+            queryModelJson({
+                queryEngine: new QueryEngine(provider),
+                model: "deepseek-v4-pro",
+                systemPrompt: "只输出 JSON。",
+                userContent: "输入",
+                schema: z.object({ value: z.string() }).strict(),
+                abortSignal: controller.signal,
+                traceOperation: "test_pre_aborted",
+            }),
         (error: unknown) => (error as Error).name === "AbortError",
     );
     assert.equal(providerCalled, false);

@@ -64,9 +64,7 @@ export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
 
         if (!response.ok) {
             const responseText = await response.text();
-            throw new Error(
-                `Embedding API 请求失败（${response.status}）：${responseText}`,
-            );
+            throw new Error(`Embedding API 请求失败（${response.status}）：${responseText}`);
         }
 
         const body = (await response.json()) as EmbeddingResponse;
@@ -76,9 +74,7 @@ export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
 
         const items = body.data as EmbeddingResponseItem[];
         if (items.length !== texts.length) {
-            throw new Error(
-                `Embedding 返回数量不一致：期望 ${texts.length}，实际 ${items.length}`,
-            );
+            throw new Error(`Embedding 返回数量不一致：期望 ${texts.length}，实际 ${items.length}`);
         }
 
         const sortedItems = [...items].sort((left, right) => left.index - right.index);
@@ -88,9 +84,7 @@ export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
             }
             if (
                 item.embedding.length === 0 ||
-                item.embedding.some(
-                    (value) => typeof value !== "number" || !Number.isFinite(value),
-                )
+                item.embedding.some((value) => typeof value !== "number" || !Number.isFinite(value))
             ) {
                 throw new Error("Embedding 向量必须由有限数字组成");
             }
@@ -112,11 +106,7 @@ export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
 export function createEmbeddingProviderFromEnv(
     environment: NodeJS.ProcessEnv = process.env,
 ): OpenAICompatibleEmbeddingProvider {
-    const requiredNames = [
-        "EMBEDDING_API_KEY",
-        "EMBEDDING_BASE_URL",
-        "EMBEDDING_MODEL_ID",
-    ] as const;
+    const requiredNames = ["EMBEDDING_API_KEY", "EMBEDDING_BASE_URL", "EMBEDDING_MODEL_ID"] as const;
     const missingNames = requiredNames.filter((name) => !environment[name]?.trim());
     if (missingNames.length > 0) {
         throw new Error(`缺少 Embedding 配置：${missingNames.join(", ")}`);

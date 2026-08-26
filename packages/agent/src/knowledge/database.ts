@@ -1,22 +1,14 @@
-
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
-import {
-    EMBEDDINGS_TABLE_SQL,
-    KNOWLEDGE_FTS_SQL,
-    KNOWLEDGE_TABLE_SQL,
-    KNOWLEDGE_TRIGGERS_SQL,
-} from "./schema.js";
+import { EMBEDDINGS_TABLE_SQL, KNOWLEDGE_FTS_SQL, KNOWLEDGE_TABLE_SQL, KNOWLEDGE_TRIGGERS_SQL } from "./schema.js";
 
 /**
  * 打开知识库数据库连接。
  *
  * 如果数据库目录不存在，会自动创建。
  */
-export function openKnowledgeDatabase(
-    databasePath: string,
-): Database.Database {
+export function openKnowledgeDatabase(databasePath: string): Database.Database {
     if (databasePath !== ":memory:") {
         const absolutePath = resolve(databasePath);
 
@@ -38,9 +30,7 @@ export function openKnowledgeDatabase(
 /**
  * 初始化知识表、FTS5 索引和同步 Trigger。
  */
-export function initializeKnowledgeSchema(
-    database: Database.Database,
-): void {
+export function initializeKnowledgeSchema(database: Database.Database): void {
     database.exec(KNOWLEDGE_TABLE_SQL);
     database.exec(KNOWLEDGE_FTS_SQL);
     database.exec(KNOWLEDGE_TRIGGERS_SQL);

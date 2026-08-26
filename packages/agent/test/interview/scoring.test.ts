@@ -17,10 +17,7 @@ const clusters: QuestionCluster[] = [
     { id: "c-3", title: "流程", questionIds: ["q-4"] },
 ];
 
-function completed(
-    questionId: string,
-    contentQuality: number,
-): CompletedQuestionAnalysis {
+function completed(questionId: string, contentQuality: number): CompletedQuestionAnalysis {
     return {
         status: "completed",
         questionId,
@@ -44,13 +41,16 @@ function completed(
 }
 
 test("单题只按适用维度重新归一化", () => {
-    assert.equal(calculateQuestionScore({
-        contentQuality: 80,
-        depthAndEvidence: 60,
-        analysisAndTradeoffs: null,
-        followUpHandling: null,
-        expressionQuality: null,
-    }), 70);
+    assert.equal(
+        calculateQuestionScore({
+            contentQuality: 80,
+            depthAndEvidence: 60,
+            analysisAndTradeoffs: null,
+            followUpHandling: null,
+            expressionQuality: null,
+        }),
+        70,
+    );
 });
 
 test("先簇内平均再让问题簇等权", () => {
@@ -70,11 +70,7 @@ test("簇内 60.4 与 60.5 使用未取整精度参与簇等权汇总", () => {
     const result = scoreInterview({
         questions: questions.slice(0, 3),
         clusters: clusters.slice(0, 2),
-        analyses: [
-            completed("q-1", 60.3),
-            completed("q-2", 60.5),
-            completed("q-3", 60.5),
-        ],
+        analyses: [completed("q-1", 60.3), completed("q-2", 60.5), completed("q-3", 60.5)],
     });
 
     assert.deepEqual(
@@ -109,28 +105,34 @@ test("误传 completed 的不评分题不会污染分数或覆盖率", () => {
     });
 
     assert.equal(result.totalScore, 80);
-    assert.deepEqual(result.clusterScores.map((cluster) => cluster.clusterId), ["c-1"]);
+    assert.deepEqual(
+        result.clusterScores.map((cluster) => cluster.clusterId),
+        ["c-1"],
+    );
     assert.equal(result.clusterScores[0]?.dimensions.contentQuality, 80);
     assert.deepEqual(result.coverage, { analyzed: 1, expected: 3 });
 });
 
 test("没有任何可评分维度时拒绝生成分数", () => {
     assert.throws(
-        () => scoreInterview({
-            questions,
-            clusters,
-            analyses: [{
-                ...completed("q-1", 80),
-                dimensionScores: {
-                    contentQuality: null,
-                    depthAndEvidence: null,
-                    analysisAndTradeoffs: null,
-                    followUpHandling: null,
-                    expressionQuality: null,
-                },
-                score: null,
-            }],
-        }),
+        () =>
+            scoreInterview({
+                questions,
+                clusters,
+                analyses: [
+                    {
+                        ...completed("q-1", 80),
+                        dimensionScores: {
+                            contentQuality: null,
+                            depthAndEvidence: null,
+                            analysisAndTradeoffs: null,
+                            followUpHandling: null,
+                            expressionQuality: null,
+                        },
+                        score: null,
+                    },
+                ],
+            }),
         /没有可评分维度/,
     );
 });

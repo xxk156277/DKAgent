@@ -4,11 +4,7 @@ import { initializeKnowledgeSchema, openKnowledgeDatabase } from "./database.js"
 import type { EmbeddingProvider } from "./embedding.js";
 import { parseKnowledgeMarkdown } from "./parser.js";
 import { KnowledgeRepository } from "./repository.js";
-import type {
-    KnowledgeBuildStats,
-    KnowledgeEntry,
-    StoredEmbeddingInput,
-} from "./types.js";
+import type { KnowledgeBuildStats, KnowledgeEntry, StoredEmbeddingInput } from "./types.js";
 
 /** 离线知识库构建参数。 */
 export interface BuildKnowledgeBaseOptions {
@@ -25,9 +21,7 @@ export interface BuildKnowledgeBaseOptions {
 /**
  * 完成 Markdown 解析、SQLite 同步和增量 Embedding 的离线建库流程。
  */
-export async function buildKnowledgeBase(
-    options: BuildKnowledgeBaseOptions,
-): Promise<KnowledgeBuildStats> {
+export async function buildKnowledgeBase(options: BuildKnowledgeBaseOptions): Promise<KnowledgeBuildStats> {
     const sourceDir = resolve(options.sourceDir);
     const databasePath = resolve(options.databasePath);
     const batchSize = options.embeddingBatchSize ?? 100;
@@ -58,22 +52,16 @@ export async function buildKnowledgeBase(
         const repository = new KnowledgeRepository(database);
         repository.syncEntries(entries);
 
-        const pending = repository.findPendingEmbeddings(
-            options.embeddingProvider.model,
-        );
+        const pending = repository.findPendingEmbeddings(options.embeddingProvider.model);
         let embeddedEntries = 0;
 
         for (let offset = 0; offset < pending.length; offset += batchSize) {
             const batch = pending.slice(offset, offset + batchSize);
 
             // 网络调用发生在事务之外；每批成功后才用短事务落库。
-            const vectors = await options.embeddingProvider.embedBatch(
-                batch.map((item) => item.content),
-            );
+            const vectors = await options.embeddingProvider.embedBatch(batch.map((item) => item.content));
             if (vectors.length !== batch.length) {
-                throw new Error(
-                    `Embedding 批次返回数量不一致：期望 ${batch.length}，实际 ${vectors.length}`,
-                );
+                throw new Error(`Embedding 批次返回数量不一致：期望 ${batch.length}，实际 ${vectors.length}`);
             }
 
             const records: StoredEmbeddingInput[] = batch.map((item, index) => {
@@ -112,9 +100,7 @@ async function listMarkdownFiles(directory: string): Promise<string[]> {
     const directoryEntries = await readdir(directory, { withFileTypes: true });
     const files: string[] = [];
 
-    for (const directoryEntry of directoryEntries.sort((left, right) =>
-        left.name.localeCompare(right.name),
-    )) {
+    for (const directoryEntry of directoryEntries.sort((left, right) => left.name.localeCompare(right.name))) {
         const entryPath = resolve(directory, directoryEntry.name);
         if (directoryEntry.isDirectory()) {
             files.push(...(await listMarkdownFiles(entryPath)));

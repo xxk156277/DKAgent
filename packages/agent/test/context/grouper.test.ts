@@ -12,16 +12,14 @@ test("普通消息单独成组，最后一条 User 及之后消息必须保留",
 
     const groups = groupContextMessages(messages);
 
-    assert.deepEqual(groups.map((group) => group.kind), [
-        "single",
-        "single",
-        "single",
-    ]);
-    assert.deepEqual(groups.map((group) => group.required), [
-        false,
-        false,
-        true,
-    ]);
+    assert.deepEqual(
+        groups.map((group) => group.kind),
+        ["single", "single", "single"],
+    );
+    assert.deepEqual(
+        groups.map((group) => group.required),
+        [false, false, true],
+    );
     assert.deepEqual(messages, [
         { role: "user", content: "旧问题" },
         { role: "assistant", content: "旧回答" },
@@ -55,35 +53,35 @@ test("多个 Tool Call 和对应结果形成一个不可拆分组", () => {
 test("拒绝损坏的 Tool 消息链", async (context) => {
     await context.test("孤立 Tool Result", () => {
         assert.throws(
-            () => groupContextMessages([
-                { role: "tool", toolCallId: "call-1", content: "结果" },
-            ]),
+            () => groupContextMessages([{ role: "tool", toolCallId: "call-1", content: "结果" }]),
             /孤立 Tool Result/,
         );
     });
 
     await context.test("缺少 Tool Result", () => {
         assert.throws(
-            () => groupContextMessages([
-                {
-                    role: "assistant",
-                    toolCalls: [{ id: "call-1", name: "read", input: {} }],
-                },
-            ]),
+            () =>
+                groupContextMessages([
+                    {
+                        role: "assistant",
+                        toolCalls: [{ id: "call-1", name: "read", input: {} }],
+                    },
+                ]),
             /缺少对应结果/,
         );
     });
 
     await context.test("重复 Tool Result", () => {
         assert.throws(
-            () => groupContextMessages([
-                {
-                    role: "assistant",
-                    toolCalls: [{ id: "call-1", name: "read", input: {} }],
-                },
-                { role: "tool", toolCallId: "call-1", content: "第一次" },
-                { role: "tool", toolCallId: "call-1", content: "第二次" },
-            ]),
+            () =>
+                groupContextMessages([
+                    {
+                        role: "assistant",
+                        toolCalls: [{ id: "call-1", name: "read", input: {} }],
+                    },
+                    { role: "tool", toolCallId: "call-1", content: "第一次" },
+                    { role: "tool", toolCallId: "call-1", content: "第二次" },
+                ]),
             /重复/,
         );
     });

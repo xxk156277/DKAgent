@@ -1,15 +1,10 @@
-import type {
-    InterviewSpeaker,
-    ParsedTranscript,
-    TranscriptTurn,
-} from "./types.js";
+import type { InterviewSpeaker, ParsedTranscript, TranscriptTurn } from "./types.js";
 
-const HEADING = /^(?<label>面试官|求职者|候选人|发言人\s*[12])(?:\s+(?<time>\d{1,2}:\d{2}(?::\d{2})?))?\s*(?:[：:]\s*(?<inline>.*))?$/;
+const HEADING =
+    /^(?<label>面试官|求职者|候选人|发言人\s*[12])(?:\s+(?<time>\d{1,2}:\d{2}(?::\d{2})?))?\s*(?:[：:]\s*(?<inline>.*))?$/;
 
 function toSpeaker(label: string): InterviewSpeaker {
-    return /^(?:面试官|发言人\s*1)$/.test(label)
-        ? "interviewer"
-        : "candidate";
+    return /^(?:面试官|发言人\s*1)$/.test(label) ? "interviewer" : "candidate";
 }
 
 export function parseTranscript(source: string): ParsedTranscript {
@@ -30,11 +25,7 @@ export function parseTranscript(source: string): ParsedTranscript {
     };
 
     for (const rawLine of lines) {
-        const endingLength = rawLine.endsWith("\r\n")
-            ? 2
-            : /[\r\n]$/.test(rawLine)
-                ? 1
-                : 0;
+        const endingLength = rawLine.endsWith("\r\n") ? 2 : /[\r\n]$/.test(rawLine) ? 1 : 0;
         const line = endingLength ? rawLine.slice(0, -endingLength) : rawLine;
         const match = line.match(HEADING);
 

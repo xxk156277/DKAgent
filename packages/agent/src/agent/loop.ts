@@ -1,15 +1,9 @@
 import { Tracer, type TraceSpan } from "@dkagent/trace";
-import {
-    dispatchToolCall,
-    type DispatchedToolResult,
-} from "./dispatcher.js";
+import { dispatchToolCall, type DispatchedToolResult } from "./dispatcher.js";
 import type { AgentLoopOptions } from "./types.js";
 import { InMemoryArtifactStore, type ArtifactStore } from "../artifact/index.js";
 import type { AgentMessage, ModelResponse } from "../query-engine/provider.js";
-import type {
-    ContextBuildInput,
-    ConversationContextState,
-} from "../context/types.js";
+import type { ContextBuildInput, ConversationContextState } from "../context/types.js";
 
 export class AgentLoop {
     private readonly messages: AgentMessage[];
@@ -20,19 +14,16 @@ export class AgentLoop {
     private readonly artifactStore: ArtifactStore;
 
     public constructor(private readonly options: AgentLoopOptions) {
-        this.messages = options.session
-            ? [...options.session.snapshot.messages]
-            : [];
+        this.messages = options.session ? [...options.session.snapshot.messages] : [];
         this.contextState = options.session
             ? { ...options.session.snapshot.contextState }
             : {
-                summary: "",
-                firstKeptMessageIndex: 0,
-            };
+                  summary: "",
+                  firstKeptMessageIndex: 0,
+              };
         this.abortSignal = options.abortSignal ?? new AbortController().signal;
         this.tracer = options.tracer ?? new Tracer();
-        this.artifactStore = options.artifactStore
-            ?? new InMemoryArtifactStore(this.tracer);
+        this.artifactStore = options.artifactStore ?? new InMemoryArtifactStore(this.tracer);
     }
 
     public getMessages(): readonly AgentMessage[] {
@@ -79,13 +70,11 @@ export class AgentLoop {
 
         const systemPrompt = recalledMemory
             ? [this.options.systemPrompt, recalledMemory]
-                .filter((value): value is string => Boolean(value))
-                .join("\n\n")
+                  .filter((value): value is string => Boolean(value))
+                  .join("\n\n")
             : this.options.systemPrompt;
         const contextBuildInput: ContextBuildInput = {
-            ...(systemPrompt === undefined
-                ? {}
-                : { systemPrompt }),
+            ...(systemPrompt === undefined ? {} : { systemPrompt }),
             messages: [...this.messages],
             tools: this.options.toolRegistry.getSchemas(),
             maxContextTokens: this.options.maxContextTokens,
@@ -93,23 +82,20 @@ export class AgentLoop {
             ...(this.options.contextCompaction === undefined
                 ? {}
                 : {
-                    compaction: {
-                        state: { ...this.contextState },
-                        options: this.options.contextCompaction,
-                        summaryModel: this.options.summaryModel ?? this.options.model,
-                        abortSignal: this.abortSignal,
-                    },
-                }),
+                      compaction: {
+                          state: { ...this.contextState },
+                          options: this.options.contextCompaction,
+                          summaryModel: this.options.summaryModel ?? this.options.model,
+                          abortSignal: this.abortSignal,
+                      },
+                  }),
         };
         const contextSnapshot = await this.options.contextManager.build(contextBuildInput);
         if (contextSnapshot.nextContextState) {
             const nextState = { ...contextSnapshot.nextContextState };
             const session = this.options.session;
             if (session) {
-                session.store.saveContextState(
-                    session.snapshot.id,
-                    nextState,
-                );
+                session.store.saveContextState(session.snapshot.id, nextState);
             }
             this.contextState = nextState;
         }
@@ -121,21 +107,14 @@ export class AgentLoop {
             maxTokens: this.options.maxOutputTokens,
             temperature: 0,
             abortSignal: this.abortSignal,
-            ...(contextSnapshot.systemPrompt === undefined
-                ? {}
-                : { systemPrompt: contextSnapshot.systemPrompt }),
-            ...(this.options.onTextDelta === undefined
-                ? {}
-                : { onTextDelta: this.options.onTextDelta }),
+            ...(contextSnapshot.systemPrompt === undefined ? {} : { systemPrompt: contextSnapshot.systemPrompt }),
+            ...(this.options.onTextDelta === undefined ? {} : { onTextDelta: this.options.onTextDelta }),
         };
         const traceRequest = recalledMemory
             ? {
-                ...request,
-                systemPrompt: this.createTraceSystemPrompt(
-                    request.systemPrompt,
-                    recalledMemory,
-                ),
-            }
+                  ...request,
+                  systemPrompt: this.createTraceSystemPrompt(request.systemPrompt, recalledMemory),
+              }
             : { ...request };
         const response = await this.tracer.span(
             "model.request",
@@ -194,16 +173,12 @@ export class AgentLoop {
                 "tool.call",
                 call,
                 async (toolSpan) => {
-                    const result = await dispatchToolCall(
-                        this.options.toolRegistry,
-                        call,
-                        {
-                            queryEngine: this.options.queryEngine,
-                            abortSignal: this.abortSignal,
-                            tracer: this.tracer,
-                            artifactStore: this.artifactStore,
-                        },
-                    );
+                    const result = await dispatchToolCall(this.options.toolRegistry, call, {
+                        queryEngine: this.options.queryEngine,
+                        abortSignal: this.abortSignal,
+                        tracer: this.tracer,
+                        artifactStore: this.artifactStore,
+                    });
                     toolSpan.event("tool.result", result, { step });
                     toolSpan.setOutput(result);
                     return result;
@@ -254,17 +229,12 @@ export class AgentLoop {
     }
 
     /** 记忆只供模型使用；所有 Trace 必须使用不含原文的副本。 */
-    private createTraceSystemPrompt(
-        systemPrompt: string | undefined,
-        recalledMemory: string,
-    ): string | undefined {
+    private createTraceSystemPrompt(systemPrompt: string | undefined, recalledMemory: string): string | undefined {
         if (!recalledMemory) return systemPrompt;
         if (!systemPrompt?.includes(recalledMemory)) {
             return "[RECALLED_MEMORY_REDACTED]";
         }
-        return systemPrompt
-            .split(recalledMemory)
-            .join("[RECALLED_MEMORY_REDACTED]");
+        return systemPrompt.split(recalledMemory).join("[RECALLED_MEMORY_REDACTED]");
     }
 
     /** 自动提取失败不能影响已生成的最终回答。 */

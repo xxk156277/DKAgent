@@ -4,10 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { AgentLoop } from "../../src/agent/loop.js";
-import {
-    ContextManager,
-    ProviderTokenCounter,
-} from "../../src/context/index.js";
+import { ContextManager, ProviderTokenCounter } from "../../src/context/index.js";
 import { MemoryRetriever } from "../../src/memory/retriever.js";
 import { SqliteMemoryStore } from "../../src/memory/store.js";
 import type {
@@ -35,13 +32,11 @@ class FakeProvider implements LLMProvider {
         };
     }
 
-    public async countTokens(
-        messages: AgentMessage[],
-        _tools?: ToolSchema[],
-    ): Promise<number> {
-        return messages.reduce((total, message) => (
-            total + ("content" in message ? (message.content?.length ?? 0) : 0)
-        ), 0);
+    public async countTokens(messages: AgentMessage[], _tools?: ToolSchema[]): Promise<number> {
+        return messages.reduce(
+            (total, message) => total + ("content" in message ? (message.content?.length ?? 0) : 0),
+            0,
+        );
     }
 }
 
@@ -91,10 +86,7 @@ test("SQLite Memory 跨进程重开后在新 Session 只注入请求 Context", a
         assert.match(provider.requests[0]?.systemPrompt ?? "", new RegExp(fact));
         assert.match(provider.requests[0]?.systemPrompt ?? "", /<recalled_memory>/);
         assert.doesNotMatch(JSON.stringify(agent.getMessages()), new RegExp(fact));
-        assert.doesNotMatch(
-            JSON.stringify(sessionStore.load(sessionB.id)),
-            new RegExp(fact),
-        );
+        assert.doesNotMatch(JSON.stringify(sessionStore.load(sessionB.id)), new RegExp(fact));
     } finally {
         memoryStore.close();
         sessionStore.close();

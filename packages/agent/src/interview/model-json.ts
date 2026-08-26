@@ -62,9 +62,7 @@ export async function queryModelJson<T>(input: {
             contentCharacterCount: response.content?.length ?? 0,
             usage: response.usage,
             stopReason: response.stopReason,
-            ...(response.type === "tool_use"
-                ? { toolCallCount: response.toolCalls.length }
-                : {}),
+            ...(response.type === "tool_use" ? { toolCallCount: response.toolCalls.length } : {}),
         };
         span?.event("model.response", responseMetadata);
         span?.setOutput(responseMetadata);
@@ -72,12 +70,10 @@ export async function queryModelJson<T>(input: {
     };
 
     const response = input.tracer
-        ? await input.tracer.span(
-            "model.request",
-            traceRequest,
-            execute,
-            { module: "skill", operation: input.traceOperation },
-        )
+        ? await input.tracer.span("model.request", traceRequest, execute, {
+              module: "skill",
+              operation: input.traceOperation,
+          })
         : await execute();
 
     if (input.abortSignal.aborted) throw createAbortError();
@@ -89,9 +85,7 @@ export async function queryModelJson<T>(input: {
         throw new Error("结构化任务未返回文本");
     }
 
-    const content = response.content
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/\s*```$/, "");
+    const content = response.content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
     try {
         return input.schema.parse(JSON.parse(content));
     } catch {

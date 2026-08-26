@@ -22,9 +22,7 @@ export function decodeVector(value: Buffer, dimensions: number): number[] {
         throw new Error("Embedding 维度必须是正整数");
     }
     if (value.byteLength !== expectedBytes) {
-        throw new Error(
-            `Embedding 字节长度错误：期望 ${expectedBytes}，实际 ${value.byteLength}`,
-        );
+        throw new Error(`Embedding 字节长度错误：期望 ${expectedBytes}，实际 ${value.byteLength}`);
     }
 
     // 复制 Buffer，避免底层 byteOffset 未按 Float32 对齐导致构造失败。

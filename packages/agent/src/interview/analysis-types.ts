@@ -1,11 +1,7 @@
 import type { InterviewQuestionType } from "./types.js";
 
 export type GlobalDimension =
-    | "contentQuality"
-    | "depthAndEvidence"
-    | "analysisAndTradeoffs"
-    | "followUpHandling"
-    | "expressionQuality";
+    "contentQuality" | "depthAndEvidence" | "analysisAndTradeoffs" | "followUpHandling" | "expressionQuality";
 
 export type DimensionScores = Record<GlobalDimension, number | null>;
 export type EvidenceImpact = "high" | "medium" | "low";
@@ -57,10 +53,7 @@ export interface NotScoredQuestionAnalysis {
     clusterId: string;
 }
 
-export type QuestionAnalysis =
-    | CompletedQuestionAnalysis
-    | FailedQuestionAnalysis
-    | NotScoredQuestionAnalysis;
+export type QuestionAnalysis = CompletedQuestionAnalysis | FailedQuestionAnalysis | NotScoredQuestionAnalysis;
 
 // export type ProjectFactStatus = "stated" | "inferred" | "unknown";
 // export type ProjectFactCategory =

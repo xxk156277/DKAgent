@@ -1,15 +1,15 @@
 {
-  "extends": "./tsconfig.json",
-  "include": [
-    "src/agent/dispatcher.ts",
-    "src/agent/loop.ts",
-    "src/agent/types.ts",
-    "src/context/**/*.ts",
-    "src/memory/types.ts",
-    "src/query-engine/**/*.ts",
-    "src/session/**/*.ts",
-    "src/tools/registry.ts",
-    "src/tools/types.ts",
-    "test/session/**/*.test.ts"
-  ]
+    "extends": "./tsconfig.json",
+    "include": [
+        "src/agent/dispatcher.ts",
+        "src/agent/loop.ts",
+        "src/agent/types.ts",
+        "src/context/**/*.ts",
+        "src/memory/types.ts",
+        "src/query-engine/**/*.ts",
+        "src/session/**/*.ts",
+        "src/tools/registry.ts",
+        "src/tools/types.ts",
+        "test/session/**/*.test.ts"
+    ]
 }

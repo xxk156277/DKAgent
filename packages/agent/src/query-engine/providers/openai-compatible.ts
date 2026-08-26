@@ -1,12 +1,5 @@
 import OpenAI from "openai";
-import type {
-    AgentMessage,
-    LLMProvider,
-    ModelRequest,
-    StopReason,
-    StreamEvent,
-    ToolSchema,
-} from "../provider.js";
+import type { AgentMessage, LLMProvider, ModelRequest, StopReason, StreamEvent, ToolSchema } from "../provider.js";
 
 /** Stream 转换只依赖的 OpenAI Chunk 最小形状。 */
 export interface OpenAIStreamChunk {
@@ -80,9 +73,7 @@ export function toOpenAIMessages(
 }
 
 /** 把 Tool Registry Schema 转成 OpenAI Function Tool。 */
-export function toOpenAITools(
-    tools: readonly ToolSchema[],
-): OpenAI.Chat.Completions.ChatCompletionTool[] {
+export function toOpenAITools(tools: readonly ToolSchema[]): OpenAI.Chat.Completions.ChatCompletionTool[] {
     return tools.map((tool) => ({
         type: "function",
         function: {
@@ -94,9 +85,7 @@ export function toOpenAITools(
 }
 
 /** 把 Provider 中立的输出格式转换为 OpenAI-Compatible response_format。 */
-export function toOpenAIResponseFormat(
-    format: ModelRequest["responseFormat"],
-): { type: "json_object" } | undefined {
+export function toOpenAIResponseFormat(format: ModelRequest["responseFormat"]): { type: "json_object" } | undefined {
     return format ? { type: format } : undefined;
 }
 
@@ -104,23 +93,18 @@ export function toOpenAIResponseFormat(
  * 把 OpenAI Chunk 转换成 Provider 中立事件。
  * Tool Call 在整个流结束后统一 End，保证每个 index 只闭合一次。
  */
-export async function* translateOpenAIChunks(
-    chunks: AsyncIterable<OpenAIStreamChunk>,
-): AsyncIterable<StreamEvent> {
+export async function* translateOpenAIChunks(chunks: AsyncIterable<OpenAIStreamChunk>): AsyncIterable<StreamEvent> {
     const startedCalls = new Map<number, { id: string; name: string }>();
     let stopReason: StopReason = "unknown";
     let usage = { inputTokens: 0, outputTokens: 0 };
 
     for await (const chunk of chunks) {
         if (chunk.usage) {
-            const cachedTokens =
-                chunk.usage.prompt_tokens_details?.cached_tokens ?? undefined;
+            const cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens ?? undefined;
             usage = {
                 inputTokens: chunk.usage.prompt_tokens,
                 outputTokens: chunk.usage.completion_tokens,
-                ...(cachedTokens === undefined
-                    ? {}
-                    : { cacheReadTokens: cachedTokens }),
+                ...(cachedTokens === undefined ? {} : { cacheReadTokens: cachedTokens }),
             };
         }
 
@@ -139,9 +123,7 @@ export async function* translateOpenAIChunks(
                 const id = toolCall.id;
                 const name = toolCall.function?.name;
                 if (!id || !name) {
-                    throw new Error(
-                        `OpenAI Tool Call index ${toolCall.index} 首个 Chunk 缺少 ID 或名称`,
-                    );
+                    throw new Error(`OpenAI Tool Call index ${toolCall.index} 首个 Chunk 缺少 ID 或名称`);
                 }
                 startedCalls.set(toolCall.index, { id, name });
                 yield {
@@ -152,17 +134,10 @@ export async function* translateOpenAIChunks(
                 };
             } else {
                 if (toolCall.id && toolCall.id !== existing.id) {
-                    throw new Error(
-                        `OpenAI Tool Call index ${toolCall.index} 的 ID 发生变化`,
-                    );
+                    throw new Error(`OpenAI Tool Call index ${toolCall.index} 的 ID 发生变化`);
                 }
-                if (
-                    toolCall.function?.name &&
-                    toolCall.function.name !== existing.name
-                ) {
-                    throw new Error(
-                        `OpenAI Tool Call index ${toolCall.index} 的名称发生变化`,
-                    );
+                if (toolCall.function?.name && toolCall.function.name !== existing.name) {
+                    throw new Error(`OpenAI Tool Call index ${toolCall.index} 的名称发生变化`);
                 }
             }
 
@@ -199,14 +174,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
         });
     }
 
-    public async *stream(
-        request: ModelRequest,
-    ): AsyncIterable<StreamEvent> {
+    public async *stream(request: ModelRequest): AsyncIterable<StreamEvent> {
         const responseFormat = toOpenAIResponseFormat(request.responseFormat);
-        const thinking = request.thinking === "disabled"
-            && supportsDeepSeekThinkingToggle(request.model)
-            ? { type: "disabled" as const }
-            : undefined;
+        const thinking =
+            request.thinking === "disabled" && supportsDeepSeekThinkingToggle(request.model)
+                ? { type: "disabled" as const }
+                : undefined;
         const openAIRequest: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
             model: request.model,
             messages: toOpenAIMessages(request.messages, request.systemPrompt),
@@ -217,15 +190,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
             parallel_tool_calls: false,
             ...(responseFormat ? { response_format: responseFormat } : {}),
             ...(thinking ? { thinking } : {}),
-            ...(request.tools?.length
-                ? { tools: toOpenAITools(request.tools) }
-                : {}),
-            ...(request.abortSignal
-                ? { signal: request.abortSignal }
-                : {}),
+            ...(request.tools?.length ? { tools: toOpenAITools(request.tools) } : {}),
+            ...(request.abortSignal ? { signal: request.abortSignal } : {}),
         };
 
-        const stream = await this.client.chat.completions.create(openAIRequest)
+        const stream = await this.client.chat.completions.create(openAIRequest);
 
         yield* translateOpenAIChunks(stream);
     }
@@ -233,10 +202,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     /**
      * V1 使用本地近似估算；这不是官方 tokenizer 的精确结果。
      */
-    public async countTokens(
-        messages: AgentMessage[],
-        tools?: ToolSchema[],
-    ): Promise<number> {
+    public async countTokens(messages: AgentMessage[], tools?: ToolSchema[]): Promise<number> {
         const serialized = JSON.stringify({ messages, tools });
         return Math.ceil(Buffer.byteLength(serialized, "utf8") / 4);
     }

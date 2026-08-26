@@ -38,9 +38,7 @@ export function collectExpressionStats(answer: string): ExpressionStats {
         const count = countOccurrences(answer, word);
         return count ? [{ word, count }] : [];
     });
-    const sentences = answer
-        .split(/[。！？!?]/)
-        .filter((sentence) => sentence.trim().length > 0);
+    const sentences = answer.split(/[。！？!?]/).filter((sentence) => sentence.trim().length > 0);
 
     return {
         fillerWords,
@@ -48,8 +46,6 @@ export function collectExpressionStats(answer: string): ExpressionStats {
         adjacentRepetitionCount: countAdjacentRepetitions(answer),
         characterCount: answer.replace(/\s/g, "").length,
         sentenceCount: sentences.length,
-        longSentenceCount: sentences.filter(
-            (sentence) => sentence.replace(/\s/g, "").length > 120,
-        ).length,
+        longSentenceCount: sentences.filter((sentence) => sentence.replace(/\s/g, "").length > 120).length,
     };
 }

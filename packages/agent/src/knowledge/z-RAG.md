@@ -132,51 +132,42 @@ sequenceDiagram
 
 ```typescript
 async function buildKnowledgeBase(options) {
-  // 1. 找到所有 Markdown 文件
-  const files = await scanMarkdownFiles(options.sourceDir);
+    // 1. 找到所有 Markdown 文件
+    const files = await scanMarkdownFiles(options.sourceDir);
 
-  // 2. 先完成全部解析
-  const entries = [];
-  const skipped = [];
+    // 2. 先完成全部解析
+    const entries = [];
+    const skipped = [];
 
-  for (const file of files) {
-    const markdown = await readFile(file);
+    for (const file of files) {
+        const markdown = await readFile(file);
 
-    const result = parseKnowledgeMarkdown(
-      markdown,
-      getRelativePath(file),
-    );
+        const result = parseKnowledgeMarkdown(markdown, getRelativePath(file));
 
-    entries.push(...result.entries);
-    skipped.push(...result.skipped);
-  }
+        entries.push(...result.entries);
+        skipped.push(...result.skipped);
+    }
 
-  // 3. 防止空目录误删已有数据库
-  if (entries.length === 0) {
-    throw new Error("拒绝用空知识覆盖数据库");
-  }
+    // 3. 防止空目录误删已有数据库
+    if (entries.length === 0) {
+        throw new Error("拒绝用空知识覆盖数据库");
+    }
 
-  // 4. 同步结构化知识和 FTS
-  repository.syncEntries(entries);
+    // 4. 同步结构化知识和 FTS
+    repository.syncEntries(entries);
 
-  // 5. 找到真正需要生成向量的知识
-  const pending = repository.findPendingEmbeddings(
-    embeddingProvider.model,
-  );
+    // 5. 找到真正需要生成向量的知识
+    const pending = repository.findPendingEmbeddings(embeddingProvider.model);
 
-  // 6. 分批调用外部 API
-  for (const batch of splitIntoBatches(pending)) {
-    const vectors = await embeddingProvider.embedBatch(
-      batch.map(item => item.content),
-    );
+    // 6. 分批调用外部 API
+    for (const batch of splitIntoBatches(pending)) {
+        const vectors = await embeddingProvider.embedBatch(batch.map((item) => item.content));
 
-    // 7. 每批生成成功后再写入数据库
-    repository.saveEmbeddings(
-      combine(batch, vectors),
-    );
-  }
+        // 7. 每批生成成功后再写入数据库
+        repository.saveEmbeddings(combine(batch, vectors));
+    }
 
-  return buildStats();
+    return buildStats();
 }
 ```
 
@@ -426,24 +417,24 @@ flowchart TD
 
 ```typescript
 function findPendingEmbeddings(model) {
-  return knowledgeEntries.filter(entry => {
-    const stored = embeddings.get(entry.id);
-    const currentHash = sha256(entry.content);
+    return knowledgeEntries.filter((entry) => {
+        const stored = embeddings.get(entry.id);
+        const currentHash = sha256(entry.content);
 
-    if (!stored) {
-      return true;
-    }
+        if (!stored) {
+            return true;
+        }
 
-    if (stored.model !== model) {
-      return true;
-    }
+        if (stored.model !== model) {
+            return true;
+        }
 
-    if (stored.contentHash !== currentHash) {
-      return true;
-    }
+        if (stored.contentHash !== currentHash) {
+            return true;
+        }
 
-    return false;
-  });
+        return false;
+    });
 }
 ```
 
@@ -483,7 +474,7 @@ flowchart TD
 
 ```typescript
 function searchFts(query) {
-  return sqlite.query(`
+    return sqlite.query(`
     SELECT knowledge.*, bm25(knowledge_fts) AS rank
     FROM knowledge_fts
     JOIN knowledge
@@ -526,18 +517,15 @@ flowchart LR
 
 ```typescript
 async function searchEmbedding(query) {
-  const queryVector = await provider.embedBatch([query]);
-  const storedVectors = repository.listStoredVectors(provider.model);
+    const queryVector = await provider.embedBatch([query]);
+    const storedVectors = repository.listStoredVectors(provider.model);
 
-  return storedVectors
-    .map(item => ({
-      entry: item.entry,
-      similarity: cosineSimilarity(
-        queryVector[0],
-        item.vector,
-      ),
-    }))
-    .sort((a, b) => b.similarity - a.similarity);
+    return storedVectors
+        .map((item) => ({
+            entry: item.entry,
+            similarity: cosineSimilarity(queryVector[0], item.vector),
+        }))
+        .sort((a, b) => b.similarity - a.similarity);
 }
 ```
 
@@ -600,24 +588,21 @@ RRF 分数 = 1 / (60 + rank)
 
 ```typescript
 function hybridSearch(ftsResults, embeddingResults) {
-  const resultMap = new Map();
+    const resultMap = new Map();
 
-  for (const [index, result] of ftsResults.entries()) {
-    const rank = index + 1;
+    for (const [index, result] of ftsResults.entries()) {
+        const rank = index + 1;
 
-    resultMap[result.id].score +=
-      1 / (60 + rank);
-  }
+        resultMap[result.id].score += 1 / (60 + rank);
+    }
 
-  for (const [index, result] of embeddingResults.entries()) {
-    const rank = index + 1;
+    for (const [index, result] of embeddingResults.entries()) {
+        const rank = index + 1;
 
-    resultMap[result.id].score +=
-      1 / (60 + rank);
-  }
+        resultMap[result.id].score += 1 / (60 + rank);
+    }
 
-  return [...resultMap.values()]
-    .sort((a, b) => b.score - a.score);
+    return [...resultMap.values()].sort((a, b) => b.score - a.score);
 }
 ```
 

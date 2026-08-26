@@ -1,8 +1,4 @@
-export type ArtifactKind =
-    | "file_text"
-    | "parsed_transcript"
-    | "structured_interview"
-    | "question_analysis";
+export type ArtifactKind = "file_text" | "parsed_transcript" | "structured_interview" | "question_analysis";
 
 export interface ArtifactMetadata {
     producer: string;

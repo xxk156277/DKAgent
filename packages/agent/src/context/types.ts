@@ -1,9 +1,4 @@
-import type {
-    AgentMessage,
-    ModelRequest,
-    ModelResponse,
-    ToolSchema,
-} from "../query-engine/provider.js";
+import type { AgentMessage, ModelRequest, ModelResponse, ToolSchema } from "../query-engine/provider.js";
 
 /**
  * ContextCompactionInput - 压缩器入参
@@ -13,7 +8,7 @@ import type {
  *          开关、触发阈值、目标阈值、摘要阈值、ToolResult阈值
  *      3.压缩模型ID
  *      4.压缩停止器 AbortSignal
- * 
+ *
  * HistorySummaryInput - 生成历史摘要 - 喂给模型的入参定义
  *      当前摘要Summary
  *      新加入摘要的历史会话
@@ -21,10 +16,10 @@ import type {
  *      摘要的最大Token
  *      摘要前处理ToolResult的最大token
  *      摘要停止器
- * 
+ *
  * HistorySummaryEngine - 摘要模型Provider
  *      query 请求方法
- * 
+ *
  * ContextBuildInput - 构建上下文方法入参
  */
 /**
@@ -68,7 +63,6 @@ export interface ContextCompactionInput {
     /** 用于中止摘要模型请求。 */
     abortSignal?: AbortSignal;
 }
-
 
 /** 生成一次历史摘要所需的输入。 */
 export interface HistorySummaryInput {

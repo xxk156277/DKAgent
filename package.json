@@ -1,22 +1,24 @@
 {
-  "name": "dkagent-monorepo",
-  "private": true,
-  "type": "module",
-  "packageManager": "pnpm@11.18.0",
-  "scripts": {
-    "agent": "pnpm --filter @dkagent/agent agent",
-    "observe": "pnpm --filter @dkagent/web-tap observe",
-    "dev": "pnpm --filter @dkagent/web-tap dev",
-    "test": "pnpm -r --if-present test",
-    "typecheck": "pnpm -r --if-present typecheck",
-
-    "test:rag-v2": "pnpm --filter @dkagent/rag-v2 test",
-    "typecheck:rag-v2": "pnpm --filter @dkagent/rag-v2 typecheck"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "^26.1.2",
-    "tsx": "^4.23.1",
-    "typescript": "^7.0.2"
-  }
+    "name": "dkagent-monorepo",
+    "private": true,
+    "type": "module",
+    "packageManager": "pnpm@11.18.0",
+    "scripts": {
+        "agent": "pnpm --filter @dkagent/agent agent",
+        "observe": "pnpm --filter @dkagent/web-tap observe",
+        "dev": "pnpm --filter @dkagent/web-tap dev",
+        "test": "pnpm -r --if-present test",
+        "typecheck": "pnpm -r --if-present typecheck",
+        "run:db": "pnpm --filter @dkagent/rag-v2 run db:migrate",
+        "run:docker": "docker compose -f packages/rag-v2/docker-compose.yml up -d",
+        "test:rag-v2": "pnpm --filter @dkagent/rag-v2 test",
+        "typecheck:rag-v2": "pnpm --filter @dkagent/rag-v2 typecheck"
+    },
+    "devDependencies": {
+        "@types/better-sqlite3": "^9.6.0",
+        "@types/node": "^26.1.2",
+        "prettier": "^3.9.6",
+        "tsx": "^4.23.1",
+        "typescript": "^7.0.2"
+    }
 }
