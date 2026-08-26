@@ -12,7 +12,8 @@
     "test:rag-v2": "pnpm --filter @dkagent/rag-v2 test",
     "typecheck:rag-v2": "pnpm --filter @dkagent/rag-v2 typecheck",
     "test:agent-eval": "tsx --test evals/agent-loop/*.test.ts",
-    "typecheck:agent-eval": "tsc -p evals/agent-loop/tsconfig.json --noEmit"
+    "typecheck:agent-eval": "tsc -p evals/agent-loop/tsconfig.json --noEmit",
+    "eval:agent": "PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 PROMPTFOO_DISABLE_REMOTE_GENERATION=true PROMPTFOO_DISABLE_SHARING=1 PROMPTFOO_CONFIG_DIR=.dkagent/promptfoo NODE_OPTIONS='--import tsx' promptfoo eval -c evals/agent-loop/promptfooconfig.ts --no-cache"
   },
   "devDependencies": {
     "@dkagent/trace": "workspace:*",
