@@ -9,13 +9,16 @@
     "dev": "pnpm --filter @dkagent/web-tap dev",
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
-
     "test:rag-v2": "pnpm --filter @dkagent/rag-v2 test",
-    "typecheck:rag-v2": "pnpm --filter @dkagent/rag-v2 typecheck"
+    "typecheck:rag-v2": "pnpm --filter @dkagent/rag-v2 typecheck",
+    "test:agent-eval": "tsx --test evals/agent-loop/*.test.ts",
+    "typecheck:agent-eval": "tsc -p evals/agent-loop/tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@dkagent/trace": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.1.2",
+    "promptfoo": "0.121.19",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2"
   }
