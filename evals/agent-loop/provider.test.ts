@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isAbsolute } from "node:path";
 import type {
   AgentMessage,
   LLMProvider,
@@ -68,6 +69,8 @@ test("runAgentEvalCase executes read_file through the production AgentLoop", asy
   assert.equal(response.output, "验证码是 DKAGENT_EVAL_7319");
   const metadata = response.metadata?.evalRun as AgentEvalRunMetadata;
   assert.equal(metadata.caseId, "read-file");
+  assert.equal(isAbsolute(metadata.workspaceRoot ?? ""), true);
+  assert.match(metadata.workspaceRoot ?? "", /[\\/]workspace$/);
   assert.equal(metadata.runError, undefined);
   assert.deepEqual(
     selectToolCalls(metadata.traceEvents).map((call) => call.name),
@@ -242,6 +245,19 @@ test("payload secrets are redacted exactly regardless of their shape", () => {
   assert.deepEqual(redacted.payload, {
     "field-[REDACTED]": "value-[REDACTED]",
   });
+});
+
+test("workspaceRoot secret collisions fail closed before metadata is returned", () => {
+  const metadata: AgentEvalRunMetadata = {
+    caseId: "read-file",
+    workspaceRoot: "/tmp/workspace-secret-7319/workspace",
+    traceEvents: [],
+  };
+
+  assert.throws(
+    () => redactMetadata(metadata, ["workspace-secret-7319"]),
+    /安全|配置/,
+  );
 });
 
 test("redactMetadata removes exact secrets from nested keys and values without breaking Trace selectors", () => {

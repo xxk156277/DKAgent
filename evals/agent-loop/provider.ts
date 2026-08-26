@@ -65,11 +65,13 @@ function redactText(value: string, secrets: readonly string[]): string {
 type RedactionScope = "payload" | "metadata" | "trace";
 
 function isAgentEvalRunMetadata(value: unknown): value is AgentEvalRunMetadata {
+  const record = value as Record<string, unknown> | null;
   return typeof value === "object"
     && value !== null
     && !Array.isArray(value)
-    && typeof (value as Record<string, unknown>).caseId === "string"
-    && Array.isArray((value as Record<string, unknown>).traceEvents);
+    && typeof record?.caseId === "string"
+    && Array.isArray(record.traceEvents)
+    && (record.workspaceRoot === undefined || typeof record.workspaceRoot === "string");
 }
 
 export function redactMetadata<T>(value: T, secrets: readonly string[]): T {
@@ -147,6 +149,9 @@ function assertAgentEvalRunStructure(
   const redactedMetadata = redacted as AgentEvalRunMetadata;
   if (original.caseId !== redactedMetadata.caseId
     || original.traceEvents.length !== redactedMetadata.traceEvents.length) {
+    throw new Error(UNSAFE_SECRET_ERROR);
+  }
+  if (original.workspaceRoot !== redactedMetadata.workspaceRoot) {
     throw new Error(UNSAFE_SECRET_ERROR);
   }
   original.traceEvents.forEach((event, index) => {
@@ -346,6 +351,7 @@ export async function runAgentEvalCase(
     runRoot = await mkdtemp(join(tmpdir(), "dkagent-agent-eval-"));
     workspace = join(runRoot, "workspace");
     await cp(fixturePath(options.caseId), workspace, { recursive: true });
+    evalRun.workspaceRoot = workspace;
 
     traceStore = new MemoryTraceStore();
     const tracer = new Tracer(traceStore);

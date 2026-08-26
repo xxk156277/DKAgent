@@ -2,6 +2,7 @@ import type {
   AssertionValueFunctionContext,
   GradingResult,
 } from "promptfoo";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { TraceEvent } from "@dkagent/trace";
 import {
   findToolProtocolViolations,
@@ -13,6 +14,7 @@ import {
 export interface AgentEvalRunMetadata {
   caseId: string;
   traceEvents: TraceEvent[];
+  workspaceRoot?: string;
   runError?: { stage: "setup" | "model" | "agent" | "capture" | "cleanup"; message: string };
   finalFiles?: Record<string, string>;
 }
@@ -47,47 +49,81 @@ function normalizePath(value: string): string {
   return value.replaceAll("\\", "/").replace(/^\.\/+/, "").replace(/\/+/g, "/");
 }
 
-function findFilesResultBase(value: unknown): string {
-  if (typeof value !== "string") return "";
-  const normalized = normalizePath(value);
-  const workspaceMarker = "/workspace";
-  const markerIndex = normalized.lastIndexOf(workspaceMarker);
-  const markerEnd = markerIndex + workspaceMarker.length;
-  if (markerIndex >= 0 && (normalized.length === markerEnd || normalized[markerEnd] === "/")) {
-    return normalized.slice(markerEnd).replace(/^\/+|\/+$/g, "");
-  }
-  return normalized === "." ? "" : normalized;
+function isWithinDirectory(directory: string, candidate: string, allowSame = true): boolean {
+  if (!isAbsolute(directory) || !isAbsolute(candidate)) return false;
+  const path = relative(resolve(directory), resolve(candidate));
+  if (path === "") return allowSame;
+  return path !== ".."
+    && !path.startsWith(`..${sep}`)
+    && !isAbsolute(path);
 }
 
-function hasExactFindFiles(results: ReturnType<typeof selectToolResults>, expected: string[]): boolean {
+function resultPathInWorkspace(workspaceRoot: unknown, resultPath: unknown): string | undefined {
+  if (typeof workspaceRoot !== "string" || typeof resultPath !== "string") return undefined;
+  if (!isWithinDirectory(workspaceRoot, resultPath)) return undefined;
+  return resolve(resultPath);
+}
+
+function workspaceRelativeFile(
+  workspaceRoot: string,
+  resultPath: string,
+  file: string,
+): string | undefined {
+  const candidate = resolve(resultPath, file);
+  if (!isWithinDirectory(workspaceRoot, candidate, false)) return undefined;
+  return normalizePath(relative(resolve(workspaceRoot), candidate));
+}
+
+interface EvalGrepMatch {
+  path: string;
+  line: number;
+  text: string;
+}
+
+function isGrepMatch(value: unknown): value is EvalGrepMatch {
+  const match = record(value);
+  return match !== undefined
+    && typeof match.path === "string"
+    && typeof match.line === "number"
+    && Number.isInteger(match.line)
+    && match.line > 0
+    && typeof match.text === "string";
+}
+
+function hasExactFindFiles(
+  results: ReturnType<typeof selectToolResults>,
+  expected: string[],
+  workspaceRoot: unknown,
+): boolean {
   const result = results.find((item) => item.name === "find_files" && item.result.success);
   const data = record(result?.result.data);
   const files = data?.files;
   if (!Array.isArray(files) || !files.every((file): file is string => typeof file === "string")) {
     return false;
   }
-  const base = findFilesResultBase(data?.path);
-  const actual = files.map((file) => {
-    const normalizedFile = normalizePath(file);
-    return base === "" ? normalizedFile : `${base}/${normalizedFile}`;
-  }).sort();
-  const wanted = [...expected].sort();
+  if (typeof workspaceRoot !== "string") return false;
+  const path = resultPathInWorkspace(workspaceRoot, data?.path);
+  if (path === undefined) return false;
+  const actual = files.map((file) => workspaceRelativeFile(workspaceRoot, path, file));
+  if (actual.some((file): file is undefined => file === undefined)) return false;
+  const wanted = expected.map(normalizePath).sort();
+  actual.sort();
   return actual.length === wanted.length && actual.every((file, index) => file === wanted[index]);
 }
 
 function hasExpectedGrep(
   results: ReturnType<typeof selectToolResults>,
   expected: NonNullable<AgentAssertionConfig["expectedGrep"]>,
+  workspaceRoot: unknown,
 ): boolean {
   const result = results.find((item) => item.name === "grep_files" && item.result.success);
-  const matches = record(result?.result.data)?.matches;
-  if (!Array.isArray(matches)) return false;
+  const data = record(result?.result.data);
+  if (resultPathInWorkspace(workspaceRoot, data?.path) === undefined) return false;
+  const matches = data?.matches;
+  if (!Array.isArray(matches) || !matches.every(isGrepMatch)) return false;
   return matches.some((item) => {
-    const match = record(item);
-    return typeof match?.path === "string"
-      && typeof match.text === "string"
-      && match.path.includes(expected.path)
-      && match.text.includes(expected.text);
+    return normalizePath(item.path) === normalizePath(expected.path)
+      && item.text.includes(expected.text);
   });
 }
 
@@ -162,14 +198,14 @@ export function gradeAgentRun(
   if (config.expectedFindFiles !== undefined) {
     components.push(component(
       "expectedFindFiles",
-      hasExactFindFiles(results, config.expectedFindFiles),
+      hasExactFindFiles(results, config.expectedFindFiles, metadata.workspaceRoot),
       "find_files 返回精确文件集合",
     ));
   }
   if (config.expectedGrep !== undefined) {
     components.push(component(
       "expectedGrep",
-      hasExpectedGrep(results, config.expectedGrep),
+      hasExpectedGrep(results, config.expectedGrep, metadata.workspaceRoot),
       "grep_files 返回包含目标路径和文本的匹配",
     ));
   }

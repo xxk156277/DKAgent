@@ -134,13 +134,20 @@ function gradeWithTrace(
     outputIncludes: "DKAGENT_EVAL_7319",
   },
   output = "验证码是 DKAGENT_EVAL_7319",
+  workspaceRoot?: string,
 ) {
   return gradeAgentRun(output, {
     vars: {},
     test: {} as never,
     providerResponse: {
       output,
-      metadata: { evalRun: { caseId: "read-file", traceEvents } },
+      metadata: {
+        evalRun: {
+          caseId: "read-file",
+          traceEvents,
+          ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+        },
+      },
     },
     config,
   } as never);
@@ -281,6 +288,7 @@ test("grader rejects a forbidden Tool", () => {
 });
 
 test("grader enforces the exact find_files result set", () => {
+  const workspaceRoot = "/private/tmp/dkagent-agent-eval-123/workspace";
   const expected = {
     requiredTools: ["find_files"],
     expectedFindFiles: ["src/a.ts", "src/b.ts"],
@@ -289,22 +297,46 @@ test("grader enforces the exact find_files result set", () => {
     "find_files",
     { path: "src", pattern: "**/*.ts" },
     {
-      path: "/private/tmp/dkagent-agent-eval-123/workspace/src",
+      path: `${workspaceRoot}/src`,
       files: ["b.ts", "a.ts"],
       total: 2,
     },
-  ), expected, "");
+  ), expected, "", workspaceRoot);
   assert.equal(exact.pass, true);
 
   const withReadme = gradeWithTrace(completeToolTrace(
     "find_files",
     { path: "src", pattern: "**/*" },
     { path: ".", files: ["src/a.ts", "src/b.ts", "README.md"], total: 3 },
-  ), expected, "");
+  ), expected, "", workspaceRoot);
   assert.equal(withReadme.pass, false);
+
+  const withDuplicate = gradeWithTrace(completeToolTrace(
+    "find_files",
+    { path: "src", pattern: "**/*.ts" },
+    { path: `${workspaceRoot}/src`, files: ["a.ts", "a.ts"], total: 2 },
+  ), expected, "", workspaceRoot);
+  assert.equal(withDuplicate.pass, false);
+
+  for (const path of ["../../workspace/src", "/outside/workspace/src"]) {
+    const outside = gradeWithTrace(completeToolTrace(
+      "find_files",
+      { path: "src", pattern: "**/*.ts" },
+      { path, files: ["a.ts", "b.ts"], total: 2 },
+    ), expected, "", workspaceRoot);
+    assert.equal(outside.pass, false, `越界 find_files path 不应通过: ${path}`);
+  }
+
+  const missingPath = gradeWithTrace(completeToolTrace(
+    "find_files",
+    { path: "src", pattern: "**/*.ts" },
+    { files: ["src/a.ts", "src/b.ts"], total: 2 },
+  ), expected, "", workspaceRoot);
+  assert.equal(missingPath.pass, false);
 });
 
 test("grader requires a matching grep_files result", () => {
+  const workspaceRoot = "/private/tmp/dkagent-agent-eval-123/workspace";
   const expected = {
     requiredTools: ["grep_files"],
     expectedGrep: { path: "hit.txt", text: "DKAGENT_GREP_4821" },
@@ -313,21 +345,64 @@ test("grader requires a matching grep_files result", () => {
     "grep_files",
     { pattern: "DKAGENT_GREP_4821" },
     {
-      path: ".",
+      path: workspaceRoot,
       matches: [{ path: "hit.txt", line: 1, text: "search marker: DKAGENT_GREP_4821" }],
       total: 1,
     },
-  ), expected, "");
+  ), expected, "", workspaceRoot);
   assert.equal(match.pass, true);
 
   const miss = gradeWithTrace(completeToolTrace(
     "grep_files",
     { pattern: "DKAGENT_GREP_4821" },
     {
-      path: ".",
+      path: workspaceRoot,
       matches: [{ path: "miss.txt", line: 1, text: "this file has no target marker" }],
       total: 1,
     },
-  ), expected, "");
+  ), expected, "", workspaceRoot);
   assert.equal(miss.pass, false);
+
+  const wrongPath = gradeWithTrace(completeToolTrace(
+    "grep_files",
+    { pattern: "DKAGENT_GREP_4821" },
+    {
+      path: workspaceRoot,
+      matches: [{ path: "not-hit.txt", line: 1, text: "DKAGENT_GREP_4821" }],
+      total: 1,
+    },
+  ), expected, "", workspaceRoot);
+  assert.equal(wrongPath.pass, false);
+
+  const malformed = gradeWithTrace(completeToolTrace(
+    "grep_files",
+    { pattern: "DKAGENT_GREP_4821" },
+    {
+      path: workspaceRoot,
+      matches: [{ path: "hit.txt", line: 0, text: "DKAGENT_GREP_4821" }],
+      total: 1,
+    },
+  ), expected, "", workspaceRoot);
+  assert.equal(malformed.pass, false);
+
+  const outside = gradeWithTrace(completeToolTrace(
+    "grep_files",
+    { pattern: "DKAGENT_GREP_4821" },
+    {
+      path: "/outside/workspace",
+      matches: [{ path: "hit.txt", line: 1, text: "DKAGENT_GREP_4821" }],
+      total: 1,
+    },
+  ), expected, "", workspaceRoot);
+  assert.equal(outside.pass, false);
+
+  const missingPath = gradeWithTrace(completeToolTrace(
+    "grep_files",
+    { pattern: "DKAGENT_GREP_4821" },
+    {
+      matches: [{ path: "hit.txt", line: 1, text: "DKAGENT_GREP_4821" }],
+      total: 1,
+    },
+  ), expected, "", workspaceRoot);
+  assert.equal(missingPath.pass, false);
 });
