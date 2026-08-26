@@ -545,6 +545,39 @@ test("grader enforces causal Tool order by Trace sequence and input path", () =>
   ]), config, "", readThenWriteWorkspace);
   assert.equal(absoluteReadThenWrite.pass, true);
 
+  const sourceReadFailedButLaterReadSucceeded = completeSequenceTrace([
+    { name: "read_file", input: { path: "source.txt" }, resultData: { content: writeEvaluationContent } },
+    {
+      name: "write_file",
+      input: { path: "result.txt", content: writeEvaluationContent, overwrite: false },
+      resultData: { path: `${readThenWriteWorkspace}/result.txt` },
+    },
+    { name: "read_file", input: { path: "result.txt" }, resultData: { content: writeEvaluationContent } },
+  ]).map((traceEvent) => (
+    traceEvent.name === "tool.result"
+      && (traceEvent.data as Record<string, unknown>).input
+      && ((traceEvent.data as { input: { path?: unknown } }).input.path === "source.txt")
+      ? {
+        ...traceEvent,
+        data: {
+          ...(traceEvent.data as Record<string, unknown>),
+          result: { success: false, error: { code: "ENOENT", message: "source missing" } },
+        },
+      }
+      : traceEvent
+  ));
+  const failedSourceRead = gradeWithTrace(
+    sourceReadFailedButLaterReadSucceeded,
+    config,
+    "",
+    readThenWriteWorkspace,
+  );
+  assert.equal(failedSourceRead.pass, false);
+  assert.equal(
+    failedSourceRead.componentResults?.find((item) => item.metadata?.component === "mustHappenBefore")?.pass,
+    false,
+  );
+
   const outsideRead = gradeWithTrace(completeSequenceTrace([
     {
       name: "read_file",

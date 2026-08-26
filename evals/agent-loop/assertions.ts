@@ -168,6 +168,7 @@ function hasExpectedToolPaths(
 
 function hasRequiredCausalOrder(
   calls: ReturnType<typeof selectToolCalls>,
+  results: ReturnType<typeof selectToolResults>,
   expected: NonNullable<AgentAssertionConfig["mustHappenBefore"]>,
   workspaceRoot: unknown,
 ): boolean {
@@ -175,10 +176,21 @@ function hasRequiredCausalOrder(
   const beforePath = resolveWorkspacePath(workspaceRoot, expected.before.path);
   const afterPath = resolveWorkspacePath(workspaceRoot, expected.after.path);
   if (beforePath === undefined || afterPath === undefined) return false;
+  const hasSuccessfulResult = (
+    call: (typeof orderedCalls)[number],
+    targetPath: string,
+  ): boolean => {
+    const result = results.find((item) => item.toolCallId === call.id);
+    return result !== undefined
+      && result.name === call.name
+      && result.result.success === true
+      && resolveWorkspacePath(workspaceRoot, result.input.path) === targetPath;
+  };
   const firstAfter = orderedCalls.find((call) => (
     call.name === expected.after.tool
     && typeof call.input.path === "string"
     && resolveWorkspacePath(workspaceRoot, call.input.path) === afterPath
+    && hasSuccessfulResult(call, afterPath)
   ));
   if (firstAfter === undefined) return false;
   return orderedCalls.some((call) => (
@@ -186,6 +198,7 @@ function hasRequiredCausalOrder(
     && call.name === expected.before.tool
     && typeof call.input.path === "string"
     && resolveWorkspacePath(workspaceRoot, call.input.path) === beforePath
+    && hasSuccessfulResult(call, beforePath)
   ));
 }
 
@@ -295,7 +308,7 @@ export function gradeAgentRun(
     const { before, after } = config.mustHappenBefore;
     components.push(component(
       "mustHappenBefore",
-      hasRequiredCausalOrder(calls, config.mustHappenBefore, metadata.workspaceRoot),
+      hasRequiredCausalOrder(calls, results, config.mustHappenBefore, metadata.workspaceRoot),
       `要求 ${before.tool}(${before.path}) 先于首次 ${after.tool}(${after.path})`,
     ));
   }

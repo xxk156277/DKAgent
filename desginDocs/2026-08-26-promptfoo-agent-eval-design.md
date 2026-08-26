@@ -119,9 +119,10 @@ Provider 复用 `@dkagent/trace` 的 `TraceEvent`，只增加测评运行所必�
 ```ts
 interface AgentEvalRunMetadata {
   caseId: string;
+  workspaceRoot?: string;
   traceEvents: TraceEvent[];
   runError?: {
-    stage: "setup" | "model" | "agent" | "cleanup";
+    stage: "setup" | "model" | "agent" | "capture" | "cleanup";
     message: string;
   };
   finalFiles?: Record<string, string>;
