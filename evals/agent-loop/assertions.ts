@@ -37,6 +37,60 @@ function component(name: string, pass: boolean, reason: string): GradingResult {
   };
 }
 
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function normalizePath(value: string): string {
+  return value.replaceAll("\\", "/").replace(/^\.\/+/, "").replace(/\/+/g, "/");
+}
+
+function findFilesResultBase(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const normalized = normalizePath(value);
+  const workspaceMarker = "/workspace";
+  const markerIndex = normalized.lastIndexOf(workspaceMarker);
+  const markerEnd = markerIndex + workspaceMarker.length;
+  if (markerIndex >= 0 && (normalized.length === markerEnd || normalized[markerEnd] === "/")) {
+    return normalized.slice(markerEnd).replace(/^\/+|\/+$/g, "");
+  }
+  return normalized === "." ? "" : normalized;
+}
+
+function hasExactFindFiles(results: ReturnType<typeof selectToolResults>, expected: string[]): boolean {
+  const result = results.find((item) => item.name === "find_files" && item.result.success);
+  const data = record(result?.result.data);
+  const files = data?.files;
+  if (!Array.isArray(files) || !files.every((file): file is string => typeof file === "string")) {
+    return false;
+  }
+  const base = findFilesResultBase(data?.path);
+  const actual = files.map((file) => {
+    const normalizedFile = normalizePath(file);
+    return base === "" ? normalizedFile : `${base}/${normalizedFile}`;
+  }).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length && actual.every((file, index) => file === wanted[index]);
+}
+
+function hasExpectedGrep(
+  results: ReturnType<typeof selectToolResults>,
+  expected: NonNullable<AgentAssertionConfig["expectedGrep"]>,
+): boolean {
+  const result = results.find((item) => item.name === "grep_files" && item.result.success);
+  const matches = record(result?.result.data)?.matches;
+  if (!Array.isArray(matches)) return false;
+  return matches.some((item) => {
+    const match = record(item);
+    return typeof match?.path === "string"
+      && typeof match.text === "string"
+      && match.path.includes(expected.path)
+      && match.text.includes(expected.text);
+  });
+}
+
 export function gradeAgentRun(
   output: string,
   context: AssertionValueFunctionContext,
@@ -91,6 +145,34 @@ export function gradeAgentRun(
     ),
     component("termination", hasNormalTermination(metadata.traceEvents), "Agent 正常结束"),
   ];
+  if (config.requireNoTools === true) {
+    components.push(component(
+      "noTools",
+      calls.length === 0,
+      "要求不调用任何 Tool",
+    ));
+  }
+  if (config.forbiddenTools !== undefined) {
+    components.push(component(
+      "forbiddenTools",
+      config.forbiddenTools.every((name) => !calls.some((call) => call.name === name)),
+      "未调用禁止的 Tool",
+    ));
+  }
+  if (config.expectedFindFiles !== undefined) {
+    components.push(component(
+      "expectedFindFiles",
+      hasExactFindFiles(results, config.expectedFindFiles),
+      "find_files 返回精确文件集合",
+    ));
+  }
+  if (config.expectedGrep !== undefined) {
+    components.push(component(
+      "expectedGrep",
+      hasExpectedGrep(results, config.expectedGrep),
+      "grep_files 返回包含目标路径和文本的匹配",
+    ));
+  }
   const pass = components.every((item) => item.pass);
   return { pass, score: pass ? 1 : 0, reason: pass ? "全部组件通过" : "存在失败组件", componentResults: components };
 }

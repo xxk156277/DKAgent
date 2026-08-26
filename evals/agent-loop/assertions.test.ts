@@ -46,6 +46,35 @@ const completeReadTrace: TraceEvent[] = [
   event(5, "agent.turn", "end", { output: { answer: "DKAGENT_EVAL_7319" } }),
 ];
 
+const normalTurnTrace: TraceEvent[] = [
+  event(1, "agent.turn", "start", { input: "READY" }),
+  event(2, "agent.turn", "end", { output: { answer: "READY" } }),
+];
+
+function completeToolTrace(
+  name: string,
+  input: Record<string, unknown>,
+  resultData: unknown,
+): TraceEvent[] {
+  const toolCallId = `call-${name}`;
+  return [
+    event(1, "agent.turn", "start", { input: "执行文件查询" }),
+    event(2, "tool.call", "start", {
+      input: { id: toolCallId, name, input },
+    }),
+    event(3, "tool.result", "event", {
+      toolCallId,
+      name,
+      input,
+      result: { success: true, data: resultData },
+    }),
+    event(4, "tool.call", "end", {
+      output: { toolCallId, name },
+    }),
+    event(5, "agent.turn", "end", { output: { answer: "查询完成" } }),
+  ];
+}
+
 test("selectors only count tool.call start and tool.result event", () => {
   assert.deepEqual(selectToolCalls(completeReadTrace), [{
     id: "call-1",
@@ -229,4 +258,76 @@ test("protocol integrity is bidirectional one-to-one with diagnostics", () => {
   assert.match(violations.map((violation) => violation.message).join(" "), /duplicate-call/);
   assert.match(violations.map((violation) => violation.message).join(" "), /orphan-result/);
   assert.match(violations.map((violation) => violation.message).join(" "), /name-mismatch/);
+});
+
+test("grader enforces requireNoTools", () => {
+  const direct = gradeWithTrace(normalTurnTrace, {
+    requireNoTools: true,
+    outputIncludes: "READY",
+  }, "READY");
+  assert.equal(direct.pass, true);
+
+  const withTool = gradeWithTrace(completeReadTrace, {
+    requireNoTools: true,
+  });
+  assert.equal(withTool.pass, false);
+});
+
+test("grader rejects a forbidden Tool", () => {
+  const result = gradeWithTrace(completeReadTrace, {
+    forbiddenTools: ["read_file"],
+  });
+  assert.equal(result.pass, false);
+});
+
+test("grader enforces the exact find_files result set", () => {
+  const expected = {
+    requiredTools: ["find_files"],
+    expectedFindFiles: ["src/a.ts", "src/b.ts"],
+  };
+  const exact = gradeWithTrace(completeToolTrace(
+    "find_files",
+    { path: "src", pattern: "**/*.ts" },
+    {
+      path: "/private/tmp/dkagent-agent-eval-123/workspace/src",
+      files: ["b.ts", "a.ts"],
+      total: 2,
+    },
+  ), expected, "");
+  assert.equal(exact.pass, true);
+
+  const withReadme = gradeWithTrace(completeToolTrace(
+    "find_files",
+    { path: "src", pattern: "**/*" },
+    { path: ".", files: ["src/a.ts", "src/b.ts", "README.md"], total: 3 },
+  ), expected, "");
+  assert.equal(withReadme.pass, false);
+});
+
+test("grader requires a matching grep_files result", () => {
+  const expected = {
+    requiredTools: ["grep_files"],
+    expectedGrep: { path: "hit.txt", text: "DKAGENT_GREP_4821" },
+  };
+  const match = gradeWithTrace(completeToolTrace(
+    "grep_files",
+    { pattern: "DKAGENT_GREP_4821" },
+    {
+      path: ".",
+      matches: [{ path: "hit.txt", line: 1, text: "search marker: DKAGENT_GREP_4821" }],
+      total: 1,
+    },
+  ), expected, "");
+  assert.equal(match.pass, true);
+
+  const miss = gradeWithTrace(completeToolTrace(
+    "grep_files",
+    { pattern: "DKAGENT_GREP_4821" },
+    {
+      path: ".",
+      matches: [{ path: "miss.txt", line: 1, text: "this file has no target marker" }],
+      total: 1,
+    },
+  ), expected, "");
+  assert.equal(miss.pass, false);
 });
