@@ -120,6 +120,7 @@ Provider 复用 `@dkagent/trace` 的 `TraceEvent`，只增加测评运行所必�
 interface AgentEvalRunMetadata {
     caseId: string;
     traceEvents: TraceEvent[];
+    workspaceRoot?: string;
     runError?: {
         stage: "setup" | "model" | "agent" | "cleanup";
         message: string;
