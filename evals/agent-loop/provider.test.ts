@@ -160,6 +160,27 @@ test("non-missing capture failures retain the capture stage", async () => {
   assert.match(metadata.runError?.message ?? "", /ENOTDIR|not a directory/i);
 });
 
+test("dangerous short or structural secrets fail closed without returning Trace metadata", async () => {
+  const provider = new ReadFileFakeProvider();
+  for (const secret of ["tool", "tool.call"]) {
+    const response = await runAgentEvalCase({
+      caseId: "read-file",
+      prompt: "请读取 notes.txt，并告诉我其中的验证码。",
+      enabledTools: ["read_file"],
+      provider,
+      model: "fake-model",
+      maxContextTokens: 1_000,
+      maxOutputTokens: 100,
+      secrets: [secret],
+    });
+
+    assert.equal(response.metadata, undefined);
+    assert.doesNotMatch(JSON.stringify(response), new RegExp(secret.replace(".", "\\.")));
+    assert.match(response.error ?? "", /安全|配置/i);
+  }
+  assert.equal(provider.requests.length, 0);
+});
+
 test("redactMetadata removes exact secrets from nested keys and values without breaking Trace selectors", () => {
   const secret = "EVAL_SECRET_7319";
   const callEvent: TraceEvent = {
@@ -214,25 +235,21 @@ test("redactMetadata removes exact secrets from nested keys and values without b
   assert.match(String((result?.result.data as { content?: string } | undefined)?.content), /REDACTED/);
 });
 
-test("empty and structural short secrets do not corrupt Trace discriminants", () => {
-  const event: TraceEvent = {
-    id: "event-structure",
-    traceId: "trace-structure",
-    sequence: 1,
-    timestamp: "2026-08-26T00:00:00.000Z",
-    name: "tool.call",
-    phase: "start",
-    data: {
-      input: {
-        id: "call-structure",
-        name: "read_file",
-        input: { path: "notes.txt" },
-      },
-    },
-  };
+test("cleanup error takes precedence over a prior model error", async () => {
+  const response = await runAgentEvalCase({
+    caseId: "read-file",
+    prompt: "请读取 notes.txt。",
+    enabledTools: ["read_file"],
+    provider: new ModelFailureFakeProvider(),
+    model: "fake-model",
+    maxContextTokens: 1_000,
+    maxOutputTokens: 100,
+  }, async () => {
+    throw new Error("cleanup contains secret SHOULD NOT LEAK");
+  });
 
-  const redacted = redactMetadata({ event }, ["", "tool"]) as { event: TraceEvent };
-  assert.equal(redacted.event.name, "tool.call");
-  assert.equal(redacted.event.phase, "start");
-  assert.deepEqual(selectToolCalls([redacted.event]).map((call) => call.name), ["read_file"]);
+  const metadata = response.metadata?.evalRun as AgentEvalRunMetadata;
+  assert.equal(metadata.runError?.stage, "cleanup");
+  assert.match(metadata.runError?.message ?? "", /清理|cleanup/i);
+  assert.doesNotMatch(metadata.runError?.message ?? "", /SHOULD NOT LEAK|model exploded/);
 });
