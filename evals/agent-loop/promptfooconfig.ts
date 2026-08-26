@@ -22,6 +22,7 @@ const config: UnifiedConfig = {
         value: gradeAgentRun,
         config: {
           requiredTools: ["read_file"],
+          expectedToolPaths: { read_file: "notes.txt" },
           outputIncludes: "DKAGENT_EVAL_7319",
         },
       }],

@@ -361,7 +361,7 @@ test("grader enforces the exact find_files result set", () => {
   const withReadme = gradeWithTrace(completeToolTrace(
     "find_files",
     { path: "src", pattern: "**/*" },
-    { path: ".", files: ["src/a.ts", "src/b.ts", "README.md"], total: 3 },
+    { path: workspaceRoot, files: ["src/a.ts", "src/b.ts", "README.md"], total: 3 },
   ), expected, "", workspaceRoot);
   assert.equal(withReadme.pass, false);
 
@@ -526,6 +526,89 @@ test("grader enforces causal Tool order by Trace sequence and input path", () =>
     wrongWritePath.componentResults?.find((item) => item.metadata?.component === "mustHappenBefore")?.pass,
     false,
   );
+
+  const absoluteReadThenWrite = gradeWithTrace(completeSequenceTrace([
+    {
+      name: "read_file",
+      input: { path: `${readThenWriteWorkspace}/source.txt` },
+      resultData: { content: writeEvaluationContent },
+    },
+    {
+      name: "write_file",
+      input: {
+        path: `${readThenWriteWorkspace}/result.txt`,
+        content: writeEvaluationContent,
+        overwrite: false,
+      },
+      resultData: { path: `${readThenWriteWorkspace}/result.txt` },
+    },
+  ]), config, "", readThenWriteWorkspace);
+  assert.equal(absoluteReadThenWrite.pass, true);
+
+  const outsideRead = gradeWithTrace(completeSequenceTrace([
+    {
+      name: "read_file",
+      input: { path: "/outside/workspace/source.txt" },
+      resultData: { content: writeEvaluationContent },
+    },
+    {
+      name: "write_file",
+      input: { path: "result.txt", content: writeEvaluationContent, overwrite: false },
+      resultData: { path: `${readThenWriteWorkspace}/result.txt` },
+    },
+  ]), config, "", readThenWriteWorkspace);
+  assert.equal(outsideRead.pass, false);
+});
+
+test("grader requires the expected read_file Call and Result to target workspaceRoot/notes.txt", () => {
+  const workspaceRoot = "/private/tmp/dkagent-agent-eval-123/workspace";
+  const config = {
+    requiredTools: ["read_file"],
+    expectedToolPaths: { read_file: "notes.txt" },
+  };
+  const valid = gradeWithTrace(completeReadTrace, config, "", workspaceRoot);
+  assert.equal(valid.componentResults?.find((item) => item.metadata?.component === "expectedToolPaths")?.pass, true);
+
+  const outside = completeReadTrace.map((traceEvent) => {
+    if (traceEvent.name === "tool.call") {
+      return {
+        ...traceEvent,
+        data: {
+          input: {
+            id: "call-1",
+            name: "read_file",
+            input: { path: "/outside/workspace/notes.txt" },
+          },
+        },
+      };
+    }
+    if (traceEvent.name === "tool.result") {
+      return {
+        ...traceEvent,
+        data: {
+          ...(traceEvent.data as Record<string, unknown>),
+          input: { path: "/outside/workspace/notes.txt" },
+        },
+      };
+    }
+    return traceEvent;
+  });
+  const rejected = gradeWithTrace(outside, config, "", workspaceRoot);
+  assert.equal(rejected.componentResults?.find((item) => item.metadata?.component === "expectedToolPaths")?.pass, false);
+
+  const mismatchedResult = completeReadTrace.map((traceEvent) => (
+    traceEvent.name === "tool.result"
+      ? {
+        ...traceEvent,
+        data: {
+          ...(traceEvent.data as Record<string, unknown>),
+          input: { path: "other.txt" },
+        },
+      }
+      : traceEvent
+  ));
+  const mismatch = gradeWithTrace(mismatchedResult, config, "", workspaceRoot);
+  assert.equal(mismatch.componentResults?.find((item) => item.metadata?.component === "expectedToolPaths")?.pass, false);
 });
 
 test("grader requires exact final-file contents and names missing files", () => {

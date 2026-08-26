@@ -21,6 +21,7 @@ export interface AgentEvalRunMetadata {
 
 export interface AgentAssertionConfig {
   requiredTools?: string[];
+  expectedToolPaths?: Record<string, string>;
   forbiddenTools?: string[];
   outputIncludes?: string;
   requireNoTools?: boolean;
@@ -61,10 +62,24 @@ function isWithinDirectory(directory: string, candidate: string, allowSame = tru
     && !isAbsolute(path);
 }
 
+function resolveWorkspacePath(
+  workspaceRoot: unknown,
+  value: unknown,
+  allowSame = false,
+): string | undefined {
+  if (typeof workspaceRoot !== "string" || !isAbsolute(workspaceRoot) || typeof value !== "string") {
+    return undefined;
+  }
+  const root = resolve(workspaceRoot);
+  const platformPath = value.replaceAll("\\", sep);
+  const candidate = isAbsolute(platformPath)
+    ? resolve(platformPath)
+    : resolve(root, platformPath);
+  return isWithinDirectory(root, candidate, allowSame) ? candidate : undefined;
+}
+
 function resultPathInWorkspace(workspaceRoot: unknown, resultPath: unknown): string | undefined {
-  if (typeof workspaceRoot !== "string" || typeof resultPath !== "string") return undefined;
-  if (!isWithinDirectory(workspaceRoot, resultPath)) return undefined;
-  return resolve(resultPath);
+  return resolveWorkspacePath(workspaceRoot, resultPath, true);
 }
 
 function workspaceRelativeFile(
@@ -130,22 +145,47 @@ function hasExpectedGrep(
   });
 }
 
+function hasExpectedToolPaths(
+  calls: ReturnType<typeof selectToolCalls>,
+  results: ReturnType<typeof selectToolResults>,
+  expected: Record<string, string>,
+  workspaceRoot: unknown,
+): boolean {
+  return Object.entries(expected).every(([name, expectedPath]) => {
+    const target = resolveWorkspacePath(workspaceRoot, expectedPath);
+    if (target === undefined) return false;
+    const matchingCalls = calls.filter((call) => call.name === name);
+    if (matchingCalls.length === 0) return false;
+    return matchingCalls.every((call) => {
+      const result = results.find((item) => item.toolCallId === call.id);
+      return result !== undefined
+        && result.name === call.name
+        && resolveWorkspacePath(workspaceRoot, call.input.path) === target
+        && resolveWorkspacePath(workspaceRoot, result.input.path) === target;
+    });
+  });
+}
+
 function hasRequiredCausalOrder(
   calls: ReturnType<typeof selectToolCalls>,
   expected: NonNullable<AgentAssertionConfig["mustHappenBefore"]>,
+  workspaceRoot: unknown,
 ): boolean {
   const orderedCalls = [...calls].sort((left, right) => left.sequence - right.sequence);
+  const beforePath = resolveWorkspacePath(workspaceRoot, expected.before.path);
+  const afterPath = resolveWorkspacePath(workspaceRoot, expected.after.path);
+  if (beforePath === undefined || afterPath === undefined) return false;
   const firstAfter = orderedCalls.find((call) => (
     call.name === expected.after.tool
     && typeof call.input.path === "string"
-    && normalizePath(call.input.path) === normalizePath(expected.after.path)
+    && resolveWorkspacePath(workspaceRoot, call.input.path) === afterPath
   ));
   if (firstAfter === undefined) return false;
   return orderedCalls.some((call) => (
     call.sequence < firstAfter.sequence
     && call.name === expected.before.tool
     && typeof call.input.path === "string"
-    && normalizePath(call.input.path) === normalizePath(expected.before.path)
+    && resolveWorkspacePath(workspaceRoot, call.input.path) === beforePath
   ));
 }
 
@@ -230,6 +270,13 @@ export function gradeAgentRun(
       "未调用禁止的 Tool",
     ));
   }
+  if (config.expectedToolPaths !== undefined) {
+    components.push(component(
+      "expectedToolPaths",
+      hasExpectedToolPaths(calls, results, config.expectedToolPaths, metadata.workspaceRoot),
+      "必要 Tool 的 Call 与 Result 均指向 workspace 内的精确路径",
+    ));
+  }
   if (config.expectedFindFiles !== undefined) {
     components.push(component(
       "expectedFindFiles",
@@ -248,7 +295,7 @@ export function gradeAgentRun(
     const { before, after } = config.mustHappenBefore;
     components.push(component(
       "mustHappenBefore",
-      hasRequiredCausalOrder(calls, config.mustHappenBefore),
+      hasRequiredCausalOrder(calls, config.mustHappenBefore, metadata.workspaceRoot),
       `要求 ${before.tool}(${before.path}) 先于首次 ${after.tool}(${after.path})`,
     ));
   }
