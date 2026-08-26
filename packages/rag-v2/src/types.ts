@@ -7,6 +7,10 @@
  * - 流程统计：IngestReport（摄入报告）
  * - 评估用例：EvaluationQuestion（检索评估问题）
  */
+
+/**
+ * 图片引用
+ */
 export interface ImageReference {
     /** 引用语法类型：`markdown`（![]() 语法）或 `obsidian`（![[ ]] 语法） */
     kind: "markdown" | "obsidian";
