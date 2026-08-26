@@ -42,30 +42,104 @@ export interface RunAgentEvalCaseOptions {
 
 const FIXTURES_ROOT = fileURLToPath(new URL("./fixtures/", import.meta.url));
 const REDACTED = "[REDACTED]";
+const MIN_REDACTABLE_SECRET_LENGTH = 4;
+const STRUCTURAL_SECRET_TOKENS = [
+  "agent.turn",
+  "agent.step",
+  "context.build",
+  "context.snapshot.created",
+  "context.tokens.counted",
+  "context.threshold.checked",
+  "context.compaction.planned",
+  "context.summary.request",
+  "context.summary.response",
+  "context.compaction.completed",
+  "model.request",
+  "model.response",
+  "tool.call",
+  "tool.result",
+  "memory.recall",
+  "memory.extract",
+  "memory.write",
+  "skill.run",
+  "skill.stage",
+  "artifact.created",
+  "artifact.resolved",
+  "setup",
+  "capture",
+  "cleanup",
+  "start",
+  "event",
+  "end",
+  "error",
+  "read_file",
+  "find_files",
+  "grep_files",
+  "write_file",
+  "sessionId",
+  "module",
+  "operation",
+  "id",
+  "traceId",
+  "spanId",
+  "parentSpanId",
+  "sequence",
+  "timestamp",
+  "durationMs",
+  "name",
+  "phase",
+  "step",
+  "data",
+  "input",
+  "toolCallId",
+  "result",
+  "success",
+  "content",
+];
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isStructuralSecret(secret: string): boolean {
+  const normalized = secret.toLowerCase();
+  return STRUCTURAL_SECRET_TOKENS.some((token) => {
+    const structural = token.toLowerCase();
+    return structural === normalized || structural.includes(normalized);
+  });
+}
+
+function redactionSecrets(secrets: readonly string[]): string[] {
+  return [...new Set(secrets)]
+    .filter((secret) => secret.trim().length > 0
+      && secret.length >= MIN_REDACTABLE_SECRET_LENGTH
+      && !isStructuralSecret(secret))
+    .sort((left, right) => right.length - left.length);
+}
+
 function redactText(value: string, secrets: readonly string[]): string {
   return secrets
-    .filter((secret) => secret.length > 0)
     .reduce((text, secret) => text.split(secret).join(REDACTED), value);
 }
 
-function redactMetadata<T>(value: T, secrets: readonly string[]): T {
+export function redactMetadata<T>(value: T, secrets: readonly string[]): T {
+  const usableSecrets = redactionSecrets(secrets);
+  return redactMetadataValue(value, usableSecrets) as T;
+}
+
+function redactMetadataValue(value: unknown, secrets: readonly string[]): unknown {
   if (typeof value === "string") {
-    return redactText(value, secrets) as T;
+    return redactText(value, secrets);
   }
   if (Array.isArray(value)) {
-    return value.map((item) => redactMetadata(item, secrets)) as T;
+    return value.map((item) => redactMetadataValue(item, secrets));
   }
   if (value && typeof value === "object") {
     const redacted: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      redacted[key] = redactMetadata(item, secrets);
+      redacted[redactText(key, secrets)] = redactMetadataValue(item, secrets);
     }
-    return redacted as T;
+    return redacted;
   }
   return value;
 }
@@ -106,6 +180,13 @@ function classifyRunError(
   return { stage, message: errorMessage(error) };
 }
 
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === "ENOENT";
+}
+
 function registerEnabledTools(
   registry: ToolRegistry,
   enabledTools: readonly AgentEvalToolName[],
@@ -137,7 +218,7 @@ function safeProviderSetupMessage(error: unknown): string {
     process.env.QWEN_API_KEY,
     process.env.DEEPSEEK_API_KEY,
   ].filter((value): value is string => Boolean(value));
-  return redactText(errorMessage(error), values);
+  return redactText(errorMessage(error), redactionSecrets(values));
 }
 
 export async function runAgentEvalCase(
@@ -154,14 +235,26 @@ export async function runAgentEvalCase(
   };
   let runRoot: string | undefined;
   let traceStore: MemoryTraceStore | undefined;
+  let workspace: string | undefined;
+  let setupComplete = false;
+  let agent: AgentLoop | undefined;
 
   const refreshTrace = (): void => {
     evalRun.traceEvents = traceStore?.list().map((event) => sanitizeTraceEvent(event)) ?? [];
   };
 
+  const recordRunError = (
+    stage: NonNullable<AgentEvalRunMetadata["runError"]>["stage"],
+    error: unknown,
+  ): void => {
+    if (evalRun.runError === undefined) {
+      evalRun.runError = { stage, message: errorMessage(error) };
+    }
+  };
+
   try {
     runRoot = await mkdtemp(join(tmpdir(), "dkagent-agent-eval-"));
-    const workspace = join(runRoot, "workspace");
+    workspace = join(runRoot, "workspace");
     await cp(fixturePath(options.caseId), workspace, { recursive: true });
 
     traceStore = new MemoryTraceStore();
@@ -174,7 +267,7 @@ export async function runAgentEvalCase(
     );
     const toolRegistry = new ToolRegistry();
     registerEnabledTools(toolRegistry, options.enabledTools, workspace);
-    const agent = new AgentLoop({
+    agent = new AgentLoop({
       queryEngine,
       toolRegistry,
       contextManager,
@@ -185,37 +278,43 @@ export async function runAgentEvalCase(
       systemPrompt: AGENT_SYSTEM_PROMPT,
       tracer,
     });
-
-    try {
-      response.output = await agent.run(options.prompt);
-    } catch (error: unknown) {
-      refreshTrace();
-      evalRun.runError = classifyRunError(error, evalRun.traceEvents);
-    }
-
-    if (options.captureFiles !== undefined) {
-      evalRun.finalFiles = {};
-      for (const name of options.captureFiles) {
-        const path = capturePath(workspace, name);
-        evalRun.finalFiles[name] = await readFile(path, "utf8");
-      }
-    }
+    setupComplete = true;
   } catch (error: unknown) {
     refreshTrace();
-    evalRun.runError = {
-      stage: "setup",
-      message: errorMessage(error),
-    };
+    recordRunError("setup", error);
+  }
+
+  try {
+    if (setupComplete && agent && workspace) {
+      try {
+        response.output = await agent.run(options.prompt);
+      } catch (error: unknown) {
+        refreshTrace();
+        const runError = classifyRunError(error, evalRun.traceEvents);
+        recordRunError(runError.stage, error);
+      }
+
+      if (options.captureFiles !== undefined) {
+        evalRun.finalFiles = {};
+        for (const name of options.captureFiles) {
+          try {
+            const path = capturePath(workspace, name);
+            evalRun.finalFiles[name] = await readFile(path, "utf8");
+          } catch (error: unknown) {
+            if (!isMissingFileError(error)) {
+              recordRunError("capture", error);
+            }
+          }
+        }
+      }
+    }
   } finally {
     refreshTrace();
     if (runRoot !== undefined) {
       try {
         await rm(runRoot, { recursive: true, force: true });
       } catch (error: unknown) {
-        evalRun.runError = {
-          stage: "cleanup",
-          message: errorMessage(error),
-        };
+        recordRunError("cleanup", error);
       }
     }
   }

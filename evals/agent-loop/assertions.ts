@@ -13,7 +13,7 @@ import {
 export interface AgentEvalRunMetadata {
   caseId: string;
   traceEvents: TraceEvent[];
-  runError?: { stage: "setup" | "model" | "agent" | "cleanup"; message: string };
+  runError?: { stage: "setup" | "model" | "agent" | "capture" | "cleanup"; message: string };
   finalFiles?: Record<string, string>;
 }
 
