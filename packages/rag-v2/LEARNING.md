@@ -19,6 +19,8 @@ pnpm rag inspect --document "C-前端学习/node/SSE.md"
 
 阅读顺序：`src/embedding/embedding.ts` → `src/storage/database.ts` → `src/ingestion/ingest.ts` → `src/retrieval/search.ts`。
 
+数据库基础先阅读 [`GATE_2_DATABASE.md`](GATE_2_DATABASE.md)，完成其中的只读查询和事务回滚实验。
+
 ```bash
 docker compose up -d
 pnpm db:migrate

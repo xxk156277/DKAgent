@@ -68,7 +68,7 @@ cli
 
 ```dotenv
 SILICONFLOW_API_KEY=你的密钥
-DATABASE_URL=postgresql://rag:rag@localhost:5438/rag
+DATABASE_URL=postgresql://rag:rag@localhost:5439/rag
 ```
 
 已有的 `DEEPSEEK_API_KEY` 用于 `ask`。变量全集见 `.env.example`。不要把大康 Note 或密钥复制进项目。
@@ -76,7 +76,7 @@ DATABASE_URL=postgresql://rag:rag@localhost:5438/rag
 ## 2. 启动与索引
 
 ```bash
-cd packages/rag
+cd packages/rag-v2
 docker compose up -d
 pnpm db:migrate
 pnpm ingest

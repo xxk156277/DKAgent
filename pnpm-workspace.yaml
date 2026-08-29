@@ -1,13 +1,18 @@
 packages:
-    - "packages/*"
+  - "packages/*"
 
 allowBuilds:
-    esbuild: true
-    better-sqlite3: true
+  esbuild: true
+  better-sqlite3: true
+  '@playwright/browser-chromium': set this to true or false
+  '@swc/core': set this to true or false
+  onnxruntime-node: set this to true or false
+  protobufjs: set this to true or false
+  sharp: set this to true or false
 
 minimumReleaseAgeExclude:
-    - "@ai-sdk/gateway@4.0.64"
-    - "@ai-sdk/openai-compatible@3.0.37"
-    - "@ai-sdk/provider-utils@5.0.30"
-    - "@ai-sdk/provider@4.0.8"
-    - ai@7.0.79
+  - "@ai-sdk/gateway@4.0.64"
+  - "@ai-sdk/openai-compatible@3.0.37"
+  - "@ai-sdk/provider-utils@5.0.30"
+  - "@ai-sdk/provider@4.0.8"
+  - ai@7.0.79
