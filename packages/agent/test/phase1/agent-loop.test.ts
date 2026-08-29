@@ -5,9 +5,21 @@ import { AgentLoop } from "../../src/agent/loop.js";
 import { AGENT_SYSTEM_PROMPT } from "../../src/agent/prompt.js";
 import { MemoryExtractor } from "../../src/memory/extractor.js";
 import type { AgentLoopOptions } from "../../src/agent/types.js";
-import { ContextManager, ProviderTokenCounter } from "../../src/context/index.js";
-import type { ContextBuilder, ContextBuildInput, ContextSnapshot } from "../../src/context/types.js";
-import type { AgentMessage, LLMProvider, StreamEvent, StreamParams } from "../../src/query-engine/provider.js";
+import {
+    ContextManager,
+    ProviderTokenCounter,
+} from "../../src/context/index.js";
+import type {
+    ContextBuilder,
+    ContextBuildInput,
+    ContextSnapshot,
+} from "../../src/context/types.js";
+import type {
+    AgentMessage,
+    LLMProvider,
+    StreamEvent,
+    StreamParams,
+} from "../../src/query-engine/provider.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
 import type { SessionSnapshot, SessionStore } from "../../src/session/types.js";
 import { ToolRegistry } from "../../src/tools/registry.js";
@@ -20,7 +32,7 @@ class FakeProvider implements LLMProvider {
     readonly name = "fake";
     readonly requests: StreamParams[] = [];
 
-    constructor(private readonly responses: StreamEvent[][]) {}
+    constructor(private readonly responses: StreamEvent[][]) { }
 
     async *stream(params: StreamParams): AsyncIterable<StreamEvent> {
         this.requests.push(params);
@@ -50,12 +62,14 @@ function textResponse(
 function createAgent(
     provider: FakeProvider,
     registry = new ToolRegistry(),
-    contextManager: ContextBuilder = new ContextManager(new ProviderTokenCounter(provider)),
+    contextManager: ContextBuilder = new ContextManager(
+        new ProviderTokenCounter(provider),
+    ),
     tracer?: Tracer,
     artifactStore?: ArtifactStore,
 ): AgentLoop {
     return new AgentLoop({
-        queryEngine: new QueryEngine(provider),
+        queryEngine: new QueryEngine(provider, tracer ?? new Tracer()),
         toolRegistry: registry,
         contextManager,
         model: "fake-model",
@@ -72,7 +86,9 @@ class LatestMessageContextBuilder implements ContextBuilder {
     async build(input: ContextBuildInput): Promise<ContextSnapshot> {
         const latestMessage = input.messages.at(-1);
         return {
-            ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt }),
+            ...(input.systemPrompt === undefined
+                ? {}
+                : { systemPrompt: input.systemPrompt }),
             messages: latestMessage ? [latestMessage] : [],
             tools: [...input.tools],
         };
@@ -93,7 +109,9 @@ class AdvancingContextBuilder implements ContextBuilder {
         const nextNumber = this.receivedSummaries.length;
 
         return {
-            ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt }),
+            ...(input.systemPrompt === undefined
+                ? {}
+                : { systemPrompt: input.systemPrompt }),
             messages: [...input.messages],
             tools: [...input.tools],
             nextContextState: {
@@ -111,7 +129,9 @@ class RecordingContextBuilder implements ContextBuilder {
     async build(input: ContextBuildInput): Promise<ContextSnapshot> {
         this.systemPrompts.push(input.systemPrompt);
         return {
-            ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt }),
+            ...(input.systemPrompt === undefined
+                ? {}
+                : { systemPrompt: input.systemPrompt }),
             messages: [...input.messages],
             tools: [...input.tools],
         };
@@ -119,7 +139,9 @@ class RecordingContextBuilder implements ContextBuilder {
 }
 
 /** 只实现本组断言会调用的 SessionStore 方法。 */
-function createMemoryTestSession(appendedMessages: AgentMessage[]): NonNullable<AgentLoopOptions["session"]> {
+function createMemoryTestSession(appendedMessages: AgentMessage[]): NonNullable<
+    AgentLoopOptions["session"]
+> {
     const snapshot: SessionSnapshot = {
         id: "session-memory",
         messages: [],
@@ -149,7 +171,7 @@ function createMemoryTestSession(appendedMessages: AgentMessage[]): NonNullable<
         appendMessage(_sessionId, message) {
             appendedMessages.push(structuredClone(message));
         },
-        saveContextState() {},
+        saveContextState() { },
     };
     return {
         snapshot,
@@ -171,7 +193,10 @@ test("普通聊天直接返回文本，不执行 Tool", async () => {
 });
 
 test("连续调用时保留之前的对话消息", async () => {
-    const provider = new FakeProvider([textResponse("第一轮回答"), textResponse("第二轮回答")]);
+    const provider = new FakeProvider([
+        textResponse("第一轮回答"),
+        textResponse("第二轮回答"),
+    ]);
     const agent = createAgent(provider);
 
     await agent.run("第一轮问题");
@@ -185,13 +210,22 @@ test("连续调用时保留之前的对话消息", async () => {
 });
 
 test("模型使用 Context 快照，但 AgentLoop 保留完整历史", async () => {
-    const provider = new FakeProvider([textResponse("第一轮回答"), textResponse("第二轮回答")]);
-    const agent = createAgent(provider, new ToolRegistry(), new LatestMessageContextBuilder());
+    const provider = new FakeProvider([
+        textResponse("第一轮回答"),
+        textResponse("第二轮回答"),
+    ]);
+    const agent = createAgent(
+        provider,
+        new ToolRegistry(),
+        new LatestMessageContextBuilder(),
+    );
 
     await agent.run("第一轮问题");
     await agent.run("第二轮问题");
 
-    assert.deepEqual(provider.requests[1]?.messages, [{ role: "user", content: "第二轮问题" }]);
+    assert.deepEqual(provider.requests[1]?.messages, [
+        { role: "user", content: "第二轮问题" },
+    ]);
     assert.deepEqual(agent.getMessages(), [
         { role: "user", content: "第一轮问题" },
         { role: "assistant", content: "第一轮回答" },
@@ -201,7 +235,10 @@ test("模型使用 Context 快照，但 AgentLoop 保留完整历史", async () 
 });
 
 test("AgentLoop 每轮传入并保存 ContextManager 返回的摘要状态", async () => {
-    const provider = new FakeProvider([textResponse("第一轮回答"), textResponse("第二轮回答")]);
+    const provider = new FakeProvider([
+        textResponse("第一轮回答"),
+        textResponse("第二轮回答"),
+    ]);
     const contextManager = new AdvancingContextBuilder();
     const agent = new AgentLoop({
         queryEngine: new QueryEngine(provider),
@@ -222,7 +259,10 @@ test("AgentLoop 每轮传入并保存 ContextManager 返回的摘要状态", asy
     await agent.run("第一轮问题");
     await agent.run("第二轮问题");
 
-    assert.deepEqual(contextManager.receivedSummaries, ["", "第 1 次摘要"]);
+    assert.deepEqual(
+        contextManager.receivedSummaries,
+        ["", "第 1 次摘要"],
+    );
     assert.deepEqual(agent.getContextState(), {
         summary: "第 2 次摘要",
         firstKeptMessageIndex: 0,
@@ -270,31 +310,29 @@ test("Tool Call 执行后将结果回传模型", async () => {
 
     assert.equal(answer, "面试分析完成");
     assert.equal(executeCount, 1);
-    assert.deepEqual(
-        provider.requests[1]?.messages.map((message) => message.role),
-        ["user", "assistant", "tool"],
-    );
-    assert.ok(traceStore.list().some((event) => event.name === "tool.call"));
-    assert.ok(traceStore.list().some((event) => event.name === "tool.result"));
+    assert.deepEqual(provider.requests[1]?.messages.map((message) => message.role), [
+        "user",
+        "assistant",
+        "tool",
+    ]);
+    assert.deepEqual(traceStore.list().filter((span) => span.name === "tool.execute").length, 1);
 });
 
 test("终点 Tool 在协议消息完整后原样返回并持久化最终文本", async () => {
     const markdown = ["# 完整报告", "", "逐题分析".repeat(500)].join("\n");
-    const provider = new FakeProvider([
-        [
-            { type: "tool_call_start", index: 0, id: "call-final", name: "final_output" },
-            {
-                type: "tool_call_delta",
-                index: 0,
-                argumentsDelta: JSON.stringify({ returnDirectly: true }),
-            },
-            { type: "tool_call_end", index: 0 },
-            { type: "tool_call_start", index: 1, id: "call-auxiliary", name: "auxiliary" },
-            { type: "tool_call_delta", index: 1, argumentsDelta: "{}" },
-            { type: "tool_call_end", index: 1 },
-            { type: "message_end", usage, stopReason: "tool_use" },
-        ],
-    ]);
+    const provider = new FakeProvider([[
+        { type: "tool_call_start", index: 0, id: "call-final", name: "final_output" },
+        {
+            type: "tool_call_delta",
+            index: 0,
+            argumentsDelta: JSON.stringify({ returnDirectly: true }),
+        },
+        { type: "tool_call_end", index: 0 },
+        { type: "tool_call_start", index: 1, id: "call-auxiliary", name: "auxiliary" },
+        { type: "tool_call_delta", index: 1, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 1 },
+        { type: "message_end", usage, stopReason: "tool_use" },
+    ]]);
     const registry = new ToolRegistry();
     const terminalTool: Tool<{ returnDirectly: boolean }, { markdown: string }> & {
         getFinalOutput(
@@ -353,10 +391,13 @@ test("终点 Tool 在协议消息完整后原样返回并持久化最终文本",
         content: "生成完整报告",
     });
     assert.equal(auxiliaryExecuteCount, 1);
-    assert.deepEqual(
-        agent.getMessages().map((message) => message.role),
-        ["user", "assistant", "tool", "tool", "assistant"],
-    );
+    assert.deepEqual(agent.getMessages().map((message) => message.role), [
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+        "assistant",
+    ]);
     assert.deepEqual(sessionMessages, agent.getMessages());
     assert.deepEqual(agent.getMessages().at(-1), { role: "assistant", content: markdown });
     assert.deepEqual(deltas, [markdown]);
@@ -402,26 +443,26 @@ test("终点 Tool 失败时继续交回模型且普通文本不重复推送", as
     assert.equal(await agent.run("生成报告"), "模型处理失败结果");
     assert.equal(provider.requests.length, 2);
     assert.deepEqual(deltas, ["模型处理失败结果"]);
-    assert.deepEqual(
-        agent.getMessages().map((message) => message.role),
-        ["user", "assistant", "tool", "assistant"],
-    );
+    assert.deepEqual(agent.getMessages().map((message) => message.role), [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]);
 });
 
 test("Tool 执行期间中止时完成整批协议配对但不输出终点文本", async () => {
     const controller = new AbortController();
     const markdown = "# 不应输出的报告";
-    const provider = new FakeProvider([
-        [
-            { type: "tool_call_start", index: 0, id: "call-aborted-final", name: "aborted_final" },
-            { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
-            { type: "tool_call_end", index: 0 },
-            { type: "tool_call_start", index: 1, id: "call-after-abort", name: "after_abort" },
-            { type: "tool_call_delta", index: 1, argumentsDelta: "{}" },
-            { type: "tool_call_end", index: 1 },
-            { type: "message_end", usage, stopReason: "tool_use" },
-        ],
-    ]);
+    const provider = new FakeProvider([[
+        { type: "tool_call_start", index: 0, id: "call-aborted-final", name: "aborted_final" },
+        { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 0 },
+        { type: "tool_call_start", index: 1, id: "call-after-abort", name: "after_abort" },
+        { type: "tool_call_delta", index: 1, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 1 },
+        { type: "message_end", usage, stopReason: "tool_use" },
+    ]]);
     const registry = new ToolRegistry();
     registry.register({
         name: "aborted_final",
@@ -461,12 +502,16 @@ test("Tool 执行期间中止时完成整批协议配对但不输出终点文本
 
     await assert.rejects(agent.run("生成报告"), /Agent Run 已中止/);
     assert.equal(afterAbortExecuteCount, 1);
-    assert.deepEqual(
-        sessionMessages.map((message) => message.role),
-        ["user", "assistant", "tool", "tool"],
-    );
+    assert.deepEqual(sessionMessages.map((message) => message.role), [
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+    ]);
     assert.equal(
-        sessionMessages.some((message) => message.role === "assistant" && message.content === markdown),
+        sessionMessages.some((message) => (
+            message.role === "assistant" && message.content === markdown
+        )),
         false,
     );
     assert.equal(sessionMessages.at(-1)?.role, "tool");
@@ -474,17 +519,15 @@ test("Tool 执行期间中止时完成整批协议配对但不输出终点文本
 });
 
 test("终点提取 hook 抛错前已执行并持久化整批 Tool Result", async () => {
-    const provider = new FakeProvider([
-        [
-            { type: "tool_call_start", index: 0, id: "call-throwing-final", name: "throwing_final" },
-            { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
-            { type: "tool_call_end", index: 0 },
-            { type: "tool_call_start", index: 1, id: "call-after-hook", name: "after_hook" },
-            { type: "tool_call_delta", index: 1, argumentsDelta: "{}" },
-            { type: "tool_call_end", index: 1 },
-            { type: "message_end", usage, stopReason: "tool_use" },
-        ],
-    ]);
+    const provider = new FakeProvider([[
+        { type: "tool_call_start", index: 0, id: "call-throwing-final", name: "throwing_final" },
+        { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 0 },
+        { type: "tool_call_start", index: 1, id: "call-after-hook", name: "after_hook" },
+        { type: "tool_call_delta", index: 1, argumentsDelta: "{}" },
+        { type: "tool_call_end", index: 1 },
+        { type: "message_end", usage, stopReason: "tool_use" },
+    ]]);
     const registry = new ToolRegistry();
     registry.register({
         name: "throwing_final",
@@ -520,10 +563,12 @@ test("终点提取 hook 抛错前已执行并持久化整批 Tool Result", async
 
     await assert.rejects(agent.run("生成报告"), /终点提取失败/);
     assert.equal(afterHookExecuteCount, 1);
-    assert.deepEqual(
-        sessionMessages.map((message) => message.role),
-        ["user", "assistant", "tool", "tool"],
-    );
+    assert.deepEqual(sessionMessages.map((message) => message.role), [
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+    ]);
 });
 
 test("Tool Call 接收 AgentLoop 注入的 ArtifactStore", async () => {
@@ -591,14 +636,20 @@ test("Agent 失败时记录 agent.turn error 后原样抛出错误", async () =>
     };
     const traceStore = new MemoryTraceStore();
     const tracer = new Tracer(traceStore);
-    const agent = createAgent(new FakeProvider([]), new ToolRegistry(), failedContextBuilder, tracer);
+    const agent = createAgent(
+        new FakeProvider([]),
+        new ToolRegistry(),
+        failedContextBuilder,
+        tracer,
+    );
 
     await assert.rejects(agent.run("你好"), (error: unknown) => {
         assert.equal(error, expectedError);
         return true;
     });
-    const errorEvent = traceStore.list().find((event) => event.name === "agent.turn" && event.phase === "error");
-    assert.equal((errorEvent?.data as { error: { message: string } }).error.message, "context failed");
+    const errorSpan = traceStore.list().find((span) => span.name === "agent.turn");
+    assert.equal(errorSpan?.status, "error");
+    assert.equal(errorSpan?.error?.message, "context failed");
 });
 
 test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆", async () => {
@@ -632,7 +683,7 @@ test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆",
     };
 
     const agent = new AgentLoop({
-        queryEngine: new QueryEngine(provider),
+        queryEngine: new QueryEngine(provider, tracer),
         toolRegistry: registry,
         contextManager,
         model: "fake-model",
@@ -645,27 +696,91 @@ test("同一 Turn 的 Tool 两 Step 只召回一次，并复用同一段记忆",
 
     assert.equal(await agent.run("请使用工具"), "最终回答");
     assert.deepEqual(recallQueries, ["请使用工具"]);
-    const recallEvents = traceStore.list().filter((event) => event.name === "memory.recall");
-    assert.deepEqual(
-        recallEvents.map((event) => event.phase),
-        ["start", "end"],
-    );
-    assert.ok(recallEvents.every((event) => event.module === "memory" && event.operation === "recall"));
+    const recallEvents = traceStore.list().filter((span) => span.name === "memory.recall");
+    assert.equal(recallEvents.length, 1);
+    assert.deepEqual(recallEvents[0]?.output, { content: "<recalled_memory>用户偏好简洁</recalled_memory>", characterCount: 41 });
     assert.deepEqual(contextManager.systemPrompts, [
         "test prompt\n\n<recalled_memory>用户偏好简洁</recalled_memory>",
         "test prompt\n\n<recalled_memory>用户偏好简洁</recalled_memory>",
     ]);
 });
 
-test("召回记忆保留在真实模型请求中，但不进入 model.request Trace", async () => {
+test("canonical turn/step/model/tool flow has one owner and typed parent chain", async () => {
+    const provider = new FakeProvider([
+        [
+            { type: "tool_call_start", index: 0, id: "call-read", name: "read_file" },
+            { type: "tool_call_delta", index: 0, argumentsDelta: '{"path":"a"}' },
+            { type: "tool_call_end", index: 0 },
+            { type: "message_end", usage, stopReason: "tool_use" },
+        ],
+        textResponse("done"),
+    ]);
+    const registry = new ToolRegistry();
+    registry.register({
+        name: "read_file", description: "read", parameters: { type: "object" },
+        async execute(input) { return { success: true, data: { path: input.path } }; },
+    });
+    const store = new MemoryTraceStore();
+    const tracer = new Tracer(store);
+    const agent = new AgentLoop({
+        queryEngine: new QueryEngine(provider, tracer), toolRegistry: registry,
+        contextManager: new RecordingContextBuilder(), model: "fake-model",
+        maxContextTokens: 1000, maxOutputTokens: 100, tracer,
+    });
+    assert.equal(await agent.run("read"), "done");
+    const spans = store.list();
+    assert.deepEqual(spans.map((span) => span.name), [
+        "agent.turn", "agent.step", "model.generate", "tool.execute", "agent.step", "model.generate",
+    ]);
+    const root = spans[0]!;
+    assert.equal(spans[1]!.parentSpanId, root.spanId);
+    assert.equal(spans[2]!.parentSpanId, spans[1]!.spanId);
+    assert.equal(spans[3]!.parentSpanId, spans[1]!.spanId);
+    assert.equal(spans[4]!.parentSpanId, root.spanId);
+    assert.equal(spans[5]!.parentSpanId, spans[4]!.spanId);
+    assert.deepEqual(spans[3]!.input, { toolCallId: "call-read", name: "read_file", input: { path: "a" } });
+    assert.deepEqual(spans[3]!.output, { success: true, data: { path: "a" } });
+    assert.equal(spans.filter((span) => span.name === "model.generate").length, 2);
+    assert.equal(spans.filter((span) => span.name === "model.generate").every((span) => span.tokenUsage && span.durationMs !== undefined), true);
+});
+
+test("AgentLoop inherits QueryEngine tracer when options.tracer is omitted", async () => {
+    const provider = new FakeProvider([textResponse("inherited")]);
+    const store = new MemoryTraceStore();
+    const tracer = new Tracer(store);
+    const engine = new QueryEngine(provider, tracer);
+    const agent = new AgentLoop({
+        queryEngine: engine, toolRegistry: new ToolRegistry(), contextManager: new RecordingContextBuilder(),
+        model: "fake-model", maxContextTokens: 1000, maxOutputTokens: 100,
+    });
+    assert.equal(await agent.run("hello"), "inherited");
+    assert.deepEqual(store.list().map((span) => span.name), ["agent.turn", "agent.step", "model.generate"]);
+});
+
+test("AgentLoop rejects a tracer different from QueryEngine tracer", () => {
+    const provider = new FakeProvider([]);
+    const queryTracer = new Tracer();
+    const loopTracer = new Tracer();
+    assert.throws(() => new AgentLoop({
+        queryEngine: new QueryEngine(provider, queryTracer), tracer: loopTracer,
+        toolRegistry: new ToolRegistry(), contextManager: new RecordingContextBuilder(),
+        model: "fake-model", maxContextTokens: 1000, maxOutputTokens: 100,
+    }), /AgentLoop tracer must match QueryEngine tracer/);
+});
+
+test("召回记忆保留在真实模型请求、memory.recall 与 model.generate Trace", async () => {
     const memoryFact = "用户偏好先讲结论";
     const provider = new FakeProvider([textResponse("回答")]);
     const traceStore = new MemoryTraceStore();
     const tracer = new Tracer(traceStore);
     const agent = new AgentLoop({
-        queryEngine: new QueryEngine(provider),
+        queryEngine: new QueryEngine(provider, tracer),
         toolRegistry: new ToolRegistry(),
-        contextManager: new ContextManager(new ProviderTokenCounter(provider), undefined, tracer),
+        contextManager: new ContextManager(
+            new ProviderTokenCounter(provider),
+            undefined,
+            tracer,
+        ),
         model: "fake-model",
         maxContextTokens: 1_000,
         maxOutputTokens: 100,
@@ -681,14 +796,10 @@ test("召回记忆保留在真实模型请求中，但不进入 model.request Tr
     await agent.run("问题");
 
     assert.match(provider.requests[0]?.systemPrompt ?? "", new RegExp(memoryFact));
-    assert.doesNotMatch(JSON.stringify(traceStore.list()), new RegExp(memoryFact));
-    const modelRequestStart = traceStore
-        .list()
-        .find((event) => event.name === "model.request" && event.phase === "start");
-    assert.equal(
-        (modelRequestStart?.data as { input: { systemPrompt: string } }).input.systemPrompt,
-        "test prompt\n\n[RECALLED_MEMORY_REDACTED]",
-    );
+    const recall = traceStore.list().find((span) => span.name === "memory.recall");
+    const model = traceStore.list().find((span) => span.name === "model.generate");
+    assert.match(JSON.stringify(recall), new RegExp(memoryFact));
+    assert.match(JSON.stringify(model), new RegExp(memoryFact));
 });
 
 test("召回记忆只注入 Context System Prompt，不进入历史或 Session", async () => {
@@ -714,7 +825,10 @@ test("召回记忆只注入 Context System Prompt，不进入历史或 Session",
 
     await agent.run("问题");
 
-    assert.equal(contextManager.systemPrompts[0], "test prompt\n\n<recalled_memory>跨 Session 事实</recalled_memory>");
+    assert.equal(
+        contextManager.systemPrompts[0],
+        "test prompt\n\n<recalled_memory>跨 Session 事实</recalled_memory>",
+    );
     assert.doesNotMatch(JSON.stringify(agent.getMessages()), /跨 Session 事实/);
     assert.doesNotMatch(JSON.stringify(sessionMessages), /跨 Session 事实/);
 });
@@ -735,7 +849,7 @@ test("成功最终文本追加后按 Session 捕获记忆", async () => {
         },
     };
     const agent = new AgentLoop({
-        queryEngine: new QueryEngine(provider),
+        queryEngine: new QueryEngine(provider, tracer),
         toolRegistry: new ToolRegistry(),
         contextManager: new RecordingContextBuilder(),
         model: "fake-model",
@@ -747,20 +861,13 @@ test("成功最终文本追加后按 Session 捕获记忆", async () => {
     });
 
     assert.equal(await agent.run("原始问题"), "最终回答");
-    assert.deepEqual(captures, [
-        {
-            userInput: "原始问题",
-            assistantAnswer: "最终回答",
-            sessionId: "session-memory",
-        },
-    ]);
+    assert.deepEqual(captures, [{
+        userInput: "原始问题",
+        assistantAnswer: "最终回答",
+        sessionId: "session-memory",
+    }]);
     assert.deepEqual(sessionMessages.at(-1), { role: "assistant", content: "最终回答" });
-    const writeEvents = traceStore.list().filter((event) => event.name === "memory.write");
-    assert.deepEqual(
-        writeEvents.map((event) => event.phase),
-        ["start", "end"],
-    );
-    assert.ok(writeEvents.every((event) => event.module === "memory" && event.operation === "write"));
+    assert.equal(traceStore.list().some((span) => span.name === "memory.write"), false);
 
     const noSessionAgent = new AgentLoop({
         queryEngine: new QueryEngine(new FakeProvider([textResponse("无 Session 回答")])),
@@ -822,7 +929,7 @@ test("Memory 失败降级，空文本或循环失败不捕获", async () => {
         },
     };
     const normalAgent = new AgentLoop({
-        queryEngine: new QueryEngine(new FakeProvider([textResponse("正常回答")])),
+        queryEngine: new QueryEngine(new FakeProvider([textResponse("正常回答")]), tracer),
         toolRegistry: new ToolRegistry(),
         contextManager: new RecordingContextBuilder(),
         model: "fake-model",
@@ -835,8 +942,8 @@ test("Memory 失败降级，空文本或循环失败不捕获", async () => {
     });
 
     assert.equal(await normalAgent.run("问题"), "正常回答");
-    assert.ok(traceStore.list().some((event) => event.name === "memory.recall" && event.phase === "error"));
-    assert.ok(traceStore.list().some((event) => event.name === "memory.write" && event.phase === "error"));
+    assert.equal(traceStore.list().some((span) => span.name === "memory.recall" && span.status === "error"), true);
+    assert.equal(traceStore.list().some((span) => span.name === "memory.write"), false);
 
     const captures: Array<{ userInput: string; assistantAnswer: string; sessionId: string }> = [];
     const captureRecorder: MemoryWriter = {
@@ -857,16 +964,12 @@ test("Memory 失败降级，空文本或循环失败不捕获", async () => {
     await assert.rejects(emptyAnswerAgent.run("空文本"), /模型返回空文本/);
 
     const loopAgent = new AgentLoop({
-        queryEngine: new QueryEngine(
-            new FakeProvider([
-                [
-                    { type: "tool_call_start", index: 0, id: "call-loop", name: "test_tool" },
-                    { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
-                    { type: "tool_call_end", index: 0 },
-                    { type: "message_end", usage, stopReason: "tool_use" },
-                ],
-            ]),
-        ),
+        queryEngine: new QueryEngine(new FakeProvider([[
+            { type: "tool_call_start", index: 0, id: "call-loop", name: "test_tool" },
+            { type: "tool_call_delta", index: 0, argumentsDelta: "{}" },
+            { type: "tool_call_end", index: 0 },
+            { type: "message_end", usage, stopReason: "tool_use" },
+        ]])),
         toolRegistry: new ToolRegistry(),
         contextManager: new RecordingContextBuilder(),
         model: "fake-model",
@@ -895,19 +998,16 @@ test("System Prompt 只定义面试成长 Agent 的稳定核心契约", () => {
     assert.match(AGENT_SYSTEM_PROMPT, /能力失败时如实说明错误/);
     assert.match(AGENT_SYSTEM_PROMPT, /简单的范围外问题可以简短回答/);
     assert.doesNotMatch(AGENT_SYSTEM_PROMPT, /find_files|analyze_interview/);
-});
+})
 
 test("MemoryExtractor 模型错误不影响 AgentLoop 最终回答", async () => {
     const userInput = "用户原文仍应正常回答";
     const answer = "正常最终回答";
-    const extractor = new MemoryExtractor(
-        {
-            async query() {
-                throw new Error(`${userInput}; ${answer}; 候选正文`);
-            },
+    const extractor = new MemoryExtractor({
+        async query() {
+            throw new Error(`${userInput}; ${answer}; 候选正文`);
         },
-        "memory-model",
-    );
+    }, "memory-model");
     const agent = new AgentLoop({
         queryEngine: new QueryEngine(new FakeProvider([textResponse(answer)])),
         toolRegistry: new ToolRegistry(),

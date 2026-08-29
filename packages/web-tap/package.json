@@ -1,35 +1,35 @@
 {
-    "name": "@dkagent/web-tap",
-    "private": true,
-    "type": "module",
-    "scripts": {
-        "observe": "npm run build && cd ../.. && tsx packages/web-tap/src/observe.ts",
-        "dev": "vite",
-        "build": "vite build",
-        "test": "npm run test:node && npm run test:web -- --run",
-        "test:node": "npm run build && cd ../.. && tsx --test packages/web-tap/test/*.test.ts",
-        "test:web": "vitest",
-        "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit"
-    },
-    "dependencies": {
-        "@ant-design/icons": "^6",
-        "@dkagent/agent": "workspace:*",
-        "@dkagent/trace": "workspace:*",
-        "antd": "^6.6.0",
-        "react": "^19.2.8",
-        "react-dom": "^19.2.8",
-        "react-markdown": "^10.1.0",
-        "react-router-dom": "^7.18.2",
-        "zustand": "^5.0.14"
-    },
-    "devDependencies": {
-        "@testing-library/jest-dom": "^6.9.1",
-        "@testing-library/react": "^16.3.2",
-        "@types/react": "^19.2.7",
-        "@types/react-dom": "^19.2.3",
-        "@vitejs/plugin-react": "^6.0.5",
-        "jsdom": "^30.0.1",
-        "vite": "^8.2.1",
-        "vitest": "^4.1.10"
-    }
+  "name": "@dkagent/web-tap",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "observe": "npm run build && cd ../.. && tsx packages/web-tap/src/observe.ts",
+    "dev": "vite",
+    "build": "vite build",
+    "test": "npm run test:node && npm run test:web -- --run",
+    "test:node": "npm run build && cd ../.. && tsx --test packages/web-tap/test/*.test.ts",
+    "test:web": "vitest",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.web.json --noEmit"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6",
+    "@dkagent/agent": "workspace:*",
+    "@dkagent/trace": "workspace:*",
+    "antd": "^6.6.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.18.2",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.5",
+    "jsdom": "^30.0.1",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
+  }
 }

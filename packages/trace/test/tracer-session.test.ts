@@ -1,74 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MemoryTraceStore, Tracer, type TraceEventName, type TraceModule } from "../src/index.js";
+import { MemoryTraceStore, Tracer } from "../src/index.js";
 
-test("withSession 让根 Trace、子 Span 和 Event 继承 sessionId", async () => {
+test("withSession 继承到根和子 Span，且同一 Trace 不允许污染 session", async () => {
     const store = new MemoryTraceStore();
     const tracer = new Tracer(store);
-
-    await tracer.withSession("session-1", () =>
-        tracer.trace("agent.turn", { input: "你好" }, async () =>
-            tracer.span("model.request", {}, async (span) => {
-                span.event("context.tokens.counted", { tokens: 12 });
-            }),
-        ),
-    );
-
-    const events = store.list();
-    assert.ok(events.length > 0);
-    assert.equal(
-        events.every((event) => event.sessionId === "session-1"),
-        true,
-    );
+    await tracer.withSession("session-1", () => tracer.trace("agent.turn", { userInput: "hello" }, async (turn) => {
+        turn.setOutput({ answer: "ok" });
+        await tracer.span("agent.step", { step: 1 }, async (step) => {
+            step.setOutput({ outcome: "answer", stopReason: "end_turn", toolCallCount: 0 });
+        });
+    }));
+    assert.equal(store.listBySession("session-1").length, 2);
+    await tracer.withSession("session-1", () => tracer.trace("agent.turn", { userInput: "outer" }, async () => {
+        await assert.rejects(tracer.withSession("session-2", () => tracer.span("tool.execute", {
+            toolCallId: "id", name: "x", input: {},
+        }, async () => undefined)), /session mismatch/);
+    }));
 });
 
-test("未绑定 Session 时保持旧事件兼容", async () => {
+test("spanSync 在 active Trace 中保持父子关系", async () => {
     const store = new MemoryTraceStore();
     const tracer = new Tracer(store);
-
-    await tracer.trace("agent.turn", { input: "你好" }, async () => undefined);
-
-    assert.equal(
-        store.list().every((event) => event.sessionId === undefined),
-        true,
-    );
-});
-
-test("Skill Span 的生命周期和子 Event 继承 module 与 operation", async () => {
-    const store = new MemoryTraceStore();
-    const tracer = new Tracer(store);
-
-    await tracer.trace("agent.turn", { input: "分析答案" }, async () =>
-        tracer.span(
-            "skill.stage",
-            { stage: "analyze" },
-            async (span) => {
-                tracer.event("model.request", { prompt: "答案" });
-                span.event("model.response", { output: "分析结果" });
-            },
-            { module: "skill", operation: "analyze_answer" },
-        ),
-    );
-
-    const skillEvents = store.list().filter((event) => event.name !== "agent.turn");
-    assert.deepEqual(
-        skillEvents.map((event) => event.name),
-        ["skill.stage", "model.request", "model.response", "skill.stage"],
-    );
-    assert.equal(
-        skillEvents.every((event) => event.module === "skill"),
-        true,
-    );
-    assert.equal(
-        skillEvents.every((event) => event.operation === "analyze_answer"),
-        true,
-    );
-});
-
-test("Artifact Trace 类型可从公共入口导入", () => {
-    const module: TraceModule = "artifact";
-    const names: TraceEventName[] = ["artifact.created", "artifact.resolved"];
-
-    assert.equal(module, "artifact");
-    assert.equal(names.length, 2);
+    await tracer.trace("agent.turn", { userInput: "sync" }, async (turn) => {
+        tracer.spanSync("artifact.put", { kind: "file_text", metadata: {} }, (span) => {
+            span.setOutput({ artifactId: "artifact-1" });
+            return undefined;
+        });
+        turn.setOutput({ answer: "ok" });
+    });
+    const artifact = store.list().find((span) => span.name === "artifact.put")!;
+    assert.equal(artifact.parentSpanId, store.list().find((span) => span.name === "agent.turn")?.spanId);
 });

@@ -1,15 +1,11 @@
 export { MemoryTraceStore } from "./memory-store.js";
-export { sanitizeTraceEvent } from "./sanitize.js";
+export { SqliteTraceStore } from "./sqlite-store.js";
+export { sanitizeJson, sanitizeError } from "./sanitize.js";
 export { Tracer } from "./tracer.js";
+export { createTraceDocument } from "./trace-document.js";
 export type {
-    TraceEvent,
-    TraceEventName,
-    TraceEventOptions,
-    TraceListener,
-    TraceModule,
-    TraceOperation,
-    TracePhase,
-    TraceSink,
-    TraceSpan,
-    TraceStore,
+    AnyTraceSpan, ContextCompactionTraceInput, JsonObject, JsonValue, SpanChange, SpanEvent, SpanEventName, SpanInputMap,
+    SpanKind, SpanKindMap, SpanName, SpanOutputMap, SpanStatus, TraceError, TraceListener,
+    TraceModelInput, TraceModelOutput, TraceOperation, SyncTraceOperation, TraceSink, TraceSpan, TraceSpanHandle,
+    TraceSpanOptions, TraceStore, TraceReader, TraceTokenUsage, TracerOptions, TraceSummary, TraceDiagnostics, TraceDocument,
 } from "./types.js";

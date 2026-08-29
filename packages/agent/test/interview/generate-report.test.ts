@@ -9,23 +9,23 @@ import type {
     // ProjectFactSet,
     QuestionAnalysis,
 } from "../../src/interview/analysis-types.js";
-import type { InterviewQuestion, QuestionCluster, StructuredInterview } from "../../src/interview/types.js";
+import type {
+    InterviewQuestion,
+    QuestionCluster,
+    StructuredInterview,
+} from "../../src/interview/types.js";
 import type { QuestionAnalysisArtifact } from "../../src/interview/artifact-payloads.js";
 import { QueryEngine } from "../../src/query-engine/query-engine.js";
-import { confidenceLabel, createGenerateReportTool } from "../../src/tools/tool-item/generate-report.js";
+import {
+    confidenceLabel,
+    createGenerateReportTool,
+} from "../../src/tools/tool-item/generate-report.js";
 import { createAnalyzeAnswerTool } from "../../src/tools/tool-item/analyze-answer.js";
 import type { ToolContext } from "../../src/tools/types.js";
 import { FakeTextProvider } from "./fake-provider.js";
 
 const questions: InterviewQuestion[] = [
-    question(
-        "q-1",
-        "cluster-project",
-        "project",
-        true,
-        "请介绍项目",
-        "我负责 DSL 渲染链路，" + "完整回答。".repeat(40),
-    ),
+    question("q-1", "cluster-project", "project", true, "请介绍项目", "我负责 DSL 渲染链路，" + "完整回答。".repeat(40)),
     question("q-2", "cluster-project", "project", true, "指标提升多少", "首屏耗时下降了，但是没有记住具体数字。"),
     question("q-3", "cluster-knowledge", "knowledge", true, "解释事件循环", "宏任务执行完会清空微任务。"),
     question("q-4", "cluster-procedural", "procedural", false, "还有问题吗", "没有了。"),
@@ -66,22 +66,18 @@ const structuredInterview: StructuredInterview = {
 };
 
 const analyses: QuestionAnalysis[] = [
-    completed("q-1", "cluster-project", "project", 78, 0.72, [
-        {
-            factKey: "cluster-project.metric",
-            question: "项目指标具体提升多少？",
-            affectedQuestionIds: ["q-1"],
-            impact: "medium",
-        },
-    ]),
-    completed("q-2", "cluster-project", "project", 66, 0.84, [
-        {
-            factKey: "cluster-project.metric",
-            question: "首屏指标具体提升多少？",
-            affectedQuestionIds: ["q-2"],
-            impact: "high",
-        },
-    ]),
+    completed("q-1", "cluster-project", "project", 78, 0.72, [{
+        factKey: "cluster-project.metric",
+        question: "项目指标具体提升多少？",
+        affectedQuestionIds: ["q-1"],
+        impact: "medium",
+    }]),
+    completed("q-2", "cluster-project", "project", 66, 0.84, [{
+        factKey: "cluster-project.metric",
+        question: "首屏指标具体提升多少？",
+        affectedQuestionIds: ["q-2"],
+        impact: "high",
+    }]),
     { status: "failed", questionId: "q-3", clusterId: "cluster-knowledge", error: "模型失败" },
     { status: "not_scored", questionId: "q-4", clusterId: "cluster-procedural" },
 ];
@@ -140,22 +136,18 @@ function completed(
         questionId,
         clusterId,
         questionType,
-        strengths: [
-            {
-                id: `${questionId}-strength`,
-                text: "职责清晰",
-                impact: "能判断个人贡献",
-                evidenceTurnIds: [`${questionId}-answer`],
-            },
-        ],
-        issues: [
-            {
-                id: `${questionId}-issue`,
-                text: "结果证据不足",
-                impact: "难以判断项目效果",
-                evidenceTurnIds: [`${questionId}-answer`],
-            },
-        ],
+        strengths: [{
+            id: `${questionId}-strength`,
+            text: "职责清晰",
+            impact: "能判断个人贡献",
+            evidenceTurnIds: [`${questionId}-answer`],
+        }],
+        issues: [{
+            id: `${questionId}-issue`,
+            text: "结果证据不足",
+            impact: "难以判断项目效果",
+            evidenceTurnIds: [`${questionId}-answer`],
+        }],
         improvements: [{ issueId: `${questionId}-issue`, text: "补充量化结果" }],
         dimensionScores: {
             contentQuality: score,
@@ -173,10 +165,8 @@ function completed(
 
 function toolContext(response: unknown): { provider: FakeTextProvider; context: ToolContext } {
     const content = Array.isArray(response)
-        ? response.map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
-        : typeof response === "string"
-          ? response
-          : JSON.stringify(response);
+        ? response.map((item) => typeof item === "string" ? item : JSON.stringify(item))
+        : typeof response === "string" ? response : JSON.stringify(response);
     const provider = new FakeTextProvider(content);
     return {
         provider,
@@ -200,20 +190,22 @@ function baseInput(
     const artifacts = context.artifactStore!;
     const interview = overrides.structuredInterview ?? structuredInterview;
     const inputAnalyses = overrides.analyses ?? analyses;
-    const structuredInterviewArtifactId = artifacts.put("structured_interview", interview, { producer: "test" });
+    const structuredInterviewArtifactId = artifacts.put(
+        "structured_interview",
+        interview,
+        { producer: "test" },
+    );
     return {
         structuredInterviewArtifactId,
-        analysisArtifactIds: inputAnalyses.map((analysis) =>
-            artifacts.put(
-                "question_analysis",
-                {
-                    structuredInterviewArtifactId,
-                    analysis,
-                } satisfies QuestionAnalysisArtifact,
-                { producer: "test" },
-            ),
-        ),
-        stage: overrides.stage ?? ("provisional" as const),
+        analysisArtifactIds: inputAnalyses.map((analysis) => artifacts.put(
+            "question_analysis",
+            {
+                structuredInterviewArtifactId,
+                analysis,
+            } satisfies QuestionAnalysisArtifact,
+            { producer: "test" },
+        )),
+        stage: overrides.stage ?? "provisional" as const,
         ...(overrides.metadata ? { metadata: overrides.metadata } : {}),
     };
 }
@@ -227,16 +219,10 @@ test("暂定报告展示暂定总分、覆盖率和完整问题顺序", async ()
     assert.equal(result.data?.report.score.totalScore, 71);
     assert.match(result.data?.report.notice ?? "", /暂定总分.*可能调整/);
     assert.equal(result.data?.report.questions.length, structuredInterview.questions.length);
-    assert.deepEqual(
-        result.data?.report.questions.map((item) => item.questionId),
-        ["q-1", "q-2", "q-3", "q-4"],
-    );
+    assert.deepEqual(result.data?.report.questions.map((item) => item.questionId), ["q-1", "q-2", "q-3", "q-4"]);
     assert.equal(result.data?.report.questions[0]?.label, "低代码项目 / 项目题");
     assert.match(result.data?.markdown ?? "", /已分析：2\/3/);
-    assert.match(
-        result.data?.markdown ?? "",
-        new RegExp(questions[0]!.originalAnswer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-    );
+    assert.match(result.data?.markdown ?? "", new RegExp(questions[0]!.originalAnswer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     const firstQuestion = result.data!.markdown.split("### Q1\n")[1]!.split("### Q2\n")[0]!;
     assert.ok(firstQuestion.indexOf("原问题") < firstQuestion.indexOf("原回答"));
     assert.ok(firstQuestion.indexOf("原回答") < firstQuestion.indexOf("标签："));
@@ -258,32 +244,23 @@ test("通过 Artifact 引用生成完整报告", async () => {
     assert.equal(tool.getFinalOutput?.(input, result), result.data?.markdown);
     assert.equal(tool.getFinalOutput?.({ ...input, returnDirectly: true }, result), result.data?.markdown);
     assert.equal(tool.getFinalOutput?.({ ...input, returnDirectly: false }, result), undefined);
-    assert.equal(
-        tool.getFinalOutput?.(input, {
-            success: false,
-            error: { code: "input_error", message: "失败" },
-        }),
-        undefined,
-    );
-    assert.equal(
-        tool.getFinalOutput?.(input, {
-            success: true,
-            data: { ...result.data!, markdown: " \n\t " },
-        }),
-        undefined,
-    );
+    assert.equal(tool.getFinalOutput?.(input, {
+        success: false,
+        error: { code: "input_error", message: "失败" },
+    }), undefined);
+    assert.equal(tool.getFinalOutput?.(input, {
+        success: true,
+        data: { ...result.data!, markdown: " \n\t " },
+    }), undefined);
     const paddedMarkdown = ` \n${result.data!.markdown}\n `;
-    assert.equal(
-        tool.getFinalOutput?.(input, {
-            success: true,
-            data: { ...result.data!, markdown: paddedMarkdown },
-        }),
-        paddedMarkdown,
+    assert.equal(tool.getFinalOutput?.(input, {
+        success: true,
+        data: { ...result.data!, markdown: paddedMarkdown },
+    }), paddedMarkdown);
+    assert.deepEqual(
+        (tool.parameters.properties as Record<string, unknown>).returnDirectly,
+        { type: "boolean", description: "true 直接返回报告；false 供后续 write_file 保存" },
     );
-    assert.deepEqual((tool.parameters.properties as Record<string, unknown>).returnDirectly, {
-        type: "boolean",
-        description: "true 直接返回报告；false 供后续 write_file 保存",
-    });
 });
 
 test("Artifact 不存在或类型错误时返回输入错误", async () => {
@@ -300,13 +277,19 @@ test("Artifact 不存在或类型错误时返回输入错误", async () => {
         }),
         (input: ReturnType<typeof baseInput>, context: ToolContext) => ({
             ...input,
-            structuredInterviewArtifactId: context.artifactStore!.put("file_text", "not an interview", {
-                producer: "test",
-            }),
+            structuredInterviewArtifactId: context.artifactStore!.put(
+                "file_text",
+                "not an interview",
+                { producer: "test" },
+            ),
         }),
         (input: ReturnType<typeof baseInput>, context: ToolContext) => ({
             ...input,
-            analysisArtifactIds: [context.artifactStore!.put("file_text", "not an analysis", { producer: "test" })],
+            analysisArtifactIds: [context.artifactStore!.put(
+                "file_text",
+                "not an analysis",
+                { producer: "test" },
+            )],
         }),
     ]) {
         const { provider, context } = toolContext(validSummary);
@@ -323,13 +306,14 @@ test("拒绝重复的逐题分析 Artifact ID", async () => {
     const input = baseInput(context);
     const duplicateId = input.analysisArtifactIds[0]!;
 
-    const result = await createGenerateReportTool("fake-model").execute(
-        {
-            ...input,
-            analysisArtifactIds: [duplicateId, duplicateId, ...input.analysisArtifactIds.slice(2)],
-        },
-        context,
-    );
+    const result = await createGenerateReportTool("fake-model").execute({
+        ...input,
+        analysisArtifactIds: [
+            duplicateId,
+            duplicateId,
+            ...input.analysisArtifactIds.slice(2),
+        ],
+    }, context);
 
     assert.equal(result.success, false);
     assert.equal(result.error?.code, "input_error");
@@ -339,27 +323,20 @@ test("拒绝重复的逐题分析 Artifact ID", async () => {
 test("拒绝与结构化面试不匹配的逐题分析 Artifact", async () => {
     const { provider, context } = toolContext(validSummary);
     const input = baseInput(context);
-    const mismatchedId = context.artifactStore!.put(
-        "question_analysis",
-        {
-            structuredInterviewArtifactId: input.structuredInterviewArtifactId,
-            analysis: {
-                status: "failed",
-                questionId: "q-1",
-                clusterId: "cluster-knowledge",
-                error: "模型失败",
-            },
-        } satisfies QuestionAnalysisArtifact,
-        { producer: "test" },
-    );
-
-    const result = await createGenerateReportTool("fake-model").execute(
-        {
-            ...input,
-            analysisArtifactIds: [mismatchedId, ...input.analysisArtifactIds.slice(1)],
+    const mismatchedId = context.artifactStore!.put("question_analysis", {
+        structuredInterviewArtifactId: input.structuredInterviewArtifactId,
+        analysis: {
+            status: "failed",
+            questionId: "q-1",
+            clusterId: "cluster-knowledge",
+            error: "模型失败",
         },
-        context,
-    );
+    } satisfies QuestionAnalysisArtifact, { producer: "test" });
+
+    const result = await createGenerateReportTool("fake-model").execute({
+        ...input,
+        analysisArtifactIds: [mismatchedId, ...input.analysisArtifactIds.slice(1)],
+    }, context);
 
     assert.equal(result.success, false);
     assert.equal(result.error?.code, "input_error");
@@ -373,38 +350,37 @@ test("同 Session 中题目 ID 相同的两份面试不可串用分析 Artifact"
     const interview: StructuredInterview = {
         transcript: {
             source: "同 ID 面试原文",
-            turns: structuredInterview.transcript.turns.filter(
-                (turn) =>
-                    proceduralQuestion.promptTurnIds.includes(turn.id) ||
-                    proceduralQuestion.answerTurnIds.includes(turn.id),
-            ),
+            turns: structuredInterview.transcript.turns.filter((turn) => (
+                proceduralQuestion.promptTurnIds.includes(turn.id)
+                || proceduralQuestion.answerTurnIds.includes(turn.id)
+            )),
         },
         questions: [proceduralQuestion],
         clusters: [proceduralCluster],
         nonQuestionTurnIds: [],
     };
-    const firstInterviewId = context.artifactStore!.put("structured_interview", interview, { producer: "test" });
-    const secondInterviewId = context.artifactStore!.put("structured_interview", structuredClone(interview), {
-        producer: "test",
-    });
-    const analysis = await createAnalyzeAnswerTool("fake-model").execute(
-        {
-            structuredInterviewArtifactId: firstInterviewId,
-            questionId: proceduralQuestion.id,
-        },
-        context,
+    const firstInterviewId = context.artifactStore!.put(
+        "structured_interview",
+        interview,
+        { producer: "test" },
     );
+    const secondInterviewId = context.artifactStore!.put(
+        "structured_interview",
+        structuredClone(interview),
+        { producer: "test" },
+    );
+    const analysis = await createAnalyzeAnswerTool("fake-model").execute({
+        structuredInterviewArtifactId: firstInterviewId,
+        questionId: proceduralQuestion.id,
+    }, context);
     assert.equal(analysis.success, true);
     assert.ok(analysis.data?.artifactId);
 
-    const result = await createGenerateReportTool("fake-model").execute(
-        {
-            structuredInterviewArtifactId: secondInterviewId,
-            analysisArtifactIds: [analysis.data!.artifactId],
-            stage: "provisional",
-        },
-        context,
-    );
+    const result = await createGenerateReportTool("fake-model").execute({
+        structuredInterviewArtifactId: secondInterviewId,
+        analysisArtifactIds: [analysis.data!.artifactId],
+        stage: "provisional",
+    }, context);
 
     assert.equal(result.success, false);
     assert.equal(result.error?.code, "input_error");
@@ -416,13 +392,10 @@ test("拒绝缺少问题分析的 Artifact 列表", async () => {
     const { provider, context } = toolContext(validSummary);
     const input = baseInput(context);
 
-    const result = await createGenerateReportTool("fake-model").execute(
-        {
-            ...input,
-            analysisArtifactIds: input.analysisArtifactIds.slice(0, -1),
-        },
-        context,
-    );
+    const result = await createGenerateReportTool("fake-model").execute({
+        ...input,
+        analysisArtifactIds: input.analysisArtifactIds.slice(0, -1),
+    }, context);
 
     assert.equal(result.success, false);
     assert.equal(result.error?.code, "input_error");
@@ -438,11 +411,9 @@ test("待确认项按事实键合并、high 优先、影响题数倒序且最多
         clarification("medium-last", "medium", ["q-2"]),
         clarification("low-ignored", "low", ["q-1", "q-2", "q-3"]),
     ];
-    const inputAnalyses = analyses.map((item) =>
-        item.status === "completed"
-            ? { ...item, clarificationCandidates: [...item.clarificationCandidates, ...extras] }
-            : item,
-    );
+    const inputAnalyses = analyses.map((item) => item.status === "completed"
+        ? { ...item, clarificationCandidates: [...item.clarificationCandidates, ...extras] }
+        : item);
     const { context } = toolContext(validSummary);
     const result = await createGenerateReportTool("fake-model").execute(
         baseInput(context, { analyses: inputAnalyses }),
@@ -453,14 +424,12 @@ test("待确认项按事实键合并、high 优先、影响题数倒序且最多
     const pending = result.data?.report.pendingClarifications ?? [];
     assert.equal(pending.length, 5);
     assert.equal(new Set(pending.map((item) => item.factKey)).size, pending.length);
-    assert.deepEqual(
-        pending.slice(0, 3).map((item) => item.factKey),
-        ["high-many", "cluster-project.metric", "high-one"],
-    );
-    assert.deepEqual(pending.find((item) => item.factKey === "cluster-project.metric")?.affectedQuestionIds, [
-        "q-1",
-        "q-2",
+    assert.deepEqual(pending.slice(0, 3).map((item) => item.factKey), [
+        "high-many",
+        "cluster-project.metric",
+        "high-one",
     ]);
+    assert.deepEqual(pending.find((item) => item.factKey === "cluster-project.metric")?.affectedQuestionIds, ["q-1", "q-2"]);
     assert.ok(pending.every((item) => item.impact !== "low"));
 });
 
@@ -509,7 +478,10 @@ test("总结模型请求中止时返回 timeout 而不降级为成功", async ()
         throw Object.assign(new Error("不应泄露"), { name: "AbortError" });
     };
 
-    const result = await createGenerateReportTool("fake-model").execute(baseInput(context), context);
+    const result = await createGenerateReportTool("fake-model").execute(
+        baseInput(context),
+        context,
+    );
 
     assert.equal(result.success, false);
     assert.equal(result.error?.code, "timeout");
@@ -562,13 +534,10 @@ test("唯一计分题分析失败时仍生成无总分报告", async () => {
     };
     const { provider, context } = toolContext(validSummary);
 
-    const result = await createGenerateReportTool("fake-model").execute(
-        baseInput(context, {
-            structuredInterview: failedInterview,
-            analyses: [failedAnalysis],
-        }),
-        context,
-    );
+    const result = await createGenerateReportTool("fake-model").execute(baseInput(context, {
+        structuredInterview: failedInterview,
+        analyses: [failedAnalysis],
+    }), context);
 
     assert.equal(result.success, true);
     assert.equal(result.data?.report.score.totalScore, null);
@@ -597,13 +566,10 @@ test("只有流程题时仍生成无总分报告", async () => {
     };
     const { provider, context } = toolContext(validSummary);
 
-    const result = await createGenerateReportTool("fake-model").execute(
-        baseInput(context, {
-            structuredInterview: proceduralInterview,
-            analyses: [notScoredAnalysis],
-        }),
-        context,
-    );
+    const result = await createGenerateReportTool("fake-model").execute(baseInput(context, {
+        structuredInterview: proceduralInterview,
+        analyses: [notScoredAnalysis],
+    }), context);
 
     assert.equal(result.success, true);
     assert.equal(result.data?.report.score.totalScore, null);
@@ -620,7 +586,9 @@ test("预中止的无可评分报告返回 timeout，不调用模型也不产生
         ...structuredInterview,
         transcript: {
             ...structuredInterview.transcript,
-            turns: structuredInterview.transcript.turns.filter((turn) => turn.id.startsWith("q-4-")),
+            turns: structuredInterview.transcript.turns.filter((turn) => (
+                turn.id.startsWith("q-4-")
+            )),
         },
         questions: [questions[3]!],
         clusters: [{ ...clusters[2]!, questionIds: ["q-4"] }],
@@ -637,7 +605,9 @@ test("预中止的无可评分报告返回 timeout，不调用模型也不产生
         structuredInterview: proceduralInterview,
         analyses: [notScoredAnalysis],
     });
-    const artifactCountBefore = traceStore.list().filter((event) => event.name === "artifact.created").length;
+    const artifactCountBefore = traceStore.list().filter(
+        (event) => event.name === "artifact.put",
+    ).length;
     const controller = new AbortController();
     controller.abort();
     context.abortSignal = controller.signal;
@@ -648,7 +618,10 @@ test("预中止的无可评分报告返回 timeout，不调用模型也不产生
     assert.equal(result.error?.code, "timeout");
     assert.equal(result.data, undefined);
     assert.equal(provider.request, undefined);
-    assert.equal(traceStore.list().filter((event) => event.name === "artifact.created").length, artifactCountBefore);
+    assert.equal(
+        traceStore.list().filter((event) => event.name === "artifact.put").length,
+        artifactCountBefore,
+    );
 });
 
 test("拒绝未知和重复的逐题分析 ID", async () => {
@@ -669,13 +642,10 @@ test("拒绝逐题分析引用未知原文轮次", async () => {
     const first = analyses[0]!;
     assert.equal(first.status, "completed");
     if (first.status !== "completed") return;
-    const invalidAnalyses: QuestionAnalysis[] = [
-        {
-            ...first,
-            issues: [{ ...first.issues[0]!, evidenceTurnIds: ["turn-unknown"] }],
-        },
-        ...analyses.slice(1),
-    ];
+    const invalidAnalyses: QuestionAnalysis[] = [{
+        ...first,
+        issues: [{ ...first.issues[0]!, evidenceTurnIds: ["turn-unknown"] }],
+    }, ...analyses.slice(1)];
     const { provider, context } = toolContext(validSummary);
     const result = await createGenerateReportTool("fake-model").execute(
         baseInput(context, { analyses: invalidAnalyses }),
@@ -691,13 +661,10 @@ test("报告入口再次拒绝空的逐题分析证据", async () => {
     const first = analyses[0]!;
     assert.equal(first.status, "completed");
     if (first.status !== "completed") return;
-    const invalidAnalyses: QuestionAnalysis[] = [
-        {
-            ...first,
-            strengths: [{ ...first.strengths[0]!, evidenceTurnIds: [] }],
-        },
-        ...analyses.slice(1),
-    ];
+    const invalidAnalyses: QuestionAnalysis[] = [{
+        ...first,
+        strengths: [{ ...first.strengths[0]!, evidenceTurnIds: [] }],
+    }, ...analyses.slice(1)];
     const { provider, context } = toolContext(validSummary);
 
     const result = await createGenerateReportTool("fake-model").execute(
@@ -866,19 +833,13 @@ test("置信度边界按固定阈值显示", () => {
 
 test("报告展示面试元数据，缺失字段显示未提供", async () => {
     const { context } = toolContext(validSummary);
-    const result = await createGenerateReportTool("fake-model").execute(
-        baseInput(context, {
-            metadata: { company: "字节跳动", position: "前端开发", date: null, round: "一面" },
-        }),
-        context,
-    );
+    const result = await createGenerateReportTool("fake-model").execute(baseInput(context, {
+        metadata: { company: "字节跳动", position: "前端开发", date: null, round: "一面" },
+    }), context);
 
     assert.equal(result.success, true);
     assert.deepEqual(result.data?.report.metadata, {
-        company: "字节跳动",
-        position: "前端开发",
-        date: null,
-        round: "一面",
+        company: "字节跳动", position: "前端开发", date: null, round: "一面",
     });
     assert.match(result.data?.markdown ?? "", /公司：字节跳动/);
     assert.match(result.data?.markdown ?? "", /日期：未提供/);

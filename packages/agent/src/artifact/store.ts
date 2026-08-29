@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { Tracer } from "@dkagent/trace";
-import { ArtifactAccessError, type ArtifactKind, type ArtifactMetadata, type ArtifactStore } from "./types.js";
+import { Tracer } from "@dkagent/trace";
+import type { JsonObject, SpanInputMap, TraceSpanHandle } from "@dkagent/trace";
+import {
+    ArtifactAccessError,
+    type ArtifactKind,
+    type ArtifactMetadata,
+    type ArtifactStore,
+} from "./types.js";
 
 interface StoredArtifact {
     kind: ArtifactKind;
@@ -10,51 +16,54 @@ interface StoredArtifact {
 
 export class InMemoryArtifactStore implements ArtifactStore {
     private readonly artifacts = new Map<string, StoredArtifact>();
+    private readonly tracer: Tracer;
 
-    public constructor(private readonly tracer?: Tracer) {}
+    public constructor(tracer?: Tracer) {
+        this.tracer = tracer ?? new Tracer();
+    }
 
     public put<T>(kind: ArtifactKind, value: T, metadata: ArtifactMetadata): string {
-        const id = randomUUID();
-        this.artifacts.set(id, { kind, value, metadata });
-        this.tracer?.event(
-            "artifact.created",
-            {
-                artifactId: id,
-                artifactType: kind,
-                producer: metadata.producer,
-                characterCount: metadata.characterCount,
-                itemCount: metadata.itemCount,
-                exposedCharacterCount: metadata.exposedCharacterCount,
-                omittedCharacterCount: Math.max(
-                    0,
-                    (metadata.characterCount ?? 0) - (metadata.exposedCharacterCount ?? 0),
-                ),
-            },
-            { module: "artifact", operation: metadata.producer },
-        );
-        return id;
+        let input: SpanInputMap["artifact.put"];
+        try {
+            const producer = metadata.producer;
+            const characterCount = metadata.characterCount;
+            const itemCount = metadata.itemCount;
+            const exposedCharacterCount = metadata.exposedCharacterCount;
+            input = {
+                kind,
+                metadata: {
+                    producer,
+                    ...(characterCount === undefined ? {} : { characterCount }),
+                    ...(itemCount === undefined ? {} : { itemCount }),
+                    ...(exposedCharacterCount === undefined ? {} : { exposedCharacterCount }),
+                },
+            };
+        } catch {
+            input = { kind, metadata: Symbol("artifact.metadata.serialization") as unknown as JsonObject };
+        }
+        const operation = (span: TraceSpanHandle<"artifact.put">): string => {
+            const id = randomUUID();
+            this.artifacts.set(id, { kind, value, metadata });
+            span.setOutput({ artifactId: id });
+            return id;
+        };
+        return this.tracer.spanSync("artifact.put", input, operation);
     }
 
     public get<T>(id: string, expectedKind: ArtifactKind, consumer: string): T {
-        const artifact = this.artifacts.get(id);
-        const hit = artifact !== undefined && artifact.kind === expectedKind;
-        this.tracer?.event(
-            "artifact.resolved",
-            {
-                artifactId: id,
-                artifactType: expectedKind,
-                consumer,
-                hit,
-            },
-            { module: "artifact", operation: consumer },
-        );
-
-        if (!artifact) {
-            throw new ArtifactAccessError("Artifact 不存在或已过期");
-        }
-        if (artifact.kind !== expectedKind) {
-            throw new ArtifactAccessError("Artifact 类型不匹配");
-        }
-        return artifact.value as T;
+        const input = { artifactId: id, expectedKind, consumer };
+        const operation = (span: TraceSpanHandle<"artifact.get">): T => {
+            const artifact = this.artifacts.get(id);
+            if (!artifact || artifact.kind !== expectedKind) {
+                span.setOutput({ hit: false });
+                throw new ArtifactAccessError(!artifact ? "Artifact 不存在或已过期" : "Artifact 类型不匹配");
+            }
+            span.setOutput({ hit: true });
+            return artifact.value as T;
+        };
+        const result = this.tracer.spanSync("artifact.get", input, (span) => ({
+            value: operation(span),
+        }));
+        return result.value;
     }
 }

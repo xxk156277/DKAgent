@@ -1,9 +1,15 @@
-import { Tracer, type TraceSpan } from "@dkagent/trace";
-import { dispatchToolCall, type DispatchedToolResult } from "./dispatcher.js";
+import { Tracer, type JsonObject, type SpanOutputMap, type TraceSpanHandle } from "@dkagent/trace";
+import {
+    dispatchToolCall,
+    type DispatchedToolResult,
+} from "./dispatcher.js";
 import type { AgentLoopOptions } from "./types.js";
 import { InMemoryArtifactStore, type ArtifactStore } from "../artifact/index.js";
 import type { AgentMessage, ModelResponse } from "../query-engine/provider.js";
-import type { ContextBuildInput, ConversationContextState } from "../context/types.js";
+import type {
+    ContextBuildInput,
+    ConversationContextState,
+} from "../context/types.js";
 
 export class AgentLoop {
     private readonly messages: AgentMessage[];
@@ -14,16 +20,23 @@ export class AgentLoop {
     private readonly artifactStore: ArtifactStore;
 
     public constructor(private readonly options: AgentLoopOptions) {
-        this.messages = options.session ? [...options.session.snapshot.messages] : [];
+        this.messages = options.session
+            ? [...options.session.snapshot.messages]
+            : [];
         this.contextState = options.session
             ? { ...options.session.snapshot.contextState }
             : {
-                  summary: "",
-                  firstKeptMessageIndex: 0,
-              };
+                summary: "",
+                firstKeptMessageIndex: 0,
+            };
         this.abortSignal = options.abortSignal ?? new AbortController().signal;
-        this.tracer = options.tracer ?? new Tracer();
-        this.artifactStore = options.artifactStore ?? new InMemoryArtifactStore(this.tracer);
+        const queryTracer = options.queryEngine.getTracer();
+        if (options.tracer !== undefined && options.tracer !== queryTracer) {
+            throw new Error("AgentLoop tracer must match QueryEngine tracer");
+        }
+        this.tracer = options.tracer ?? queryTracer;
+        this.artifactStore = options.artifactStore
+            ?? new InMemoryArtifactStore(this.tracer);
     }
 
     public getMessages(): readonly AgentMessage[] {
@@ -36,7 +49,7 @@ export class AgentLoop {
     }
 
     public run(userInput: string): Promise<string> {
-        return this.tracer.trace("agent.turn", { input: userInput }, async (turnSpan) => {
+        return this.tracer.trace("agent.turn", { userInput }, async (turnSpan) => {
             const recalledMemory = await this.safeRecall(userInput);
             this.appendMessage({ role: "user", content: userInput });
             const maxSteps = this.options.maxSteps ?? 4;
@@ -46,7 +59,6 @@ export class AgentLoop {
                     "agent.step",
                     { step },
                     (stepSpan) => this.runStep(step, stepSpan, recalledMemory),
-                    { step },
                 );
                 if (result !== undefined) {
                     turnSpan.setOutput({ answer: result.answer });
@@ -63,18 +75,20 @@ export class AgentLoop {
 
     private async runStep(
         step: number,
-        stepSpan: TraceSpan,
+        stepSpan: TraceSpanHandle<"agent.step">,
         recalledMemory: string,
     ): Promise<{ answer: string; shouldCaptureMemory: boolean } | undefined> {
         if (this.abortSignal.aborted) throw new Error("Agent Run 已中止");
 
         const systemPrompt = recalledMemory
             ? [this.options.systemPrompt, recalledMemory]
-                  .filter((value): value is string => Boolean(value))
-                  .join("\n\n")
+                .filter((value): value is string => Boolean(value))
+                .join("\n\n")
             : this.options.systemPrompt;
         const contextBuildInput: ContextBuildInput = {
-            ...(systemPrompt === undefined ? {} : { systemPrompt }),
+            ...(systemPrompt === undefined
+                ? {}
+                : { systemPrompt }),
             messages: [...this.messages],
             tools: this.options.toolRegistry.getSchemas(),
             maxContextTokens: this.options.maxContextTokens,
@@ -82,20 +96,23 @@ export class AgentLoop {
             ...(this.options.contextCompaction === undefined
                 ? {}
                 : {
-                      compaction: {
-                          state: { ...this.contextState },
-                          options: this.options.contextCompaction,
-                          summaryModel: this.options.summaryModel ?? this.options.model,
-                          abortSignal: this.abortSignal,
-                      },
-                  }),
+                    compaction: {
+                        state: { ...this.contextState },
+                        options: this.options.contextCompaction,
+                        summaryModel: this.options.summaryModel ?? this.options.model,
+                        abortSignal: this.abortSignal,
+                    },
+                }),
         };
         const contextSnapshot = await this.options.contextManager.build(contextBuildInput);
         if (contextSnapshot.nextContextState) {
             const nextState = { ...contextSnapshot.nextContextState };
             const session = this.options.session;
             if (session) {
-                session.store.saveContextState(session.snapshot.id, nextState);
+                session.store.saveContextState(
+                    session.snapshot.id,
+                    nextState,
+                );
             }
             this.contextState = nextState;
         }
@@ -107,32 +124,20 @@ export class AgentLoop {
             maxTokens: this.options.maxOutputTokens,
             temperature: 0,
             abortSignal: this.abortSignal,
-            ...(contextSnapshot.systemPrompt === undefined ? {} : { systemPrompt: contextSnapshot.systemPrompt }),
-            ...(this.options.onTextDelta === undefined ? {} : { onTextDelta: this.options.onTextDelta }),
+            ...(contextSnapshot.systemPrompt === undefined
+                ? {}
+                : { systemPrompt: contextSnapshot.systemPrompt }),
+            ...(this.options.onTextDelta === undefined
+                ? {}
+                : { onTextDelta: this.options.onTextDelta }),
         };
-        const traceRequest = recalledMemory
-            ? {
-                  ...request,
-                  systemPrompt: this.createTraceSystemPrompt(request.systemPrompt, recalledMemory),
-              }
-            : { ...request };
-        const response = await this.tracer.span(
-            "model.request",
-            traceRequest,
-            async (modelSpan) => {
-                const result = await this.options.queryEngine.query(request);
-                modelSpan.event("model.response", result, { step });
-                modelSpan.setOutput(result);
-                return result;
-            },
-            { step },
-        );
+        const response = await this.options.queryEngine.query(request);
 
         if (response.type === "text") {
             const answer = response.content.trim();
             if (!answer) throw new Error("模型返回空文本");
             this.appendMessage({ role: "assistant", content: answer });
-            stepSpan.setOutput({ answer });
+            stepSpan.setOutput({ outcome: "answer", stopReason: response.stopReason, toolCallCount: 0 });
             return {
                 answer,
                 shouldCaptureMemory: response.stopReason === "end_turn",
@@ -144,46 +149,44 @@ export class AgentLoop {
             ...(response.content === undefined ? {} : { content: response.content }),
             toolCalls: response.toolCalls,
         });
-        const toolResults = await this.runToolCalls(response, step);
+        const toolResults = await this.runToolCalls(response);
         if (this.abortSignal.aborted) throw new Error("Agent Run 已中止");
         const finalOutput = this.extractFinalOutput(toolResults);
         if (finalOutput !== undefined) {
             this.appendMessage({ role: "assistant", content: finalOutput });
             this.options.onTextDelta?.(finalOutput);
-            stepSpan.setOutput({
-                toolCallCount: response.toolCalls.length,
-                finalOutput: true,
-            });
+            stepSpan.setOutput({ outcome: "answer", stopReason: response.stopReason, toolCallCount: response.toolCalls.length });
             return {
                 answer: finalOutput,
                 shouldCaptureMemory: false,
             };
         }
-        stepSpan.setOutput({ toolCallCount: response.toolCalls.length });
+        stepSpan.setOutput({ outcome: "tool_calls", stopReason: response.stopReason, toolCallCount: response.toolCalls.length });
         return undefined;
     }
 
     private async runToolCalls(
         response: Extract<ModelResponse, { type: "tool_use" }>,
-        step: number,
     ): Promise<DispatchedToolResult[]> {
         const toolResults: DispatchedToolResult[] = [];
         for (const call of response.toolCalls) {
-            const dispatched = await this.tracer.span(
-                "tool.call",
-                call,
+            const dispatched = await this.tracer.span<"tool.execute", DispatchedToolResult>(
+                "tool.execute",
+                { toolCallId: call.id, name: call.name, input: call.input as unknown as JsonObject },
                 async (toolSpan) => {
-                    const result = await dispatchToolCall(this.options.toolRegistry, call, {
-                        queryEngine: this.options.queryEngine,
-                        abortSignal: this.abortSignal,
-                        tracer: this.tracer,
-                        artifactStore: this.artifactStore,
-                    });
-                    toolSpan.event("tool.result", result, { step });
-                    toolSpan.setOutput(result);
+                    const result = await dispatchToolCall(
+                        this.options.toolRegistry,
+                        call,
+                        {
+                            queryEngine: this.options.queryEngine,
+                            abortSignal: this.abortSignal,
+                            tracer: this.tracer,
+                            artifactStore: this.artifactStore,
+                        },
+                    );
+                    toolSpan.setOutput(result.result as unknown as SpanOutputMap["tool.execute"]);
                     return result;
                 },
-                { step },
             );
             this.appendMessage({
                 role: "tool",
@@ -215,26 +218,16 @@ export class AgentLoop {
         try {
             return await this.tracer.span(
                 "memory.recall",
-                { userInputCharacterCount: userInput.length },
+                { query: userInput },
                 async (span) => {
                     const recalledMemory = await reader.recall(userInput);
-                    span.setOutput({ characterCount: recalledMemory.length });
+                    span.setOutput({ content: recalledMemory, characterCount: recalledMemory.length });
                     return recalledMemory;
                 },
-                { module: "memory", operation: "recall" },
             );
         } catch {
             return "";
         }
-    }
-
-    /** 记忆只供模型使用；所有 Trace 必须使用不含原文的副本。 */
-    private createTraceSystemPrompt(systemPrompt: string | undefined, recalledMemory: string): string | undefined {
-        if (!recalledMemory) return systemPrompt;
-        if (!systemPrompt?.includes(recalledMemory)) {
-            return "[RECALLED_MEMORY_REDACTED]";
-        }
-        return systemPrompt.split(recalledMemory).join("[RECALLED_MEMORY_REDACTED]");
     }
 
     /** 自动提取失败不能影响已生成的最终回答。 */
@@ -244,23 +237,7 @@ export class AgentLoop {
         if (!writer || !sessionId) return;
 
         try {
-            await this.tracer.span(
-                "memory.write",
-                {
-                    sessionId,
-                    userInputCharacterCount: userInput.length,
-                    answerCharacterCount: answer.length,
-                },
-                async (span) => {
-                    await writer.capture({
-                        userInput,
-                        assistantAnswer: answer,
-                        sessionId,
-                    });
-                    span.setOutput({ captured: true });
-                },
-                { module: "memory", operation: "write" },
-            );
+            await writer.capture({ userInput, assistantAnswer: answer, sessionId });
         } catch {
             // Memory 是附加能力，写入失败不改变已经生成的回答。
         }

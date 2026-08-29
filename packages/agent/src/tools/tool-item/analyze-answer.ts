@@ -13,63 +13,50 @@ import type { QuestionAnalysisArtifact } from "../../interview/artifact-payloads
 import { queryModelJson } from "../../interview/model-json.js";
 import { QUESTION_RUBRICS } from "../../interview/rubrics.js";
 import { calculateQuestionScore } from "../../interview/scoring.js";
-import type { InterviewQuestion, QuestionCluster, StructuredInterview } from "../../interview/types.js";
+import type {
+    InterviewQuestion,
+    QuestionCluster,
+    StructuredInterview,
+} from "../../interview/types.js";
 import type { Tool } from "../types.js";
 
-const observationSchema = z
-    .object({
-        id: z.string().min(1),
+const observationSchema = z.object({
+    id: z.string().min(1),
+    text: z.string().min(1),
+    impact: z.string().min(1),
+    evidenceTurnIds: z.array(z.string().min(1)).min(1),
+}).strict();
+
+const clarificationSchema = z.object({
+    factKey: z.string().min(1),
+    question: z.string().min(1),
+    affectedQuestionIds: z.array(z.string().min(1)),
+    impact: z.enum(["high", "medium", "low"]),
+}).strict();
+
+const responseSchema = z.object({
+    strengths: z.array(observationSchema).max(2),
+    issues: z.array(observationSchema).max(3),
+    improvements: z.array(z.object({
+        issueId: z.string().min(1),
         text: z.string().min(1),
-        impact: z.string().min(1),
-        evidenceTurnIds: z.array(z.string().min(1)).min(1),
-    })
-    .strict();
-
-const clarificationSchema = z
-    .object({
-        factKey: z.string().min(1),
-        question: z.string().min(1),
-        affectedQuestionIds: z.array(z.string().min(1)),
-        impact: z.enum(["high", "medium", "low"]),
-    })
-    .strict();
-
-const responseSchema = z
-    .object({
-        strengths: z.array(observationSchema).max(2),
-        issues: z.array(observationSchema).max(3),
-        improvements: z.array(
-            z
-                .object({
-                    issueId: z.string().min(1),
-                    text: z.string().min(1),
-                })
-                .strict(),
-        ),
-        dimensions: z
-            .object({
-                contentQuality: z.number().min(0).max(100).nullable().describe("内容质量分；0-100，不适用时为 null"),
-                depthAndEvidence: z
-                    .number()
-                    .min(0)
-                    .max(100)
-                    .nullable()
-                    .describe("深度与证据分；0-100，不适用时为 null"),
-                analysisAndTradeoffs: z
-                    .number()
-                    .min(0)
-                    .max(100)
-                    .nullable()
-                    .describe("分析与权衡分；0-100，不适用时为 null"),
-                followUpHandling: z.number().min(0).max(100).nullable().describe("追问处理分；0-100，非追问时为 null"),
-                expressionQuality: z.number().min(0).max(100).describe("表达质量分；0-100，结合原回答和程序统计判断"),
-            })
-            .strict(),
-        confidence: z.number().min(0).max(1),
-        confidenceReason: z.string().min(1),
-        clarificationCandidates: z.array(clarificationSchema),
-    })
-    .strict();
+    }).strict()),
+    dimensions: z.object({
+        contentQuality: z.number().min(0).max(100).nullable()
+            .describe("内容质量分；0-100，不适用时为 null"),
+        depthAndEvidence: z.number().min(0).max(100).nullable()
+            .describe("深度与证据分；0-100，不适用时为 null"),
+        analysisAndTradeoffs: z.number().min(0).max(100).nullable()
+            .describe("分析与权衡分；0-100，不适用时为 null"),
+        followUpHandling: z.number().min(0).max(100).nullable()
+            .describe("追问处理分；0-100，非追问时为 null"),
+        expressionQuality: z.number().min(0).max(100)
+            .describe("表达质量分；0-100，结合原回答和程序统计判断"),
+    }).strict(),
+    confidence: z.number().min(0).max(1),
+    confidenceReason: z.string().min(1),
+    clarificationCandidates: z.array(clarificationSchema),
+}).strict();
 
 export interface AnalyzeAnswerInput {
     structuredInterviewArtifactId: string;
@@ -92,47 +79,40 @@ const SEMANTIC_DIMENSIONS: SemanticDimension[] = [
     "followUpHandling",
 ];
 
-function jsonOutputExample(applicableDimensions: Set<SemanticDimension>): string {
-    const dimensionScore = (dimension: SemanticDimension): number | null =>
-        applicableDimensions.has(dimension) ? 65 : null;
-    return JSON.stringify(
-        {
-            strengths: [
-                {
-                    id: "strength-1",
-                    text: "回答中的具体优点",
-                    impact: "该优点对回答质量的影响",
-                    evidenceTurnIds: ["turn-0002"],
-                },
-            ],
-            issues: [
-                {
-                    id: "issue-1",
-                    text: "回答中的具体问题",
-                    impact: "该问题对回答质量的影响",
-                    evidenceTurnIds: ["turn-0002"],
-                },
-            ],
-            improvements: [
-                {
-                    issueId: "issue-1",
-                    text: "针对该问题的改进方法",
-                },
-            ],
-            dimensions: {
-                contentQuality: dimensionScore("contentQuality"),
-                depthAndEvidence: dimensionScore("depthAndEvidence"),
-                analysisAndTradeoffs: dimensionScore("analysisAndTradeoffs"),
-                followUpHandling: dimensionScore("followUpHandling"),
-                expressionQuality: 70,
-            },
-            confidence: 0.8,
-            confidenceReason: "置信度理由",
-            clarificationCandidates: [],
-        },
-        null,
-        2,
+function jsonOutputExample(
+    applicableDimensions: Set<SemanticDimension>,
+): string {
+    const dimensionScore = (dimension: SemanticDimension): number | null => (
+        applicableDimensions.has(dimension) ? 65 : null
     );
+    return JSON.stringify({
+        strengths: [{
+            id: "strength-1",
+            text: "回答中的具体优点",
+            impact: "该优点对回答质量的影响",
+            evidenceTurnIds: ["turn-0002"],
+        }],
+        issues: [{
+            id: "issue-1",
+            text: "回答中的具体问题",
+            impact: "该问题对回答质量的影响",
+            evidenceTurnIds: ["turn-0002"],
+        }],
+        improvements: [{
+            issueId: "issue-1",
+            text: "针对该问题的改进方法",
+        }],
+        dimensions: {
+            contentQuality: dimensionScore("contentQuality"),
+            depthAndEvidence: dimensionScore("depthAndEvidence"),
+            analysisAndTradeoffs: dimensionScore("analysisAndTradeoffs"),
+            followUpHandling: dimensionScore("followUpHandling"),
+            expressionQuality: 70,
+        },
+        confidence: 0.8,
+        confidenceReason: "置信度理由",
+        clarificationCandidates: [],
+    }, null, 2);
 }
 
 // // 未经用户确认的推断事实最多支持“中”置信度。
@@ -141,7 +121,8 @@ function jsonOutputExample(applicableDimensions: Set<SemanticDimension>): string
 function sameMembers(left: string[], right: string[]): boolean {
     const sortedLeft = [...left].sort();
     const sortedRight = [...right].sort();
-    return sortedLeft.length === sortedRight.length && sortedLeft.every((value, index) => value === sortedRight[index]);
+    return sortedLeft.length === sortedRight.length
+        && sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 
 function validateInput(input: {
@@ -158,8 +139,8 @@ function validateInput(input: {
     }
     const clusterQuestionIds = input.clusterQuestions.map((question) => question.id);
     if (
-        !sameMembers(clusterQuestionIds, input.cluster.questionIds) ||
-        input.clusterQuestions.some((question) => question.clusterId !== input.cluster.id)
+        !sameMembers(clusterQuestionIds, input.cluster.questionIds)
+        || input.clusterQuestions.some((question) => question.clusterId !== input.cluster.id)
     ) {
         throw new Error("问题簇与 clusterQuestions 不一致");
     }
@@ -169,7 +150,10 @@ function validateInput(input: {
     return questionIndex;
 }
 
-function validateEvidence(observations: AnalysisObservation[], allowedTurnIds: Set<string>): void {
+function validateEvidence(
+    observations: AnalysisObservation[],
+    allowedTurnIds: Set<string>,
+): void {
     for (const observation of observations) {
         if (!observation.evidenceTurnIds.length) {
             throw new Error(`分析证据不能为空: ${observation.id}`);
@@ -228,7 +212,10 @@ function safeAnalysisFailureMessage(error: unknown): string {
     return SAFE_ANALYSIS_FAILURE_MESSAGES.has(message) ? message : "回答分析失败";
 }
 
-function validateClarifications(candidates: ClarificationCandidate[], clusterQuestionIds: Set<string>): void {
+function validateClarifications(
+    candidates: ClarificationCandidate[],
+    clusterQuestionIds: Set<string>,
+): void {
     for (const candidate of candidates) {
         if (candidate.affectedQuestionIds.some((id) => !clusterQuestionIds.has(id))) {
             throw new Error(`澄清项引用了当前问题簇外的问题: ${candidate.factKey}`);
@@ -236,7 +223,9 @@ function validateClarifications(candidates: ClarificationCandidate[], clusterQue
     }
 }
 
-export function createAnalyzeAnswerTool(model: string): Tool<AnalyzeAnswerInput, AnalyzeAnswerOutput> {
+export function createAnalyzeAnswerTool(
+    model: string,
+): Tool<AnalyzeAnswerInput, AnalyzeAnswerOutput> {
     return {
         name: "analyze_answer",
         description: "按问题题型、证据边界和适用维度分析单个面试回答。",
@@ -278,9 +267,13 @@ export function createAnalyzeAnswerTool(model: string): Tool<AnalyzeAnswerInput,
                     "structured_interview",
                     "analyze_answer",
                 );
-                const resolvedQuestion = interview.questions.find((item) => item.id === input.questionId);
+                const resolvedQuestion = interview.questions.find(
+                    (item) => item.id === input.questionId,
+                );
                 if (!resolvedQuestion) throw new Error(`问题不存在: ${input.questionId}`);
-                const resolvedCluster = interview.clusters.find((item) => item.id === resolvedQuestion.clusterId);
+                const resolvedCluster = interview.clusters.find(
+                    (item) => item.id === resolvedQuestion.clusterId,
+                );
                 if (!resolvedCluster) {
                     throw new Error(`问题簇不存在: ${resolvedQuestion.clusterId}`);
                 }
@@ -319,17 +312,23 @@ export function createAnalyzeAnswerTool(model: string): Tool<AnalyzeAnswerInput,
                     structuredInterviewArtifactId: input.structuredInterviewArtifactId,
                     analysis,
                 };
-                const artifactId = ctx.artifactStore!.put("question_analysis", payload, {
-                    producer: "analyze_answer",
-                    characterCount: JSON.stringify(payload).length,
-                    itemCount: 1,
-                });
+                const artifactId = ctx.artifactStore!.put(
+                    "question_analysis",
+                    payload,
+                    {
+                        producer: "analyze_answer",
+                        characterCount: JSON.stringify(payload).length,
+                        itemCount: 1,
+                    },
+                );
                 return {
                     artifactId,
                     questionId: analysis.questionId,
                     clusterId: analysis.clusterId,
                     status: analysis.status,
-                    ...(analysis.status === "completed" && analysis.score !== null ? { score: analysis.score } : {}),
+                    ...(analysis.status === "completed" && analysis.score !== null
+                        ? { score: analysis.score }
+                        : {}),
                 };
             };
 
@@ -345,7 +344,9 @@ export function createAnalyzeAnswerTool(model: string): Tool<AnalyzeAnswerInput,
             try {
                 const questionIndex = cluster.questionIds.indexOf(question.id);
                 const rubric = QUESTION_RUBRICS[question.questionType];
-                const applicableDimensions = new Set<SemanticDimension>(rubric.applicableDimensions);
+                const applicableDimensions = new Set<SemanticDimension>(
+                    rubric.applicableDimensions,
+                );
                 if (questionIndex > 0) applicableDimensions.add("followUpHandling");
 
                 const expressionStats = collectExpressionStats(question.originalAnswer);
@@ -353,8 +354,6 @@ export function createAnalyzeAnswerTool(model: string): Tool<AnalyzeAnswerInput,
                     queryEngine: ctx.queryEngine,
                     model,
                     abortSignal: ctx.abortSignal,
-                    tracer: ctx.tracer,
-                    traceOperation: "analyze_answer",
                     schema: responseSchema,
                     systemPrompt: [
                         "只基于输入分析当前面试回答，严格输出 JSON。",
@@ -383,11 +382,17 @@ export function createAnalyzeAnswerTool(model: string): Tool<AnalyzeAnswerInput,
                     }),
                 });
 
-                const allowedTurnIds = new Set([...question.promptTurnIds, ...question.answerTurnIds]);
+                const allowedTurnIds = new Set([
+                    ...question.promptTurnIds,
+                    ...question.answerTurnIds,
+                ]);
                 validateEvidence([...response.strengths, ...response.issues], allowedTurnIds);
                 validateImprovements(response);
                 validateDimensions(response.dimensions, applicableDimensions);
-                validateClarifications(response.clarificationCandidates, new Set(cluster.questionIds));
+                validateClarifications(
+                    response.clarificationCandidates,
+                    new Set(cluster.questionIds),
+                );
 
                 const dimensionScores: DimensionScores = response.dimensions;
                 const analysis: CompletedQuestionAnalysis = {

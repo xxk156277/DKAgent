@@ -1,39 +1,40 @@
-import type { Tracer } from "@dkagent/trace";
 import { z } from "zod";
 import type { QueryEngine } from "../query-engine/query-engine.js";
 import { queryModelJson } from "./model-json.js";
-import type { InterviewQuestion, ParsedTranscript, QuestionCluster, TranscriptTurn } from "./types.js";
+import type {
+    InterviewQuestion,
+    ParsedTranscript,
+    QuestionCluster,
+    TranscriptTurn,
+} from "./types.js";
 
-const promptSegmentSchema = z
-    .object({
-        turnId: z.string().min(1),
-        text: z.string().min(1),
-    })
-    .strict();
+const promptSegmentSchema = z.object({
+    turnId: z.string().min(1),
+    text: z.string().min(1),
+}).strict();
 
-const questionTypeSchema = z.enum(["project", "knowledge", "open", "behavior", "coding", "procedural"]);
+const questionTypeSchema = z.enum([
+    "project",
+    "knowledge",
+    "open",
+    "behavior",
+    "coding",
+    "procedural",
+]);
 
-const modelQuestionSchema = z
-    .object({
-        promptSegments: z.array(promptSegmentSchema).min(1),
-        answerTurnIds: z.array(z.string().min(1)),
-        questionType: questionTypeSchema,
-    })
-    .strict();
+const modelQuestionSchema = z.object({
+    promptSegments: z.array(promptSegmentSchema).min(1),
+    answerTurnIds: z.array(z.string().min(1)),
+    questionType: questionTypeSchema,
+}).strict();
 
-const relationSchema = z
-    .object({
-        clusters: z.array(
-            z
-                .object({
-                    title: z.string().min(1),
-                    questions: z.array(modelQuestionSchema).min(1),
-                })
-                .strict(),
-        ),
-        nonQuestionTurnIds: z.array(z.string().min(1)),
-    })
-    .strict();
+const relationSchema = z.object({
+    clusters: z.array(z.object({
+        title: z.string().min(1),
+        questions: z.array(modelQuestionSchema).min(1),
+    }).strict()),
+    nonQuestionTurnIds: z.array(z.string().min(1)),
+}).strict();
 
 type ModelQuestion = z.infer<typeof modelQuestionSchema>;
 
@@ -48,7 +49,6 @@ export interface StructureInput {
     model: string;
     /** 上层任务的取消信号。 */
     abortSignal: AbortSignal;
-    tracer?: Tracer | undefined;
 }
 
 export interface StructureOutput {
@@ -80,55 +80,43 @@ function generatedId(prefix: "cluster" | "question", index: number): string {
     return `${prefix}-${String(index + 1).padStart(4, "0")}`;
 }
 
-const JSON_OUTPUT_EXAMPLE = JSON.stringify(
-    {
-        clusters: [
-            {
-                title: "低代码项目",
-                questions: [
-                    {
-                        promptSegments: [
-                            {
-                                turnId: "turn-0001",
-                                text: "请介绍一下低代码项目。",
-                            },
-                        ],
-                        answerTurnIds: ["turn-0002"],
-                        questionType: "project",
-                    },
-                    {
-                        promptSegments: [
-                            {
-                                turnId: "turn-0003",
-                                text: "为什么选择 DSL？",
-                            },
-                        ],
-                        answerTurnIds: ["turn-0004"],
-                        questionType: "project",
-                    },
-                ],
-            },
-            {
-                title: "结束流程",
-                questions: [
-                    {
-                        promptSegments: [
-                            {
-                                turnId: "turn-0005",
-                                text: "你还有什么问题吗？",
-                            },
-                        ],
-                        answerTurnIds: [],
-                        questionType: "procedural",
-                    },
-                ],
-            },
-        ],
-        nonQuestionTurnIds: ["turn-0006"],
-    },
-    null,
-    2,
-);
+const JSON_OUTPUT_EXAMPLE = JSON.stringify({
+    clusters: [
+        {
+            title: "低代码项目",
+            questions: [
+                {
+                    promptSegments: [{
+                        turnId: "turn-0001",
+                        text: "请介绍一下低代码项目。",
+                    }],
+                    answerTurnIds: ["turn-0002"],
+                    questionType: "project",
+                },
+                {
+                    promptSegments: [{
+                        turnId: "turn-0003",
+                        text: "为什么选择 DSL？",
+                    }],
+                    answerTurnIds: ["turn-0004"],
+                    questionType: "project",
+                },
+            ],
+        },
+        {
+            title: "结束流程",
+            questions: [{
+                promptSegments: [{
+                    turnId: "turn-0005",
+                    text: "你还有什么问题吗？",
+                }],
+                answerTurnIds: [],
+                questionType: "procedural",
+            }],
+        },
+    ],
+    nonQuestionTurnIds: ["turn-0006"],
+}, null, 2);
 
 export async function structureInterview(input: StructureInput): Promise<StructureOutput> {
     // const correctedById = new Map(
@@ -140,8 +128,6 @@ export async function structureInterview(input: StructureInput): Promise<Structu
         queryEngine: input.queryEngine,
         model: input.model,
         abortSignal: input.abortSignal,
-        tracer: input.tracer,
-        traceOperation: "structure_interview",
         schema: relationSchema,
         systemPrompt: [
             "把完整面试轮次结构化为问题簇和具体问题，只返回一个 JSON 对象。",
@@ -166,19 +152,21 @@ export async function structureInterview(input: StructureInput): Promise<Structu
             JSON_OUTPUT_EXAMPLE,
             "只返回一个 JSON 对象；不得使用 Markdown 代码块，不得附加解释文字。",
         ].join("\n"),
-        userContent: JSON.stringify(
-            input.transcript.turns.map((turn) => ({
-                id: turn.id,
-                speaker: turn.speaker,
-                content: turn.content,
-                // originalContent: turn.content,
-                // correctedContent: correctedById.get(turn.id) ?? turn.content,
-            })),
-        ),
+        userContent: JSON.stringify(input.transcript.turns.map((turn) => ({
+            id: turn.id,
+            speaker: turn.speaker,
+            content: turn.content,
+            // originalContent: turn.content,
+            // correctedContent: correctedById.get(turn.id) ?? turn.content,
+        }))),
     });
 
-    const originalById = new Map(input.transcript.turns.map((turn) => [turn.id, turn]));
-    const turnIndexById = new Map(input.transcript.turns.map((turn, index) => [turn.id, index]));
+    const originalById = new Map(
+        input.transcript.turns.map((turn) => [turn.id, turn]),
+    );
+    const turnIndexById = new Map(
+        input.transcript.turns.map((turn, index) => [turn.id, index]),
+    );
     const interviewerIds = input.transcript.turns
         .filter((turn) => turn.speaker === "interviewer")
         .map((turn) => turn.id);
@@ -196,7 +184,9 @@ export async function structureInterview(input: StructureInput): Promise<Structu
         }
     }
 
-    const promptTurnIds = drafts.flatMap(({ question }) => question.promptSegments.map((segment) => segment.turnId));
+    const promptTurnIds = drafts.flatMap(
+        ({ question }) => question.promptSegments.map((segment) => segment.turnId),
+    );
     const actualQuestionTurnIds = new Set(promptTurnIds);
     for (const draft of drafts) {
         for (const segment of draft.question.promptSegments) {
@@ -227,7 +217,11 @@ export async function structureInterview(input: StructureInput): Promise<Structu
 
         const interviewerRunEnd = [...interviewerRunEnds][0]!;
         const expectedAnswerTurnIds: string[] = [];
-        for (let index = interviewerRunEnd + 1; index < input.transcript.turns.length; index += 1) {
+        for (
+            let index = interviewerRunEnd + 1;
+            index < input.transcript.turns.length;
+            index += 1
+        ) {
             const turn = input.transcript.turns[index]!;
             if (turn.speaker === "interviewer" && actualQuestionTurnIds.has(turn.id)) {
                 break;
@@ -243,7 +237,9 @@ export async function structureInterview(input: StructureInput): Promise<Structu
             (turnId) => !expectedAnswerTurnIdSet.has(turnId),
         );
         if (outOfWindowAnswerTurnIds.length) {
-            throw new Error(`回答引用超出回答窗口: ${outOfWindowAnswerTurnIds.join(",")}`);
+            throw new Error(
+                `回答引用超出回答窗口: ${outOfWindowAnswerTurnIds.join(",")}`,
+            );
         }
     }
 
@@ -255,11 +251,16 @@ export async function structureInterview(input: StructureInput): Promise<Structu
             throw new Error(`非提问项引用了非面试官轮次: ${turnId}`);
         }
     }
-    const overlap = relation.nonQuestionTurnIds.filter((turnId) => promptTurnIds.includes(turnId));
+    const overlap = relation.nonQuestionTurnIds.filter(
+        (turnId) => promptTurnIds.includes(turnId),
+    );
     if (overlap.length) {
         throw new Error(`轮次不能同时标记为问题和非问题: ${overlap.join(",")}`);
     }
-    const classifiedIds = new Set([...promptTurnIds, ...relation.nonQuestionTurnIds]);
+    const classifiedIds = new Set([
+        ...promptTurnIds,
+        ...relation.nonQuestionTurnIds,
+    ]);
     const missing = interviewerIds.filter((turnId) => !classifiedIds.has(turnId));
     if (missing.length) {
         throw new Error(`未分类的面试官轮次: ${missing.join(",")}`);
@@ -274,21 +275,20 @@ export async function structureInterview(input: StructureInput): Promise<Structu
             ...draft,
             question: {
                 ...draft.question,
-                promptSegments: [...draft.question.promptSegments].sort((left, right) =>
-                    comparePosition(segmentPosition(left), segmentPosition(right)),
-                ),
-                answerTurnIds: [...draft.question.answerTurnIds].sort(
-                    (left, right) => turnIndexById.get(left)! - turnIndexById.get(right)!,
-                ),
+                promptSegments: [...draft.question.promptSegments].sort((left, right) => (
+                    comparePosition(segmentPosition(left), segmentPosition(right))
+                )),
+                answerTurnIds: [...draft.question.answerTurnIds].sort((left, right) => (
+                    turnIndexById.get(left)! - turnIndexById.get(right)!
+                )),
             },
         }))
-        .sort(
-            (left, right) =>
-                comparePosition(
-                    segmentPosition(left.question.promptSegments[0]!),
-                    segmentPosition(right.question.promptSegments[0]!),
-                ) || left.modelOrder - right.modelOrder,
-        );
+        .sort((left, right) => (
+            comparePosition(
+                segmentPosition(left.question.promptSegments[0]!),
+                segmentPosition(right.question.promptSegments[0]!),
+            ) || left.modelOrder - right.modelOrder
+        ));
 
     const positionsByCluster = new Map<number, number[]>();
     orderedDrafts.forEach((draft, index) => {
@@ -308,10 +308,9 @@ export async function structureInterview(input: StructureInput): Promise<Structu
         .sort((left, right) => left[1][0]! - right[1][0]!)
         .map(([clusterModelIndex]) => clusterModelIndex);
     const clusterIdByModelIndex = new Map(
-        orderedClusterModelIndexes.map((clusterModelIndex, index) => [
-            clusterModelIndex,
-            generatedId("cluster", index),
-        ]),
+        orderedClusterModelIndexes.map((clusterModelIndex, index) => (
+            [clusterModelIndex, generatedId("cluster", index)]
+        )),
     );
 
     const questionRelations = orderedDrafts.map((draft, index) => ({
@@ -333,21 +332,26 @@ export async function structureInterview(input: StructureInput): Promise<Structu
         };
     });
 
-    const readTurns = (ids: string[]): TranscriptTurn[] =>
-        ids.map((turnId) => {
-            const turn = originalById.get(turnId);
-            if (!turn) throw new Error(`轮次不存在: ${turnId}`);
-            return turn;
-        });
+    const readTurns = (ids: string[]): TranscriptTurn[] => ids.map((turnId) => {
+        const turn = originalById.get(turnId);
+        if (!turn) throw new Error(`轮次不存在: ${turnId}`);
+        return turn;
+    });
     const questions = questionRelations.map((question): InterviewQuestion => {
-        const promptTurns = readTurns(question.promptSegments.map((segment) => segment.turnId));
+        const promptTurns = readTurns(
+            question.promptSegments.map((segment) => segment.turnId),
+        );
         const answerTurns = readTurns(question.answerTurnIds);
         const evidenceTurns = [...promptTurns, ...answerTurns];
 
         return {
             ...question,
-            promptTurnIds: [...new Set(question.promptSegments.map((segment) => segment.turnId))],
-            originalQuestion: question.promptSegments.map((segment) => segment.text).join("\n"),
+            promptTurnIds: [...new Set(
+                question.promptSegments.map((segment) => segment.turnId),
+            )],
+            originalQuestion: question.promptSegments
+                .map((segment) => segment.text)
+                .join("\n"),
             originalAnswer: answerTurns.map((turn) => turn.content).join("\n"),
             sourceStart: Math.min(...evidenceTurns.map((turn) => turn.sourceStart)),
             sourceEnd: Math.max(...evidenceTurns.map((turn) => turn.sourceEnd)),

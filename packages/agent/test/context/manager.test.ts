@@ -1,14 +1,43 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { MemoryTraceStore, Tracer } from "@dkagent/trace";
 import { Compressor } from "../../src/context/compressor.js";
 import { ContextManager } from "../../src/context/manager.js";
-import type { HistorySummaryEngine, ContextTokenCountInput, ContextTokenCounter } from "../../src/context/types.js";
-import type { AgentMessage, ModelRequest, ModelResponse } from "../../src/query-engine/provider.js";
+import { QueryEngine } from "../../src/query-engine/query-engine.js";
+import type {
+    HistorySummaryEngine,
+    ContextTokenCountInput,
+    ContextTokenCounter,
+} from "../../src/context/types.js";
+import type {
+    AgentMessage,
+    LLMProvider,
+    ModelRequest,
+    ModelResponse,
+    StreamEvent,
+} from "../../src/query-engine/provider.js";
+
+class TraceSummaryProvider implements LLMProvider {
+    public readonly name = "summary-fake";
+    public async *stream(): AsyncIterable<StreamEvent> {
+        yield { type: "text_delta", content: "summary" };
+        yield { type: "message_end", usage: { inputTokens: 1, outputTokens: 1 }, stopReason: "end_turn" };
+    }
+    public async countTokens(): Promise<number> { return 0; }
+}
+
+class AbortSummaryEngine implements HistorySummaryEngine {
+    public query(): Promise<ModelResponse> {
+        return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    }
+}
 
 class DeterministicTokenCounter implements ContextTokenCounter {
     public count(input: ContextTokenCountInput): Promise<number> {
         const systemTokens = input.systemPrompt === undefined ? 0 : 1;
-        return Promise.resolve(systemTokens + input.messages.length + input.tools.length);
+        return Promise.resolve(
+            systemTokens + input.messages.length + input.tools.length,
+        );
     }
 }
 
@@ -16,7 +45,9 @@ class DeterministicTokenCounter implements ContextTokenCounter {
 class WeightedTokenCounter implements ContextTokenCounter {
     public count(input: ContextTokenCountInput): Promise<number> {
         const systemTokens = input.systemPrompt === undefined ? 0 : 10;
-        return Promise.resolve(systemTokens + input.messages.length * 10 + input.tools.length * 10);
+        return Promise.resolve(
+            systemTokens + input.messages.length * 10 + input.tools.length * 10,
+        );
     }
 }
 
@@ -115,7 +146,9 @@ test("裁剪时完整删除 Tool Call 和 Tool Result", async () => {
         reservedOutputTokens: 1,
     });
 
-    assert.deepEqual(snapshot.messages, [{ role: "user", content: "当前问题" }]);
+    assert.deepEqual(snapshot.messages, [
+        { role: "user", content: "当前问题" },
+    ]);
 });
 
 test("必留内容超过预算时明确失败", async () => {
@@ -149,7 +182,10 @@ test("拒绝非法 Token 预算", async () => {
 
 test("达到 80% 水位后摘要旧历史并尽量降低到 60%", async () => {
     const engine = new ConfigurableSummaryEngine();
-    const manager = new ContextManager(new WeightedTokenCounter(), new Compressor(engine));
+    const manager = new ContextManager(
+        new WeightedTokenCounter(),
+        new Compressor(engine),
+    );
     const messages = createTenMessages();
 
     const snapshot = await manager.build({
@@ -175,7 +211,10 @@ test("达到 80% 水位后摘要旧历史并尽量降低到 60%", async () => {
 
 test("连续压缩时只摘要上次边界后的新增历史并合并旧摘要", async () => {
     const engine = new ConfigurableSummaryEngine();
-    const manager = new ContextManager(new WeightedTokenCounter(), new Compressor(engine));
+    const manager = new ContextManager(
+        new WeightedTokenCounter(),
+        new Compressor(engine),
+    );
     const messages: AgentMessage[] = [
         { role: "user", content: "已经摘要的问题" },
         { role: "assistant", content: "已经摘要的回答" },
@@ -207,7 +246,10 @@ test("连续压缩时只摘要上次边界后的新增历史并合并旧摘要",
 
 test("摘要模型失败时保留旧状态并退回整组删除", async () => {
     const engine = new ConfigurableSummaryEngine(true);
-    const manager = new ContextManager(new WeightedTokenCounter(), new Compressor(engine));
+    const manager = new ContextManager(
+        new WeightedTokenCounter(),
+        new Compressor(engine),
+    );
     const previousState = {
         summary: "旧摘要",
         firstKeptMessageIndex: 0,
@@ -227,4 +269,169 @@ test("摘要模型失败时保留旧状态并退回整组删除", async () => {
 
     assert.deepEqual(snapshot.nextContextState, previousState);
     assert.ok(snapshot.messages.length < 10);
+});
+
+test("context.build Trace 只保存 DTO，不复制 systemPrompt/messages/tools", async () => {
+    const store = new MemoryTraceStore();
+    const tracer = new Tracer(store);
+    const manager = new ContextManager(new DeterministicTokenCounter(), new Compressor(new ConfigurableSummaryEngine()), tracer);
+    await tracer.trace("agent.turn", { userInput: "context" }, async (root) => {
+        await manager.build({
+        systemPrompt: "secret system prompt",
+        messages: [{ role: "user", content: "large private content" }],
+        tools: [{ name: "tool", description: "private", parameters: { secret: "value" } }],
+        maxContextTokens: 100,
+        reservedOutputTokens: 10,
+        });
+        root.setOutput({ answer: "ok" });
+    });
+    const span = store.list().find((item) => item.name === "context.build")!;
+    assert.deepEqual(span.input, {
+        messageCount: 1, toolCount: 1, maxContextTokens: 100, reservedOutputTokens: 10,
+    });
+    assert.deepEqual(span.output, {
+        messageCount: 1, toolCount: 1, estimatedInputTokens: 3, availableInputTokens: 90, compacted: false,
+    });
+    assert.doesNotMatch(JSON.stringify(span), /private|secret/);
+});
+
+test("compaction emits context.compact metrics and fallback remains successful", async () => {
+    const store = new MemoryTraceStore();
+    const tracer = new Tracer(store);
+    const manager = new ContextManager(new WeightedTokenCounter(), new Compressor(new ConfigurableSummaryEngine(true)), tracer);
+    let snapshot!: import("../../src/context/types.js").ContextSnapshot;
+    await tracer.trace("agent.turn", { userInput: "compact" }, async (root) => {
+        snapshot = await manager.build({
+        messages: createTenMessages(), tools: [], maxContextTokens: 90, reservedOutputTokens: 0,
+        compaction: { state: { summary: "old", firstKeptMessageIndex: 0 }, options: compactionOptions, summaryModel: "summary" },
+        });
+        root.setOutput({ answer: "ok" });
+    });
+    assert.ok(snapshot.messages.length < 10);
+    const compact = store.list().find((item) => item.name === "context.compact")!;
+    assert.equal(compact.input.messageCountBefore, 10);
+    assert.equal(compact.input.decision, "summary");
+    assert.equal(compact.output?.fallbackUsed, true);
+    assert.equal(compact.integrity, true);
+});
+
+test("QueryEngine summary shares tracer: context.build > context.compact > model.generate", async () => {
+    const store = new MemoryTraceStore();
+    const tracer = new Tracer(store);
+    const summaryEngine = new QueryEngine(new TraceSummaryProvider(), tracer);
+    const manager = new ContextManager(
+        new WeightedTokenCounter(),
+        new Compressor(summaryEngine),
+    );
+    await tracer.trace("agent.turn", { userInput: "compact" }, async (root) => {
+        await manager.build({
+            messages: createTenMessages(), tools: [], maxContextTokens: 90, reservedOutputTokens: 0,
+            compaction: { state: { summary: "old", firstKeptMessageIndex: 0 }, options: compactionOptions, summaryModel: "summary-model" },
+        });
+        root.setOutput({ answer: "ok" });
+    });
+    const spans = store.list();
+    assert.deepEqual(spans.map((span) => span.name), ["agent.turn", "context.build", "context.compact", "model.generate"]);
+    assert.equal(spans[2]?.parentSpanId, spans[1]?.spanId);
+    assert.equal(spans[3]?.parentSpanId, spans[2]?.spanId);
+    assert.deepEqual(spans[3]?.tokenUsage, { inputTokens: 1, outputTokens: 1 });
+    assert.equal(typeof spans[3]?.durationMs, "number");
+});
+
+test("ContextManager rejects an explicit tracer different from summary QueryEngine tracer", () => {
+    const summaryEngine = new QueryEngine(new TraceSummaryProvider(), new Tracer());
+    assert.throws(
+        () => new ContextManager(new DeterministicTokenCounter(), new Compressor(summaryEngine), new Tracer()),
+        /ContextManager tracer must match Compressor tracer/,
+    );
+});
+
+test("context DTO whitelists compaction fields and never copies content-shaped extras", async () => {
+    const store = new MemoryTraceStore();
+    const tracer = new Tracer(store);
+    const manager = new ContextManager(new DeterministicTokenCounter(), new Compressor(new ConfigurableSummaryEngine()), tracer);
+    await tracer.trace("agent.turn", { userInput: "dto" }, async (root) => {
+        await manager.build({
+            systemPrompt: "system secret",
+            messages: [{ role: "user", content: "message secret" }],
+            tools: [], maxContextTokens: 100, reservedOutputTokens: 10,
+            compaction: {
+                state: { summary: "summary secret", firstKeptMessageIndex: 0 },
+                options: {
+                    ...compactionOptions,
+                    summary: "extra summary",
+                    messages: ["extra messages"],
+                    systemPrompt: "extra system",
+                } as never,
+                summaryModel: "summary",
+            },
+        });
+        root.setOutput({ answer: "ok" });
+    });
+    const build = store.list().find((span) => span.name === "context.build")!;
+    assert.deepEqual(build.input.compaction, compactionOptions);
+    assert.doesNotMatch(JSON.stringify(build.input), /secret|messages|systemPrompt|summary/);
+});
+
+test("compact output/events are complete metrics, and no compact span below threshold", async () => {
+    const compactStore = new MemoryTraceStore();
+    const compactTracer = new Tracer(compactStore);
+    const compactManager = new ContextManager(
+        new WeightedTokenCounter(), new Compressor(new ConfigurableSummaryEngine(true)), compactTracer,
+    );
+    const previousState = { summary: "old summary", firstKeptMessageIndex: 0 };
+    await compactTracer.trace("agent.turn", { userInput: "compact" }, async (root) => {
+        await compactManager.build({
+            messages: createTenMessages(), tools: [], maxContextTokens: 90, reservedOutputTokens: 0,
+            compaction: { state: previousState, options: compactionOptions, summaryModel: "summary" },
+        });
+        root.setOutput({ answer: "ok" });
+    });
+    const compact = compactStore.list().find((span) => span.name === "context.compact")!;
+    assert.deepEqual(Object.keys(compact.output ?? {}).sort(), [
+        "fallbackUsed", "messageCountAfter", "messageCountBefore", "retainedMessageCount",
+        "summarizedMessageCount", "tokensAfter", "tokensBefore",
+    ].sort());
+    assert.deepEqual(compact.output, {
+        messageCountBefore: 10, messageCountAfter: 8, summarizedMessageCount: 0,
+        retainedMessageCount: 8, tokensBefore: 110, tokensAfter: 90, fallbackUsed: true,
+    });
+    for (const span of compactStore.list().filter((item) => item.name === "context.build" || item.name === "context.compact")) {
+        assert.doesNotMatch(JSON.stringify({ input: span.input, output: span.output, events: span.events }), /systemPrompt|messages|tools|groups|snapshot|old summary|message secret/);
+    }
+
+    const smallStore = new MemoryTraceStore();
+    const smallTracer = new Tracer(smallStore);
+    const smallManager = new ContextManager(new WeightedTokenCounter(), new Compressor(new ConfigurableSummaryEngine()), smallTracer);
+    await smallTracer.trace("agent.turn", { userInput: "small" }, async (root) => {
+        await smallManager.build({ messages: [{ role: "user", content: "small" }], tools: [], maxContextTokens: 100, reservedOutputTokens: 0,
+            compaction: { state: previousState, options: compactionOptions, summaryModel: "summary" } });
+        root.setOutput({ answer: "ok" });
+    });
+    assert.equal(smallStore.list().some((span) => span.name === "context.compact"), false);
+});
+
+test("Abort summary keeps old state and falls back without failing build", async () => {
+    const store = new MemoryTraceStore();
+    const tracer = new Tracer(store);
+    const manager = new ContextManager(new WeightedTokenCounter(), new Compressor(new AbortSummaryEngine()), tracer);
+    const previousState = { summary: "old summary", firstKeptMessageIndex: 0 };
+    let snapshot!: import("../../src/context/types.js").ContextSnapshot;
+    await tracer.trace("agent.turn", { userInput: "abort" }, async (root) => {
+        snapshot = await manager.build({
+            messages: createTenMessages(), tools: [], maxContextTokens: 90, reservedOutputTokens: 0,
+            compaction: {
+                state: previousState,
+                options: compactionOptions,
+                summaryModel: "summary",
+                abortSignal: AbortSignal.abort(),
+            },
+        });
+        root.setOutput({ answer: "ok" });
+    });
+    assert.deepEqual(snapshot.nextContextState, previousState);
+    assert.ok(snapshot.messages.length < 10);
+    const compact = store.list().find((span) => span.name === "context.compact")!;
+    assert.equal(compact.status, "ok");
+    assert.equal(compact.output?.fallbackUsed, true);
 });

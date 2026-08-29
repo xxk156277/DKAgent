@@ -6,9 +6,9 @@ const root = new URL("../../../", import.meta.url);
 const readJson = async (path: string): Promise<Record<string, any>> =>
     JSON.parse(await readFile(new URL(path, root), "utf8"));
 
-test("根包声明 agent、trace 与 web-tap workspaces", async () => {
-    const rootPackage = await readJson("package.json");
-    assert.deepEqual(rootPackage.workspaces, ["packages/*"]);
+test("根包声明 pnpm workspaces", async () => {
+    const workspace = await readFile(new URL("pnpm-workspace.yaml", root), "utf8");
+    assert.match(workspace, /packages:\s*\n\s*-\s*["']packages\/\*["']/);
 
     const agent = await readJson("packages/agent/package.json");
     const trace = await readJson("packages/trace/package.json");
@@ -17,10 +17,9 @@ test("根包声明 agent、trace 与 web-tap workspaces", async () => {
     assert.equal(agent.name, "@dkagent/agent");
     assert.equal(trace.name, "@dkagent/trace");
     assert.equal(tap.name, "@dkagent/web-tap");
-    assert.equal(tap.dependencies["@dkagent/agent"], "*");
-    assert.equal(tap.dependencies["@dkagent/trace"], "*");
-    assert.equal(agent.dependencies["@dkagent/trace"], "*");
-    assert.equal(agent.dependencies?.["@dkagent/web-tap"], undefined);
+    assert.equal(tap.dependencies["@dkagent/agent"], "workspace:*");
+    assert.equal(tap.dependencies["@dkagent/trace"], "workspace:*");
+    assert.equal(agent.dependencies["@dkagent/trace"], "workspace:*");
 });
 
 test("业务源码和测试位于独立 workspace", async () => {
