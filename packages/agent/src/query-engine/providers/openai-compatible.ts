@@ -176,10 +176,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     public async *stream(request: ModelRequest): AsyncIterable<StreamEvent> {
         const responseFormat = toOpenAIResponseFormat(request.responseFormat);
-        const thinking =
-            request.thinking === "disabled" && supportsDeepSeekThinkingToggle(request.model)
-                ? { type: "disabled" as const }
-                : undefined;
+        const thinking = "disabled";
+        // request.thinking === "disabled" && supportsDeepSeekThinkingToggle(request.model)
+        //     ? { type: "disabled" as const }
+        //     : undefined;
         const openAIRequest: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
             model: request.model,
             messages: toOpenAIMessages(request.messages, request.systemPrompt),
