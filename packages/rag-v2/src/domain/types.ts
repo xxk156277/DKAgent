@@ -93,7 +93,7 @@ export interface SearchHit {
     headingPath: string[];
     /** 命中子块的正文内容 */
     content: string;
-    /** 与查询的余弦相似度，取值范围 [0, 1]，越接近 1 越相关 */
+    /** 与查询的余弦相似度，理论范围 [-1, 1]，越接近 1 越相关 */
     similarity: number;
     /** 命中子块是否需要多模态理解 */
     needsVision: boolean;

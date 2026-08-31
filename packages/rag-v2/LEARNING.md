@@ -21,6 +21,8 @@ pnpm rag inspect --document "C-前端学习/node/SSE.md"
 
 数据库基础先阅读 [`GATE_2_DATABASE.md`](GATE_2_DATABASE.md)，完成其中的只读查询和事务回滚实验。
 
+向量检索与父文档聚合阅读 [`GATE_3_RETRIEVAL.md`](GATE_3_RETRIEVAL.md)，完成 Top-12 → Top-3 的预测和真实搜索检查。
+
 ```bash
 docker compose up -d
 pnpm db:migrate

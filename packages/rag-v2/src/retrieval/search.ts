@@ -22,14 +22,15 @@ export async function searchKnowledge(input: {
     embedding: EmbeddingService;
     query: string;
     topK?: number;
-}): Promise<{ hits: SearchHit[]; embeddingTokens?: number; durationMs: number }> {
+}): Promise<{ hits: SearchHit[]; embeddingTokens?: number | undefined; durationMs: number }> {
     const startedAt = performance.now();
     const topK = input.topK ?? 3;
     const embedded = await input.embedding.embedQuery(input.query);
     const childHits = await input.database.searchChildren(embedded.embedding, Math.max(12, topK * 4));
+
     return {
         hits: aggregateByParent(childHits, topK),
-        embeddingTokens: embedded.tokens,
+        embeddingTokens: embedded.tokens || undefined,
         durationMs: Math.round(performance.now() - startedAt),
     };
 }

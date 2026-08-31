@@ -180,18 +180,18 @@ export class RagDatabase {
             needs_vision: boolean;
         }>(
             `SELECT
-        c.parent_id,
-        c.source_path,
-        d.title AS document_title,
-        c.id AS chunk_id,
-        c.heading_path,
-        c.content,
-        1 - (c.embedding <=> $1::vector) AS similarity,
-        c.needs_vision
-       FROM rag_chunks c
-       JOIN rag_documents d ON d.id = c.parent_id
-       ORDER BY c.embedding <=> $1::vector
-       LIMIT $2`,
+                c.parent_id,
+                c.source_path,
+                d.title AS document_title,
+                c.id AS chunk_id,
+                c.heading_path,
+                c.content,
+                1 - (c.embedding <=> $1::vector) AS similarity,
+                c.needs_vision
+            FROM rag_chunks c
+            JOIN rag_documents d ON d.id = c.parent_id
+            ORDER BY c.embedding <=> $1::vector
+            LIMIT $2`,
             [pgvector.toSql(vector), limit],
         );
         return result.rows.map((row) => ({

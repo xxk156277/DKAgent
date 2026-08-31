@@ -14,7 +14,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
  */
 export interface EmbeddingBatchResult {
     embeddings: number[][];
-    tokens?: number;
+    tokens?: number | undefined;
 }
 
 /**
@@ -56,16 +56,25 @@ export class EmbeddingService {
                 hasUsage = true;
             }
         }
-        return { embeddings, tokens: hasUsage ? tokens : undefined };
+        return {
+            embeddings,
+            tokens: hasUsage ? tokens : undefined,
+        };
     }
 
     /**
      * 单条文本向量化，用于检索查询。
      */
     async embedQuery(value: string): Promise<{ embedding: number[]; tokens?: number }> {
-        const result = await embed({ model: this.model, value });
+        const result = await embed({
+            model: this.model,
+            value,
+        });
         this.assertDimensions([result.embedding]);
-        return { embedding: result.embedding, tokens: result.usage?.tokens };
+        return {
+            embedding: result.embedding,
+            tokens: result.usage?.tokens,
+        };
     }
 
     /**

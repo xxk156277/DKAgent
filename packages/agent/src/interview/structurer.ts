@@ -118,7 +118,7 @@ const JSON_OUTPUT_EXAMPLE = JSON.stringify({
     nonQuestionTurnIds: ["turn-0006"],
 }, null, 2);
 
-export async function structureInterview(input: StructureInput): Promise<StructureOutput> {
+export async function      (input: StructureInput): Promise<StructureOutput> {
     // const correctedById = new Map(
     //     (input.correctedTurns ?? input.transcript.turns).map(
     //         (turn) => [turn.id, turn.content],

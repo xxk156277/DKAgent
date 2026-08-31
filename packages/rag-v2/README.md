@@ -96,6 +96,12 @@ pnpm rag ask "为什么 Agent 需要上下文压缩？"
 
 `eval/questions.jsonl` 是 20 题种子集。先人工补齐并核对 `expectedFacts`，再把 Recall@3 当作有效基线。报告逐题展示预期事实、是否应拒答、返回路径、分数、延迟，并汇总 Embedding tokens；引用是否支持答案、回答完整性和拒答正确性仍由你手工判定。若正例与拒答题的 Top-1 分数区间不重叠，报告会给出建议阈值；否则不要依赖单一相似度阈值。
 
+## 学习关卡
+
+- [`GATE_1.md`](GATE_1.md)：Markdown 父文档与标题子块。
+- [`GATE_2_DATABASE.md`](GATE_2_DATABASE.md)：PostgreSQL、pgvector 与事务入库。
+- [`GATE_3_RETRIEVAL.md`](GATE_3_RETRIEVAL.md)：查询向量、余弦检索与父文档聚合。
+
 ## 当前边界
 
 - 图片只保存引用与邻近文字，`needsVision=true` 不代表已完成多模态。

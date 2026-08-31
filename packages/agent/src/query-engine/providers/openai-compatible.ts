@@ -176,10 +176,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     public async *stream(request: ModelRequest): AsyncIterable<StreamEvent> {
         const responseFormat = toOpenAIResponseFormat(request.responseFormat);
-        const thinking = "disabled";
-        // request.thinking === "disabled" && supportsDeepSeekThinkingToggle(request.model)
-        //     ? { type: "disabled" as const }
-        //     : undefined;
+        // 永久禁用 thinking 参数，避免与不兼容的 API 冲突
         const openAIRequest: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
             model: request.model,
             messages: toOpenAIMessages(request.messages, request.systemPrompt),
@@ -189,7 +186,6 @@ export class OpenAICompatibleProvider implements LLMProvider {
             stream_options: { include_usage: true },
             parallel_tool_calls: false,
             ...(responseFormat ? { response_format: responseFormat } : {}),
-            ...(thinking ? { thinking } : {}),
             ...(request.tools?.length ? { tools: toOpenAITools(request.tools) } : {}),
             ...(request.abortSignal ? { signal: request.abortSignal } : {}),
         };
