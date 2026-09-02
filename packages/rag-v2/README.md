@@ -101,6 +101,8 @@ pnpm rag ask "为什么 Agent 需要上下文压缩？"
 - [`GATE_1.md`](GATE_1.md)：Markdown 父文档与标题子块。
 - [`GATE_2_DATABASE.md`](GATE_2_DATABASE.md)：PostgreSQL、pgvector 与事务入库。
 - [`GATE_3_RETRIEVAL.md`](GATE_3_RETRIEVAL.md)：查询向量、余弦检索与父文档聚合。
+- [`GATE_4_EVALUATION.md`](GATE_4_EVALUATION.md)：20题Recall@3、延迟、成本与失败归因。
+- [`GATE_5_GENERATION.md`](GATE_5_GENERATION.md)：证据上下文、DeepSeek生成、引用与拒答。
 
 ## 当前边界
 

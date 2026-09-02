@@ -139,7 +139,7 @@ export interface IngestReport {
 export interface EvaluationQuestion {
     /** 评估用的查询问题文本 */
     query: string;
-    /** 期望被检索命中的源文件路径列表（用于计算召回） */
+    /** 人工标注的全部相关父文档路径，用于按命中比例计算严格 Recall@K */
     relevantSourcePaths: string[];
     /** 期望答案中出现的事实要点（用于内容校验） */
     expectedFacts: string[];

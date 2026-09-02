@@ -39,7 +39,10 @@ pnpm stats
 
 先人工核对 `eval/questions.jsonl` 的相关文档和 `expectedFacts`，再运行：
 
+完整教学见 [`GATE_4_EVALUATION.md`](GATE_4_EVALUATION.md)。本关不再做预测题，以真实评估报告作为验收结果。
+
 ```bash
+# 中文注释：运行20题检索评估，不调用DeepSeek
 pnpm rag evaluate
 ```
 
@@ -51,7 +54,10 @@ pnpm rag evaluate
 
 阅读顺序：`src/generation/context.ts` → `src/generation/ask.ts`。
 
+完整教学见 [`GATE_5_GENERATION.md`](GATE_5_GENERATION.md)。本关以可回答问题和拒答问题的真实输出作为验收依据。
+
 ```bash
+# 中文注释：执行完整RAG问答，会调用查询Embedding和DeepSeek
 pnpm rag ask "Agent 为什么需要上下文压缩？"
 ```
 

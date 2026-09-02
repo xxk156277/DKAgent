@@ -11,7 +11,31 @@ const QuestionSchema = z.object({
     relevantSourcePaths: z.array(z.string()),
     expectedFacts: z.array(z.string()).default([]),
     shouldRefuse: z.boolean(),
+}).superRefine((question, context) => {
+    if (!question.shouldRefuse && question.relevantSourcePaths.length === 0) {
+        context.addIssue({
+            code: "custom",
+            path: ["relevantSourcePaths"],
+            message: "可回答问题必须至少标注一篇相关父文档",
+        });
+    }
 });
+
+/**
+ * 按标准定义计算单题 Recall@K：Top-K 命中的相关文档数 / 全部相关文档数。
+ */
+export function calculateRecallAtK(relevantSourcePaths: string[], returnedPaths: string[]): {
+    recallAtK: number;
+    matchedRelevantPaths: string[];
+} {
+    const relevantPaths = [...new Set(relevantSourcePaths)];
+    const returnedPathSet = new Set(returnedPaths);
+    const matchedRelevantPaths = relevantPaths.filter((sourcePath) => returnedPathSet.has(sourcePath));
+    return {
+        recallAtK: relevantPaths.length === 0 ? 0 : matchedRelevantPaths.length / relevantPaths.length,
+        matchedRelevantPaths,
+    };
+}
 
 /**
  * 读取 JSONL 格式的评估用例文件，逐行解析并校验。
@@ -47,7 +71,8 @@ export interface EvaluationReport {
         query: string;
         expectedFacts: string[];
         shouldRefuse: boolean;
-        recalled: boolean;
+        recallAt3: number | null;
+        matchedRelevantPaths: string[];
         topScore?: number;
         returnedPaths: string[];
         latencyMs: number;
@@ -80,9 +105,9 @@ export async function evaluateRetrieval(input: {
             embeddingTokens += result.embeddingTokens;
             hasUsage = true;
         }
-        const recalled = question.shouldRefuse
-            ? true
-            : question.relevantSourcePaths.some((sourcePath) => returnedPaths.includes(sourcePath));
+        const recall = question.shouldRefuse
+            ? { recallAtK: null, matchedRelevantPaths: [] }
+            : calculateRecallAtK(question.relevantSourcePaths, returnedPaths);
         const topScore = result.hits[0]?.similarity;
         if (topScore !== undefined) {
             (question.shouldRefuse ? refusalScores : positiveScores).push(topScore);
@@ -91,13 +116,17 @@ export async function evaluateRetrieval(input: {
             query: question.query,
             expectedFacts: question.expectedFacts,
             shouldRefuse: question.shouldRefuse,
-            recalled,
+            recallAt3: recall.recallAtK,
+            matchedRelevantPaths: recall.matchedRelevantPaths,
             topScore,
             returnedPaths,
             latencyMs: result.durationMs,
         });
     }
-    const answerableCases = cases.filter((_, index) => !input.questions[index]!.shouldRefuse);
+    const answerableCases = cases.filter(
+        (evaluationCase): evaluationCase is typeof evaluationCase & { recallAt3: number } =>
+            evaluationCase.recallAt3 !== null,
+    );
     const lowestPositive = positiveScores.length ? Math.min(...positiveScores) : undefined;
     const highestRefusal = refusalScores.length ? Math.max(...refusalScores) : undefined;
     const thresholdOverlap =
@@ -112,7 +141,8 @@ export async function evaluateRetrieval(input: {
         recallAt3:
             answerableCases.length === 0
                 ? 0
-                : answerableCases.filter((evaluationCase) => evaluationCase.recalled).length / answerableCases.length,
+                : answerableCases.reduce((sum, evaluationCase) => sum + evaluationCase.recallAt3, 0) /
+                  answerableCases.length,
         averageLatencyMs:
             cases.length === 0 ? 0 : Math.round(cases.reduce((sum, item) => sum + item.latencyMs, 0) / cases.length),
         embeddingTokens: hasUsage ? embeddingTokens : undefined,
