@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { RagKnowledgeService } from "@dkagent/rag-v2";
 import { SqliteTraceStore, Tracer } from "@dkagent/trace";
 import { createInterface } from "node:readline";
 // import { existsSync } from "node:fs";
@@ -52,10 +53,6 @@ export async function runAgentCli(options: {
     //         new KnowledgeSearch(new KnowledgeRepository(knowledgeDatabase)),
     //     )
     //     : undefined;
-    const toolRegistry = createToolRegistry({
-        model: config.model,
-        // ...(referenceRetriever ? { referenceRetriever } : {}),
-    });
     const systemPrompt = appendAvailableSkills(
         AGENT_SYSTEM_PROMPT,
         createSkillRegistry(),
@@ -99,7 +96,13 @@ export async function runAgentCli(options: {
     // 摘要复用统一 QueryEngine；Compressor 不直接依赖具体 Provider。
     const compressor = new Compressor(queryEngine);
     const contextManager = new ContextManager(new ProviderTokenCounter(provider), compressor);
+    let ragService: RagKnowledgeService | undefined;
     try {
+    ragService = config.rag ? new RagKnowledgeService(config.rag) : undefined;
+    const toolRegistry = createToolRegistry({
+        model: config.model,
+        ...(ragService ? { knowledgeRetriever: ragService } : {}),
+    });
     // Demo 阶段暂时下线自动 Memory 召回/提取/写入；手动 Memory 命令继续可用。
     const artifactStores = new Map<string, ArtifactStore>();
     const getOrCreateArtifactStore = (sessionId: string): ArtifactStore => {
@@ -338,11 +341,13 @@ export async function runAgentCli(options: {
                 closeError ??= error;
             }
         }
-        // try {
-        //     knowledgeDatabase?.close();
-        // } catch (error: unknown) {
-        //     closeError ??= error;
-        // }
+        if (ragService) {
+            try {
+                await ragService.close();
+            } catch (error: unknown) {
+                closeError ??= error;
+            }
+        }
         if (closeError) throw closeError;
     }
 }

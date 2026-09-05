@@ -19,12 +19,14 @@ src/
 ├── storage/
 │   └── database.ts              # PostgreSQL/pgvector 迁移、事务写入与向量查询
 ├── retrieval/
-│   └── search.ts                # 问题向量化、子块召回和父文档聚合
+│   ├── bm25.ts                  # 中文/英文词元化与内存 BM25
+│   └── search.ts                # Dense/BM25候选、RRF和父文档聚合
 ├── generation/
 │   ├── context.ts               # 从父文档选择命中块及相邻块，拼装证据上下文
-│   └── ask.ts                   # 调用 DeepSeek，执行拒答、生成和引用检查
+│   ├── citation.ts              # DeepSeek结构化语义引用与事实覆盖检查
+│   └── ask.ts                   # 执行检索、拒答、生成和引用门禁
 ├── evaluation/
-│   └── evaluate.ts              # 执行 20 题 Recall@3、延迟和阈值评估
+│   └── evaluate.ts              # 检索对照与完整问答基线
 └── shared/
     ├── hash.ts                  # SHA-256 内容哈希与稳定 ID 基础能力
     └── errors.ts                # CLI 错误格式化及敏感信息保护
@@ -58,9 +60,9 @@ cli
 - `ingestion` 负责把外部 Markdown 变成可检索数据，不负责回答问题。
 - `embedding` 只负责文本与向量的转换，不关心数据存在哪里。
 - `storage` 封装 PostgreSQL 和 pgvector，其他模块不直接书写 SQL。
-- `retrieval` 只负责找到证据，不负责组织最终答案。
-- `generation` 使用检索证据回答，并处理上下文、引用和拒答。
-- `evaluation` 复用真实检索链路，衡量召回效果，不参与线上问答。
+- `retrieval` 用 Dense 和 BM25 找候选，再由 RRF 融合，不负责组织最终答案。
+- `generation` 优先保留命中块，使用检索证据回答，并处理引用语义检查和拒答。
+- `evaluation` 既能运行低成本检索回归，也能显式运行完整问答基线。
 
 ## 1. 配置
 
@@ -88,13 +90,51 @@ pnpm rag search "SSE 和普通 HTTP 有什么区别"
 ## 3. 诊断与评估
 
 ```bash
+# 中文注释：查看数据库统计
 pnpm stats
+
+# 中文注释：检查指定父文档
 pnpm rag inspect --document "C-前端学习/node/SSE.md"
-pnpm rag evaluate
+
+# 中文注释：运行 Dense 对照，只调用查询 Embedding
+pnpm rag evaluate --strategy dense
+
+# 中文注释：运行 BM25 + Dense + RRF 检索评估
+pnpm rag evaluate --strategy hybrid
+
+# 中文注释：运行22题完整基线，会调用DeepSeek生成与语义验证
+pnpm rag baseline
+
+# 中文注释：从仓库根运行 Promptfoo 四项语义评估和拒答检查
+pnpm eval:rag
+
+# 中文注释：执行一次完整问答
 pnpm rag ask "为什么 Agent 需要上下文压缩？"
 ```
 
-`eval/questions.jsonl` 是 20 题种子集。先人工补齐并核对 `expectedFacts`，再把 Recall@3 当作有效基线。报告逐题展示预期事实、是否应拒答、返回路径、分数、延迟，并汇总 Embedding tokens；引用是否支持答案、回答完整性和拒答正确性仍由你手工判定。若正例与拒答题的 Top-1 分数区间不重叠，报告会给出建议阈值；否则不要依赖单一相似度阈值。
+`eval/interview-questions.v1.jsonl` 是 20 条可回答黄金问题，`eval/refusal-questions.v1.jsonl` 是独立负例。`evaluate` 只测 Recall@3；`baseline` 额外报告模型裁判的事实覆盖、引用支持、拒答、端到端延迟和生成/验证 Token。模型裁判不是人工真值，仍需抽查逐题草稿、证据和 unsupported claims。
+
+Promptfoo 接入位于仓库根目录 `evals/rag-v2`：正例额外报告 Context Recall、Context Relevance（Context Precision 代理）、Answer Relevancy 和 Faithfulness；拒答例检查 `is-refusal`。Promptfoo 不替代确定性的 Recall@3，首次基线也不预设评分门槛。
+
+当前同一快照结果见 [`eval/baselines/dense-before-hybrid.md`](eval/baselines/dense-before-hybrid.md) 和 [`eval/baselines/hybrid-v1.md`](eval/baselines/hybrid-v1.md)。
+
+## 4. 接入 DKAgent
+
+在仓库根目录 `.env` 显式开启只读知识库 Tool：
+
+```dotenv
+# 中文注释：开启后，Agent 才会看到 query_knowledge_base Tool
+RAG_ENABLED=true
+```
+
+然后从仓库根目录启动 Agent：
+
+```bash
+# 中文注释：启动 DKAgent，Agent 会按需决定是否检索知识库
+pnpm --filter @dkagent/agent run agent
+```
+
+这条链路是 `Agent → query_knowledge_base → Hybrid 检索 → Top-3 父文档证据 → Agent 当前模型回答`。Tool 本身不调用 DeepSeek 生成或语义裁判，因此不会形成两次回答；引用仍应使用 Tool 返回的 `[n] 路径#标题`。
 
 ## 学习关卡
 
@@ -107,5 +147,7 @@ pnpm rag ask "为什么 Agent 需要上下文压缩？"
 ## 当前边界
 
 - 图片只保存引用与邻近文字，`needsVision=true` 不代表已完成多模态。
-- 当前只有 Dense 检索；BM25、RRF、查询重写和重排应由真实失败案例驱动。
+- 当前 BM25 在应用进程内读取并缓存全部子块，适合约 3747 子块的本地项目；更大语料需要重新评估持久化词法索引或专用搜索服务。
+- 当前没有查询重写和重排；是否增加仍应由失败案例驱动。
+- 每个成功草稿会增加一次 DeepSeek 语义验证调用，延迟和 Token 已分阶段统计。
 - 云端 Embedding 白名单不包含 `Z-前东家/Tower`、个人、面试和股票目录。

@@ -28,6 +28,16 @@ export interface AgentConfig {
     /** 历史摘要使用的模型 ID；首版默认复用主模型。 */
     summaryModel: string;
     knowledgeDatabasePath?: string;
+    /** 显式启用后的 RAG v2 检索配置；未启用时不创建服务。 */
+    rag?: {
+        databaseUrl: string;
+        embedding: {
+            apiKey: string;
+            baseUrl: string;
+            model: string;
+            dimensions: 1024;
+        };
+    };
 }
 
 type ProviderName = "qwen" | "deepseek";
@@ -71,6 +81,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     }
 
     const knowledgeDatabasePath = env.KNOWLEDGE_DATABASE_PATH?.trim();
+    const ragEnabled = parseBoolean(env.RAG_ENABLED, false, "RAG_ENABLED");
+    const rag = ragEnabled ? loadRagConfig(env) : undefined;
 
     return {
         apiKey: providerConfig.apiKey,
@@ -83,6 +95,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
         summaryModel: env.LLM_SUMMARY_MODEL_ID?.trim() || providerConfig.model,
         ...(providerConfig.baseURL ? { baseURL: providerConfig.baseURL } : {}),
         ...(knowledgeDatabasePath ? { knowledgeDatabasePath } : {}),
+        ...(rag ? { rag } : {}),
+    };
+}
+
+/** RAG 只在显式启用后校验配置，避免影响普通 Agent 启动。 */
+function loadRagConfig(env: NodeJS.ProcessEnv): NonNullable<AgentConfig["rag"]> {
+    const apiKey = env.SILICONFLOW_API_KEY?.trim();
+    if (!apiKey) throw new Error("缺少环境变量 SILICONFLOW_API_KEY");
+    return {
+        databaseUrl: env.DATABASE_URL?.trim() || "postgresql://rag:rag@localhost:5439/rag",
+        embedding: {
+            apiKey,
+            baseUrl: env.EMBEDDING_BASE_URL?.trim() || "https://api.siliconflow.cn/v1",
+            model: env.EMBEDDING_MODEL?.trim() || "BAAI/bge-m3",
+            dimensions: 1024,
+        },
     };
 }
 
@@ -143,4 +171,13 @@ function parsePositiveInteger(value: string | undefined, defaultValue: number, v
         throw new Error(`${variableName} 必须是正整数`);
     }
     return parsed;
+}
+
+/** 解析显式布尔开关，拒绝容易误解的其他字符串。 */
+function parseBoolean(value: string | undefined, defaultValue: boolean, variableName: string): boolean {
+    if (!value?.trim()) return defaultValue;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+    throw new Error(`${variableName} 必须是 true 或 false`);
 }

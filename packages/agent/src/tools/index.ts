@@ -11,10 +11,15 @@ import { createParseTranscriptTool } from "./tool-item/parse-transcript.js";
 // import { createPreprocessTranscriptTool } from "./tool-item/preprocess-transcript.js";
 // import { createSearchInterviewReferenceTool } from "./tool-item/search-interview-reference.js";
 import { createStructureInterviewTool } from "./tool-item/structure-interview.js";
+import {
+    createQueryKnowledgeBaseTool,
+    type KnowledgeRetriever,
+} from "./rag/query-knowledge-base.js";
 
 export interface CreateToolRegistryOptions {
     cwd?: string;
     model: string;
+    knowledgeRetriever?: KnowledgeRetriever;
     // referenceRetriever?: InterviewReferenceRetriever;
 }
 
@@ -38,6 +43,9 @@ export function createToolRegistry(options: CreateToolRegistryOptions): ToolRegi
     // }
     registry.register(createAnalyzeAnswerTool(options.model));
     registry.register(createGenerateReportTool(options.model));
+    if (options.knowledgeRetriever) {
+        registry.register(createQueryKnowledgeBaseTool(options.knowledgeRetriever));
+    }
     return registry;
 }
 // import type { InterviewReferenceRetriever } from "../skills/interview-reference-retriever.js";

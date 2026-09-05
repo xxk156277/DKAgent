@@ -80,3 +80,37 @@ test("继续校验最大输出 Token 必须小于上下文窗口", () => {
         /LLM_MAX_OUTPUT_TOKENS 必须小于 LLM_CONTEXT_WINDOW_TOKENS/,
     );
 });
+
+test("RAG 默认关闭，关闭时不要求 Embedding 配置", () => {
+    const config = loadConfig({ QWEN_API_KEY: "qwen-key" });
+
+    assert.equal(config.rag, undefined);
+});
+
+test("RAG 启用时加载检索配置", () => {
+    const config = loadConfig({
+        QWEN_API_KEY: "qwen-key",
+        RAG_ENABLED: "true",
+        SILICONFLOW_API_KEY: "embedding-key",
+        DATABASE_URL: "postgresql://rag:test@localhost:5439/rag",
+        EMBEDDING_BASE_URL: "https://embedding.example/v1",
+        EMBEDDING_MODEL: "BAAI/bge-m3",
+    });
+
+    assert.deepEqual(config.rag, {
+        databaseUrl: "postgresql://rag:test@localhost:5439/rag",
+        embedding: {
+            apiKey: "embedding-key",
+            baseUrl: "https://embedding.example/v1",
+            model: "BAAI/bge-m3",
+            dimensions: 1024,
+        },
+    });
+});
+
+test("RAG 启用但缺少 Embedding Key 时明确失败", () => {
+    assert.throws(
+        () => loadConfig({ QWEN_API_KEY: "qwen-key", RAG_ENABLED: "true" }),
+        /缺少环境变量 SILICONFLOW_API_KEY/,
+    );
+});

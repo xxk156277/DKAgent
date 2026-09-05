@@ -28,6 +28,7 @@
         "@ai-sdk/anthropic": "^4.0.34",
         "@ai-sdk/deepseek": "^3.0.24",
         "@ai-sdk/openai": "^4.0.34",
+        "@dkagent/rag-v2": "workspace:*",
         "@dkagent/trace": "workspace:*",
         "@vscode/ripgrep": "^1.18.0",
         "ai": "^7.0.56",

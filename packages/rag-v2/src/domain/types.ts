@@ -17,7 +17,7 @@ export interface ImageReference {
     /** 图片目标：Markdown 为链接地址，Obsidian 为 [[目标]] 中的名称/路径 */
     target: string;
     /** 图片替代文本（alt），可选 */
-    alt?: string;
+    alt?: string | undefined;
 }
 
 /**
@@ -97,7 +97,21 @@ export interface SearchHit {
     similarity: number;
     /** 命中子块是否需要多模态理解 */
     needsVision: boolean;
+    /** Dense 候选中的名次（从 1 起），未进入 Dense 候选时为空 */
+    denseRank?: number | undefined;
+    /** BM25 候选中的名次（从 1 起），未进入 BM25 候选时为空 */
+    bm25Rank?: number | undefined;
+    /** BM25 原始分数，仅用于诊断，不与余弦相似度直接相加 */
+    bm25Score?: number | undefined;
+    /** RRF 融合分数；Dense-only 检索时为空 */
+    rrfScore?: number | undefined;
 }
+
+/** 不含向量的词法检索子块，用于构建进程内 BM25 索引。 */
+export type LexicalChunk = Omit<SearchHit, "similarity" | "denseRank" | "bm25Rank" | "bm25Score" | "rrfScore">;
+
+/** 检索策略：Dense 基线或 BM25 + Dense + RRF。 */
+export type RetrievalStrategy = "dense" | "hybrid";
 
 /**
  * 引用标注：答案中 [n] 对应的来源位置。
@@ -128,7 +142,7 @@ export interface IngestReport {
     /** 本次摄入写入的向量（子块）总数 */
     chunksEmbedded: number;
     /** Embedding 调用消耗的 token 数（模型未返回用量时为 undefined） */
-    embeddingTokens?: number;
+    embeddingTokens?: number | undefined;
     /** 摄入总耗时（毫秒） */
     durationMs: number;
 }

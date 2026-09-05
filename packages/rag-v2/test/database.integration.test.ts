@@ -5,7 +5,7 @@ import { RagDatabase } from "../src/storage/database.js";
 
 const connectionString = process.env.RAG_TEST_DATABASE_URL;
 
-test("pgvector 迁移、事务替换、余弦检索和删除同步", { skip: !connectionString }, async () => {
+test("pgvector 迁移、事务替换、Dense/词法候选和删除同步", { skip: !connectionString }, async () => {
     const database = new RagDatabase(connectionString!);
     const vectorA = Array.from({ length: 1024 }, (_, index) => (index === 0 ? 1 : 0));
     const vectorB = Array.from({ length: 1024 }, (_, index) => (index === 1 ? 1 : 0));
@@ -38,10 +38,16 @@ test("pgvector 迁移、事务替换、余弦检索和删除同步", { skip: !co
         await database.replaceDocument(parent("b"), [chunk("b")], [vectorB]);
         const hits = await database.searchChildren(vectorA, 2);
         assert.equal(hits[0]?.parentId, "a");
+        assert.equal((await database.getLexicalChunks()).length, 2);
+        assert.equal((await database.scoreChildrenByIds(vectorA, ["chunk-b"]))[0]?.chunkId, "chunk-b");
 
         const updated = { ...chunk("a"), content: "updated", contentHash: "updated" };
         await database.replaceDocument({ ...parent("a"), contentHash: "updated" }, [updated], [vectorA]);
         assert.equal((await database.getDocument("a"))?.chunks[0]?.content, "updated");
+        assert.equal(
+            (await database.getLexicalChunks()).find((item) => item.chunkId === "chunk-a")?.content,
+            "updated",
+        );
 
         const deleted = await database.deleteMissingDocuments(["__integration__/a.md"]);
         assert.equal(deleted, 1);

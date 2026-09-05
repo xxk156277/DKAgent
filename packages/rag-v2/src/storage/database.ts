@@ -9,7 +9,7 @@
  */
 import pg from "pg";
 import pgvector from "pgvector";
-import type { ChildChunk, ParentDocument, SearchHit } from "../domain/types.js";
+import type { ChildChunk, LexicalChunk, ParentDocument, SearchHit } from "../domain/types.js";
 
 const { Pool } = pg;
 
@@ -26,6 +26,7 @@ export interface StoredDocument {
  */
 export class RagDatabase {
     readonly pool: pg.Pool;
+    private lexicalChunksCache: LexicalChunk[] | undefined;
 
     /**
      * @param connectionString PostgreSQL 连接串
@@ -145,6 +146,7 @@ export class RagDatabase {
                 );
             }
             await client.query("COMMIT");
+            this.lexicalChunksCache = undefined;
         } catch (error) {
             await client.query("ROLLBACK");
             /**
@@ -165,6 +167,7 @@ export class RagDatabase {
              * 按向量余弦相似度检索最相近的子块，并按相似度降序返回。
              */
         ]);
+        if ((result.rowCount ?? 0) > 0) this.lexicalChunksCache = undefined;
         return result.rowCount ?? 0;
     }
 
@@ -193,6 +196,81 @@ export class RagDatabase {
             ORDER BY c.embedding <=> $1::vector
             LIMIT $2`,
             [pgvector.toSql(vector), limit],
+        );
+        return result.rows.map((row) => ({
+            parentId: row.parent_id,
+            sourcePath: row.source_path,
+            documentTitle: row.document_title,
+            chunkId: row.chunk_id,
+            headingPath: row.heading_path,
+            content: row.content,
+            similarity: Number(row.similarity),
+            needsVision: row.needs_vision,
+        }));
+    }
+
+    /**
+     * 读取全部子块的词法字段并在当前进程缓存，供多题评估复用 BM25 语料。
+     * 摄入或删除文档后会清空缓存。
+     */
+    async getLexicalChunks(): Promise<LexicalChunk[]> {
+        if (this.lexicalChunksCache) return this.lexicalChunksCache;
+        const result = await this.pool.query<{
+            parent_id: string;
+            source_path: string;
+            document_title: string;
+            chunk_id: string;
+            heading_path: string[];
+            content: string;
+            needs_vision: boolean;
+        }>(`SELECT
+                c.parent_id,
+                c.source_path,
+                d.title AS document_title,
+                c.id AS chunk_id,
+                c.heading_path,
+                c.content,
+                c.needs_vision
+            FROM rag_chunks c
+            JOIN rag_documents d ON d.id = c.parent_id`);
+        this.lexicalChunksCache = result.rows.map((row) => ({
+            parentId: row.parent_id,
+            sourcePath: row.source_path,
+            documentTitle: row.document_title,
+            chunkId: row.chunk_id,
+            headingPath: row.heading_path,
+            content: row.content,
+            needsVision: row.needs_vision,
+        }));
+        return this.lexicalChunksCache;
+    }
+
+    /** 为 BM25-only 候选补算与当前查询的余弦相似度，便于统一诊断和阈值校准。 */
+    async scoreChildrenByIds(vector: number[], chunkIds: string[]): Promise<SearchHit[]> {
+        if (chunkIds.length === 0) return [];
+        const result = await this.pool.query<{
+            parent_id: string;
+            source_path: string;
+            document_title: string;
+            chunk_id: string;
+            heading_path: string[];
+            content: string;
+            similarity: number;
+            needs_vision: boolean;
+        }>(
+            `SELECT
+                c.parent_id,
+                c.source_path,
+                d.title AS document_title,
+                c.id AS chunk_id,
+                c.heading_path,
+                c.content,
+                1 - (c.embedding <=> $1::vector) AS similarity,
+                c.needs_vision
+            FROM rag_chunks c
+            JOIN rag_documents d ON d.id = c.parent_id
+            WHERE c.id = ANY($2::text[])`,
+            [pgvector.toSql(vector), chunkIds],
         );
         return result.rows.map((row) => ({
             parentId: row.parent_id,

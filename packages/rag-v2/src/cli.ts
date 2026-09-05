@@ -9,7 +9,7 @@ import path from "node:path";
 import { inspect } from "node:util";
 import { config, requireSecret } from "./config.js";
 import { EmbeddingService } from "./embedding/embedding.js";
-import { evaluateRetrieval, readEvaluationQuestions } from "./evaluation/evaluate.js";
+import { evaluateAnswers, evaluateRetrieval, readEvaluationQuestions } from "./evaluation/evaluate.js";
 import { askKnowledgeBase } from "./generation/ask.js";
 import { ingestKnowledgeBase } from "./ingestion/ingest.js";
 import { searchKnowledge } from "./retrieval/search.js";
@@ -27,7 +27,8 @@ function printHelp(): void {
   pnpm rag inspect --document <id或相对路径>
   pnpm rag inspect --chunk <id>
   pnpm rag stats
-  pnpm rag evaluate [JSONL路径]
+  pnpm rag evaluate [JSONL路径] [--strategy dense|hybrid]
+  pnpm rag baseline
   pnpm rag ask "问题"
 `);
 }
@@ -44,6 +45,13 @@ function readQuery(args: string[]): string {
         .filter((value, index) => !value.startsWith("--") && !args[index - 1]?.startsWith("--"))
         .join(" ")
         .trim();
+}
+
+/** 读取并校验 Dense / Hybrid 检索策略。 */
+function readStrategy(args: string[]): "dense" | "hybrid" {
+    const strategy = readFlag(args, "--strategy") ?? "hybrid";
+    if (strategy !== "dense" && strategy !== "hybrid") throw new Error("--strategy 只支持 dense 或 hybrid");
+    return strategy;
 }
 
 /** 按配置创建 Embedding 服务（校验必填的 SILICONFLOW_API_KEY）。 */
@@ -90,13 +98,19 @@ async function main(): Promise<void> {
             const topK = Number(readFlag(args, "--top-k") ?? 3);
             const query = readQuery(args);
             if (!query) throw new Error("search 需要问题文本");
-            const result = await searchKnowledge({ database, embedding: createEmbedding(), query, topK });
+            const strategy = readStrategy(args);
+            const result = await searchKnowledge({ database, embedding: createEmbedding(), query, topK, strategy });
             console.log(
-                `Top-${topK}，耗时 ${result.durationMs}ms，Embedding tokens=${result.embeddingTokens ?? "未知"}`,
+                `${strategy} Top-${topK}，耗时 ${result.durationMs}ms，Embedding tokens=${result.embeddingTokens ?? "未知"}`,
             );
             result.hits.forEach((hit, index) => {
                 console.log(`\n${index + 1}. ${hit.sourcePath}#${hit.headingPath.join(" > ") || "全文"}`);
                 console.log(`   similarity=${hit.similarity.toFixed(4)} needsVision=${hit.needsVision}`);
+                if (hit.rrfScore !== undefined) {
+                    console.log(
+                        `   rrf=${hit.rrfScore.toFixed(6)} denseRank=${hit.denseRank ?? "-"} bm25Rank=${hit.bm25Rank ?? "-"}`,
+                    );
+                }
                 console.log(`   ${hit.content.replace(/\s+/g, " ").slice(0, 240)}`);
             });
             return;
@@ -117,9 +131,34 @@ async function main(): Promise<void> {
             return;
         }
         if (command === "evaluate") {
-            const evaluationPath = path.resolve(args[0] ?? path.join(config.packageRoot, "eval/questions.jsonl"));
+            const strategy = readStrategy(args);
+            const pathArgument = args.find(
+                (value, index) => !value.startsWith("--") && !args[index - 1]?.startsWith("--"),
+            );
+            const evaluationPath = path.resolve(
+                pathArgument ?? path.join(config.packageRoot, "eval/interview-questions.v1.jsonl"),
+            );
             const questions = await readEvaluationQuestions(evaluationPath);
-            const report = await evaluateRetrieval({ database, embedding: createEmbedding(), questions });
+            const report = await evaluateRetrieval({ database, embedding: createEmbedding(), questions, strategy });
+            console.log(JSON.stringify({ strategy, ...report }, null, 2));
+            return;
+        }
+        if (command === "baseline") {
+            const answerable = await readEvaluationQuestions(
+                path.join(config.packageRoot, "eval/interview-questions.v1.jsonl"),
+            );
+            const refusal = await readEvaluationQuestions(path.join(config.packageRoot, "eval/refusal-questions.v1.jsonl"));
+            const report = await evaluateAnswers({
+                database,
+                embedding: createEmbedding(),
+                questions: [...answerable, ...refusal],
+                generation: {
+                    apiKey: requireSecret(config.generation.apiKey, "DEEPSEEK_API_KEY"),
+                    baseUrl: config.generation.baseUrl,
+                    model: config.generation.model,
+                },
+                minSimilarity: config.minSimilarity,
+            });
             console.log(JSON.stringify(report, null, 2));
             return;
         }
@@ -138,6 +177,7 @@ async function main(): Promise<void> {
                 minSimilarity: config.minSimilarity,
             });
             console.log(result.answer);
+            console.log(`状态：${result.status}${result.refusalReason ? ` (${result.refusalReason})` : ""}`);
             console.log(`\n耗时：${result.durationMs}ms`);
             console.log(`调用量：${JSON.stringify(result.usage)}`);
             console.log("检索来源：");

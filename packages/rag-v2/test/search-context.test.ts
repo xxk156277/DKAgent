@@ -64,3 +64,100 @@ test("短父文档返回全文，长父文档仅返回命中块及相邻块", ()
     assert.ok(!selected.includes("一"));
     assert.ok(selected.length <= 100);
 });
+
+test("前一块超过预算时仍优先保留命中块", () => {
+    // 场景：不能因为前一块先占满预算，导致真正命中的证据被截掉。
+    const chunks = ["前".repeat(200), "命中证据", "后续步骤"].map((content, sequence) => ({
+        id: String(sequence),
+        parentId: "p",
+        sourcePath: "p.md",
+        sequence,
+        headingPath: [content.slice(0, 4)],
+        headingOrdinal: 0,
+        splitIndex: 0,
+        content,
+        contentHash: content,
+        imageRefs: [],
+        needsVision: false,
+    }));
+    const document: StoredDocument = {
+        parent: {
+            id: "p",
+            sourcePath: "p.md",
+            title: "p",
+            content: "长".repeat(500),
+            contentHash: "h",
+            frontmatter: {},
+            modifiedAt: new Date(),
+        },
+        chunks,
+    };
+
+    const selected = selectParentContext(document, "1", 30);
+    assert.ok(selected.includes("命中证据"));
+    assert.ok(selected.length <= 30);
+});
+
+test("相邻长块的 overlap 在上下文中只保留一次", () => {
+    // 场景：切块时引入的重叠只用于召回，生成上下文不应重复浪费预算。
+    const overlap = "共同边界";
+    const chunks = [`前文${overlap}`, `${overlap}命中`, "后文"].map((content, sequence) => ({
+        id: String(sequence),
+        parentId: "p",
+        sourcePath: "p.md",
+        sequence,
+        headingPath: [],
+        headingOrdinal: 0,
+        splitIndex: sequence,
+        content,
+        contentHash: content,
+        imageRefs: [],
+        needsVision: false,
+    }));
+    const document: StoredDocument = {
+        parent: {
+            id: "p",
+            sourcePath: "p.md",
+            title: "p",
+            content: "长".repeat(500),
+            contentHash: "h",
+            frontmatter: {},
+            modifiedAt: new Date(),
+        },
+        chunks,
+    };
+
+    const selected = selectParentContext(document, "1", 100);
+    assert.equal(selected.match(/共同边界/g)?.length, 1);
+});
+
+test("预算只比命中块多一个字符时也不裁掉命中内容", () => {
+    // 场景：邻居和分隔符不能反过来挤占命中块的保底预算。
+    const chunks = ["前", "完整命中证据", "后"].map((content, sequence) => ({
+        id: String(sequence),
+        parentId: "p",
+        sourcePath: "p.md",
+        sequence,
+        headingPath: [],
+        headingOrdinal: 0,
+        splitIndex: 0,
+        content,
+        contentHash: content,
+        imageRefs: [],
+        needsVision: false,
+    }));
+    const document: StoredDocument = {
+        parent: {
+            id: "p",
+            sourcePath: "p.md",
+            title: "p",
+            content: "长".repeat(100),
+            contentHash: "h",
+            frontmatter: {},
+            modifiedAt: new Date(),
+        },
+        chunks,
+    };
+
+    assert.equal(selectParentContext(document, "1", "完整命中证据".length + 1), "完整命中证据");
+});

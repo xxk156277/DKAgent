@@ -3,6 +3,8 @@
 > 本关目标：用20个真实问题判断检索是否把正确父文档放进前三。  
 > 本关不调用 DeepSeek，不使用 RAGAS、Phoenix，不提前增加 BM25、RRF、重排或查询重写。
 
+> 2026-09-02 实现更新：检索评估已支持 `--strategy dense|hybrid`，并增加显式 `baseline` 完整问答评估。下文“不增加 BM25、RRF”描述的是改造前基线阶段。
+
 核心文件：
 
 - [`eval/questions.jsonl`](eval/questions.jsonl)：20条人工评估数据；
