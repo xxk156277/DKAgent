@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<!-- saved from url=(0023)http://localhost:60043/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  
+  <title>Superpowers Brainstorming</title>
+  <style>
+    /*
+     * BRAINSTORM COMPANION FRAME TEMPLATE
+     *
+     * This template provides a consistent frame with:
+     * - OS-aware light/dark theming
+     * - Header branding and connection status
+     * - Scrollable main content area
+     * - CSS helpers for common UI patterns
+     *
+     * Content is injected via placeholder comment in #frame-content.
+     */
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; }
+
+    /* ===== THEME VARIABLES ===== */
+    :root {
+      --bg-primary: #f5f5f7;
+      --bg-secondary: #ffffff;
+      --bg-tertiary: #e5e5e7;
+      --border: #d1d1d6;
+      --text-primary: #1d1d1f;
+      --text-secondary: #86868b;
+      --text-tertiary: #aeaeb2;
+      --accent: #0071e3;
+      --accent-hover: #0077ed;
+      --success: #34c759;
+      --warning: #ff9f0a;
+      --error: #ff3b30;
+      --selected-bg: #e8f4fd;
+      --selected-border: #0071e3;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-primary: #1d1d1f;
+        --bg-secondary: #2d2d2f;
+        --bg-tertiary: #3d3d3f;
+        --border: #424245;
+        --text-primary: #f5f5f7;
+        --text-secondary: #86868b;
+        --text-tertiary: #636366;
+        --accent: #0a84ff;
+        --accent-hover: #409cff;
+        --selected-bg: rgba(10, 132, 255, 0.15);
+        --selected-border: #0a84ff;
+      }
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      display: flex;
+      flex-direction: column;
+      line-height: 1.5;
+    }
+
+    /* ===== FRAME STRUCTURE ===== */
+    .brand { display: flex; align-items: center; min-width: 0; overflow: hidden; color: var(--text-secondary); line-height: 1; }
+    .brand a { color: inherit; text-decoration: none; display: flex; align-items: center; gap: 0.5rem; min-width: 0; max-width: 100%; line-height: 1; }
+    .brand-copy { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1; transform: translateY(-1px); }
+    .brand-logo { display: block; height: 1em; width: auto; max-width: 180px; flex-shrink: 0; filter: invert(1); }
+    @media (prefers-color-scheme: dark) {
+      .brand-logo { filter: none; }
+    }
+    .status { font-size: 0.7rem; color: var(--status-color, var(--success)); display: flex; align-items: center; gap: 0.4rem; justify-self: end; white-space: nowrap; line-height: 1; }
+    .status::before { content: ''; width: 6px; height: 6px; background: var(--status-color, var(--success)); border-radius: 50%; }
+
+    .main { flex: 1; overflow-y: auto; }
+    #frame-content { padding: 2rem; min-height: 100%; }
+
+    .header {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      padding: 0.5rem 1.5rem;
+      flex-shrink: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 1rem;
+      min-height: 42px;
+    }
+    .header .brand { justify-self: start; width: 100%; font-size: 0.75rem; line-height: 1; }
+    .header .status { grid-column: 2; line-height: 1; }
+    .header span {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+    .header .selected-text {
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    /* ===== TYPOGRAPHY ===== */
+    h2 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem; }
+    h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .subtitle { color: var(--text-secondary); margin-bottom: 1.5rem; }
+    .section { margin-bottom: 2rem; }
+    .label { font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+
+    /* ===== OPTIONS (for A/B/C choices) ===== */
+    .options { display: flex; flex-direction: column; gap: 0.75rem; }
+    .option {
+      background: var(--bg-secondary);
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .option:hover { border-color: var(--accent); }
+    .option.selected { background: var(--selected-bg); border-color: var(--selected-border); }
+    .option .letter {
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      width: 1.75rem; height: 1.75rem;
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 600; font-size: 0.85rem; flex-shrink: 0;
+    }
+    .option.selected .letter { background: var(--accent); color: white; }
+    .option .content { flex: 1; }
+    .option .content h3 { font-size: 0.95rem; margin-bottom: 0.15rem; }
+    .option .content p { color: var(--text-secondary); font-size: 0.85rem; margin: 0; }
+
+    /* ===== CARDS (for showing designs/mockups) ===== */
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .card.selected { border-color: var(--selected-border); border-width: 2px; }
+    .card-image { background: var(--bg-tertiary); aspect-ratio: 16/10; display: flex; align-items: center; justify-content: center; }
+    .card-body { padding: 1rem; }
+    .card-body h3 { margin-bottom: 0.25rem; }
+    .card-body p { color: var(--text-secondary); font-size: 0.85rem; }
+
+    /* ===== MOCKUP CONTAINER ===== */
+    .mockup {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 1.5rem;
+    }
+    .mockup-header {
+      background: var(--bg-tertiary);
+      padding: 0.5rem 1rem;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border);
+    }
+    .mockup-body { padding: 1.5rem; }
+
+    /* ===== SPLIT VIEW (side-by-side comparison) ===== */
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    @media (max-width: 700px) { .split { grid-template-columns: 1fr; } }
+
+    /* ===== PROS/CONS ===== */
+    .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+    .pros, .cons { background: var(--bg-secondary); border-radius: 8px; padding: 1rem; }
+    .pros h4 { color: var(--success); font-size: 0.85rem; margin-bottom: 0.5rem; }
+    .cons h4 { color: var(--error); font-size: 0.85rem; margin-bottom: 0.5rem; }
+    .pros ul, .cons ul { margin-left: 1.25rem; font-size: 0.85rem; color: var(--text-secondary); }
+    .pros li, .cons li { margin-bottom: 0.25rem; }
+
+    /* ===== PLACEHOLDER (for mockup areas) ===== */
+    .placeholder {
+      background: var(--bg-tertiary);
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 2rem;
+      text-align: center;
+      color: var(--text-tertiary);
+    }
+
+    /* ===== INLINE MOCKUP ELEMENTS ===== */
+    .mock-nav { background: var(--accent); color: white; padding: 0.75rem 1rem; display: flex; gap: 1.5rem; font-size: 0.9rem; }
+    .mock-sidebar { background: var(--bg-tertiary); padding: 1rem; min-width: 180px; }
+    .mock-content { padding: 1.5rem; flex: 1; }
+    .mock-button { background: var(--accent); color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; }
+    .mock-input { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; width: 100%; }
+  </style>
+</head>
+<body>
+  
+
+  <div class="main">
+    <div id="frame-content" style="
+    color: black;
+    background: #fff;
+">
+      <h2>DKAgent 面试分析：最小增量架构</h2>
+<p class="subtitle">复用现有 Harness，只新增面试诊断 Skill、8个业务Tool和结构化诊断状态</p>
+
+<div class="section">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+    <span style="padding:6px 10px;border-radius:8px;background:#e3f2fd">复用现有</span>
+    <span style="padding:6px 10px;border-radius:8px;background:#f3e8ff">新增或改造</span>
+    <span style="padding:6px 10px;border-radius:8px;background:#e8f5e9">持久化数据</span>
+  </div>
+
+  <div style="padding:14px;border-radius:12px;background:#e3f2fd;text-align:center"><strong>用户 → CLI → AgentLoop</strong><br>自然语言交互、元数据/JD确认、事实补充、报告追问</div>
+  <div style="text-align:center;font-size:25px;padding:5px">↓</div>
+  <div style="padding:16px;border-radius:12px;background:#f3e8ff;text-align:center"><strong>diagnose-transcript Skill</strong><br>固定SOP｜逐题循环｜暂停确认｜恢复分析｜完成条件</div>
+  <div style="text-align:center;font-size:25px;padding:5px">↓</div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div style="padding:15px;border-radius:12px;background:#e3f2fd">
+      <strong>ToolRegistry + Dispatcher</strong>
+      <p style="margin-bottom:6px">复用现有注册、Schema和执行边界</p>
+      <div style="font-size:14px;line-height:1.7">
+        read_file｜preprocess_transcript｜split_qa_pairs｜extract_project_facts<br>
+        analyze_expression｜query_knowledge_base｜analyze_answer｜generate_report
+      </div>
+    </div>
+    <div style="padding:15px;border-radius:12px;background:#e3f2fd">
+      <strong>QueryEngine → LLM</strong>
+      <p style="margin-bottom:6px">复用模型调用；只处理受Skill约束的语义任务</p>
+      <div style="font-size:14px;line-height:1.7">错词判断｜问题簇与题型｜项目事实｜单题诊断｜报告总结</div>
+    </div>
+  </div>
+
+  <div style="text-align:center;font-size:25px;padding:5px">↓</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+    <div style="padding:13px;border-radius:12px;background:#e3f2fd;text-align:center"><strong>ContextManager</strong><br><small>每次只装载当前问题簇及必要证据</small></div>
+    <div style="padding:13px;border-radius:12px;background:#e8f5e9;text-align:center"><strong>SessionStore</strong><br><small>阶段、进度、中间诊断、等待确认</small></div>
+    <div style="padding:13px;border-radius:12px;background:#e8f5e9;text-align:center"><strong>KnowledgeBase</strong><br><small>按需核验知识和技术事实</small></div>
+    <div style="padding:13px;border-radius:12px;background:#e8f5e9;text-align:center"><strong>MemoryStore</strong><br><small>最终报告后的表现时间线</small></div>
+  </div>
+
+  <div style="text-align:center;font-size:25px;padding:5px">↓</div>
+  <div style="padding:14px;border-radius:12px;background:#f3e8ff;text-align:center"><strong>FinalReport</strong><br>第一层面试分析｜第二层全部具体问题</div>
+</div>
+
+
+
+
+
+    </div>
+  </div>
+
+<script>
+(function() {
+  const MIN_RECONNECT_MS = 500;
+  const MAX_RECONNECT_MS = 30000;
+  const TOMBSTONE_AFTER_MS = 15000; // show the "paused" overlay after this long disconnected
+
+  // Pure: next backoff delay (doubles, capped). Exported for unit tests.
+  function nextReconnectDelay(current, max) {
+    return Math.min(current * 2, max);
+  }
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { nextReconnectDelay, MIN_RECONNECT_MS, MAX_RECONNECT_MS, TOMBSTONE_AFTER_MS };
+  }
+
+  // Everything below is browser-only; bail out when loaded in Node (tests).
+  if (typeof window === 'undefined') return;
+
+  let ws = null;
+  let eventQueue = [];
+  let reconnectDelay = MIN_RECONNECT_MS;
+  let reconnectTimer = null;
+  let disconnectedSince = null;
+  let everConnected = false;
+  let tombstoneShown = false;
+
+  function sessionKey() {
+    try {
+      return window.sessionStorage && window.sessionStorage.getItem('brainstorm-session-key');
+    } catch (e) {}
+    return null;
+  }
+
+  function websocketUrl() {
+    const key = sessionKey();
+    return 'ws://' + window.location.host + (key ? '/?key=' + encodeURIComponent(key) : '');
+  }
+
+  function reloadAfterRecovery() {
+    const key = sessionKey();
+    if (key) {
+      window.location.replace('/?key=' + encodeURIComponent(key));
+    } else {
+      window.location.reload();
+    }
+  }
+
+  // Reflect connection state in the frame's status pill (absent on full-doc screens).
+  function setStatus(state) {
+    const el = document.querySelector('.status');
+    if (!el) return;
+    const map = {
+      connecting:   ['Connecting…',   'var(--text-tertiary)'],
+      connected:    ['Connected',     'var(--success)'],
+      reconnecting: ['Reconnecting…', 'var(--warning)'],
+      disconnected: ['Disconnected',  'var(--error)']
+    };
+    const [text, color] = map[state] || map.disconnected;
+    el.textContent = text;
+    el.style.setProperty('--status-color', color);
+  }
+
+  // Self-styled so it works on framed and full-document screens alike.
+  function showTombstone() {
+    if (tombstoneShown) return;
+    tombstoneShown = true;
+    const el = document.createElement('div');
+    el.id = 'bs-tombstone';
+    el.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;' +
+      'align-items:center;justify-content:center;padding:2rem;text-align:center;' +
+      'background:rgba(20,20,22,0.92);color:#f5f5f7;font-family:system-ui,sans-serif';
+    el.innerHTML = '<div style="max-width:480px">' +
+      '<h2 style="margin:0 0 .5rem;font-weight:600">Companion paused</h2>' +
+      '<p style="margin:0;opacity:.85">This brainstorm companion has stopped. ' +
+      'Ask your coding agent to bring it back — this page reconnects automatically.</p></div>';
+    if (document.body) document.body.appendChild(el);
+  }
+
+  function connect() {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    setStatus(everConnected ? 'reconnecting' : 'connecting');
+    ws = new WebSocket(websocketUrl());
+
+    ws.onopen = () => {
+      const recovered = tombstoneShown;
+      everConnected = true;
+      disconnectedSince = null;
+      reconnectDelay = MIN_RECONNECT_MS;
+      tombstoneShown = false;
+      setStatus('connected');
+      eventQueue.forEach(e => ws.send(JSON.stringify(e)));
+      eventQueue = [];
+      // Recovered from a tombstoned outage (e.g. the server restarted on the same
+      // port) — reload through the keyed bootstrap when possible so the cookie is
+      // refreshed before the visible URL returns to bare /.
+      if (recovered) reloadAfterRecovery();
+    };
+
+    ws.onmessage = (msg) => {
+      let data;
+      try { data = JSON.parse(msg.data); } catch (e) { return; }
+      if (data.type === 'reload') window.location.reload();
+    };
+
+    ws.onclose = () => {
+      ws = null;
+      if (disconnectedSince === null) disconnectedSince = Date.now();
+      if (Date.now() - disconnectedSince >= TOMBSTONE_AFTER_MS) {
+        setStatus('disconnected');
+        showTombstone();
+      } else {
+        setStatus('reconnecting');
+      }
+      reconnectTimer = setTimeout(connect, reconnectDelay);
+      reconnectDelay = nextReconnectDelay(reconnectDelay, MAX_RECONNECT_MS);
+    };
+
+    // Let onclose own reconnection so we don't schedule it twice.
+    ws.onerror = () => { try { ws.close(); } catch (e) {} };
+  }
+
+  function sendEvent(event) {
+    event.timestamp = Date.now();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(event));
+    } else {
+      eventQueue.push(event);
+    }
+  }
+
+  // Capture clicks on choice elements
+  document.addEventListener('click', (e) => {
+    const target = e.target.closest('[data-choice]');
+    if (!target) return;
+
+    sendEvent({
+      type: 'click',
+      text: target.textContent.trim(),
+      choice: target.dataset.choice,
+      id: target.id || null
+    });
+
+  });
+
+  // Frame UI: selection tracking
+  window.selectedChoice = null;
+
+  window.toggleSelect = function(el) {
+    const container = el.closest('.options') || el.closest('.cards');
+    const multi = container && container.dataset.multiselect !== undefined;
+    if (container && !multi) {
+      container.querySelectorAll('.option, .card').forEach(o => o.classList.remove('selected'));
+    }
+    if (multi) {
+      el.classList.toggle('selected');
+    } else {
+      el.classList.add('selected');
+    }
+    window.selectedChoice = el.dataset.choice;
+  };
+
+  // Expose API for explicit use
+  window.brainstorm = {
+    send: sendEvent,
+    choice: (value, metadata = {}) => sendEvent({ type: 'choice', value, ...metadata })
+  };
+
+  connect();
+})();
+
+</script>
+
+
+</body></html>

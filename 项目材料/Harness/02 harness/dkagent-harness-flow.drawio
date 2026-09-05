@@ -1,0 +1,175 @@
+<mxfile host="65bd71144e">
+    <diagram id="dkagent-harness-main" name="Harness 主流程">
+        <mxGraphModel dx="3716" dy="1420" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1100" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="band-capability" value="能力执行与面试业务编排" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;fillColor=#f0fdf4;strokeColor=#86efac;fontColor=#14532d;fontStyle=1;fontSize=15;collapsible=0;" parent="1" vertex="1">
+                    <mxGeometry x="-160" y="580" width="1780" height="390" as="geometry"/>
+                </mxCell>
+                <mxCell id="dispatcher" value="Dispatcher&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;解析名称 / 执行 / 包装结果&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;strokeWidth=2;fontSize=15;fontStyle=1;" parent="band-capability" vertex="1">
+                    <mxGeometry x="235" y="201.75" width="180" height="78" as="geometry"/>
+                </mxCell>
+                <mxCell id="registry" value="ToolRegistry&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;注册实现 / 暴露 Schema&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dcfce7;strokeColor=#16a34a;strokeWidth=2;fontSize=15;fontStyle=1;" parent="band-capability" vertex="1">
+                    <mxGeometry x="515" y="201.75" width="180" height="78" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-dispatch-registry" value="resolve(name)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#16a34a;strokeWidth=2;fontSize=11;" parent="band-capability" source="dispatcher" target="registry" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="file-tools" value="文件 Tools&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;read / find / grep / write&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fdf4;strokeColor=#22c55e;fontSize=14;fontStyle=1;" parent="band-capability" vertex="1">
+                    <mxGeometry x="795" y="91.75" width="180" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-registry-files" value="原子能力" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#22c55e;fontSize=11;" parent="band-capability" source="registry" target="file-tools" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="analyze-tool" value="analyze_interview Tool&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;主模型可见的任务入口&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbf7d0;strokeColor=#15803d;strokeWidth=2;fontSize=14;fontStyle=1;" parent="band-capability" vertex="1">
+                    <mxGeometry x="785" y="201.75" width="200" height="75" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-registry-analyze" value="任务入口" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#15803d;fontSize=11;" parent="band-capability" source="registry" target="analyze-tool" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="skill" value="diagnose-transcript Skill&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;TypeScript 任务级编排&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#a7f3d0;strokeColor=#047857;strokeWidth=2;fontSize=14;fontStyle=1;" parent="band-capability" vertex="1">
+                    <mxGeometry x="1075" y="196.75" width="210" height="88" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-analyze-skill" value="执行 Skill" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#047857;strokeWidth=2;fontSize=11;" parent="band-capability" source="analyze-tool" target="skill" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="pipeline" value="面试分析流水线&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;解析 → 结构化 → 事实/表达/逐题&lt;br&gt;→ 评分 → 报告 → 写文件&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d1fae5;strokeColor=#059669;strokeWidth=2;fontSize=14;fontStyle=1;" parent="band-capability" vertex="1">
+                    <mxGeometry x="1375" y="180.25" width="170" height="118" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-skill-pipeline" value="确定性编排" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#059669;strokeWidth=2;fontSize=11;" parent="band-capability" source="skill" target="pipeline" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="knowledge" value="Knowledge（可选）&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;SQLite FTS 参考资料&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef9c3;strokeColor=#ca8a04;fontSize=13;fontStyle=1;" parent="band-capability" vertex="1">
+                    <mxGeometry x="1085" y="91.75" width="190" height="68" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-knowledge-skill" value="知识题参考" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#ca8a04;fontSize=11;" parent="band-capability" source="knowledge" target="skill" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="title" value="DKAgent Harness 主流程（模型决策 + 代码约束 + 能力执行 + 旁路观测）" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#1f2937;" parent="1" vertex="1">
+                    <mxGeometry x="300" y="20" width="1050" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="scope-note" value="图示范围：核心 Harness、模型协议、能力编排、业务流水线、Trace/Web Tap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#94a3b8;fontColor=#475569;fontSize=13;dashed=1;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="70" width="690" height="36" as="geometry"/>
+                </mxCell>
+                <mxCell id="band-core" value="Harness 核心与模型协议" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;fillColor=#eff6ff;strokeColor=#93c5fd;fontColor=#1e3a8a;fontStyle=1;fontSize=15;collapsible=0;movable=1;resizable=1;rotatable=1;deletable=1;editable=1;locked=0;connectable=1;" parent="1" vertex="1">
+                    <mxGeometry x="-160" y="120" width="1770" height="440" as="geometry"/>
+                </mxCell>
+                <mxCell id="agent-loop" value="AgentLoop&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Turn / Step / maxSteps&lt;br&gt;text 或 tool_use 分支&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bfdbfe;strokeColor=#1d4ed8;strokeWidth=3;fontSize=17;fontStyle=1;" parent="band-core" vertex="1">
+                    <mxGeometry x="600" y="226" width="180" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="user" value="用户输入" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#2563eb;strokeWidth=2;fontSize=15;fontStyle=1;" parent="band-core" vertex="1">
+                    <mxGeometry x="110" y="242" width="120" height="58" as="geometry"/>
+                </mxCell>
+                <mxCell id="cli" value="CLI / 组合根&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;配置与依赖装配&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;strokeWidth=2;fontSize=15;fontStyle=1;" parent="band-core" vertex="1">
+                    <mxGeometry x="320" y="228" width="160" height="88" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-user-cli" value="自然语言" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;strokeWidth=2;fontSize=11;" parent="band-core" source="user" target="cli" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-cli-loop" value="创建并运行" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;strokeWidth=2;fontSize=11;" parent="band-core" source="cli" target="agent-loop" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="prompt" value="Stable System Prompt&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;身份 / 证据 / 授权原则&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ede9fe;strokeColor=#7c3aed;strokeWidth=2;fontSize=14;fontStyle=1;" parent="band-core" vertex="1">
+                    <mxGeometry x="590" y="50" width="200" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-prompt-loop" value="稳定规则" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#7c3aed;strokeWidth=2;fontSize=11;" parent="band-core" source="prompt" target="agent-loop" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="query-engine" value="QueryEngine&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;统一模型调用入口&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2563eb;strokeWidth=2;fontSize=15;fontStyle=1;" parent="band-core" vertex="1">
+                    <mxGeometry x="945" y="235" width="170" height="72" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-loop-query" value="ModelRequest" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#2563eb;strokeWidth=2;fontSize=11;" parent="band-core" source="agent-loop" target="query-engine" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-query-loop" value="text / tool_use" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#1d4ed8;fontSize=11;exitX=0.25;exitY=0;exitDx=0;exitDy=0;" parent="band-core" source="query-engine" target="agent-loop" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="987" y="170"/>
+                            <mxPoint x="750" y="170"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="provider" value="OpenAI-Compatible&lt;br&gt;Provider&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;协议转换 / Stream&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e0f2fe;strokeColor=#0284c7;strokeWidth=2;fontSize=14;fontStyle=1;" parent="band-core" vertex="1">
+                    <mxGeometry x="1280" y="226" width="180" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-query-provider" value="统一请求" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#0284c7;strokeWidth=2;fontSize=11;" parent="band-core" source="query-engine" target="provider" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-provider-query" value="中立流事件" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#0369a1;fontSize=11;exitX=0.25;exitY=0;exitDx=0;exitDy=0;entryX=0.75;entryY=0;entryDx=0;entryDy=0;" parent="band-core" source="provider" target="query-engine" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1325" y="150"/>
+                            <mxPoint x="1073" y="150"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="llm" value="LLM 服务&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;文本或 Tool Call&lt;/font&gt;" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0369a1;strokeWidth=2;fontSize=15;fontStyle=1;" parent="band-core" vertex="1">
+                    <mxGeometry x="1590" y="226" width="170" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-provider-llm" value="Chat Completions" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#0284c7;strokeWidth=2;fontSize=11;" parent="band-core" source="provider" target="llm" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-llm-provider" value="Stream Chunks" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#0369a1;fontSize=11;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" parent="band-core" source="llm" target="provider" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1675" y="150"/>
+                            <mxPoint x="1370" y="150"/>
+                        </Array>
+                        <mxPoint x="1675" y="154.93" as="sourcePoint"/>
+                        <mxPoint x="1370" y="154.93" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e-dispatch-loop" value="Tool Result&amp;nbsp;" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#15803d;strokeWidth=2;fontSize=11;entryX=0.25;entryY=1;entryDx=0;entryDy=0;exitX=0.25;exitY=0;exitDx=0;exitDy=0;" parent="band-core" source="dispatcher" edge="1">
+                    <mxGeometry x="-0.005" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="280" y="550"/>
+                            <mxPoint x="470" y="550"/>
+                            <mxPoint x="470" y="380"/>
+                            <mxPoint x="660" y="380"/>
+                        </Array>
+                        <mxPoint x="660" y="585" as="sourcePoint"/>
+                        <mxPoint x="659.9300000000001" y="316" as="targetPoint"/>
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="band-observe" value="旁路可观测性（失败不影响 Agent 主流程）" style="swimlane;html=1;startSize=34;horizontal=1;rounded=1;fillColor=#fff7ed;strokeColor=#fdba74;fontColor=#7c2d12;fontStyle=1;fontSize=15;collapsible=0;" parent="1" vertex="1">
+                    <mxGeometry x="-110" y="980" width="1610" height="290" as="geometry"/>
+                </mxCell>
+                <mxCell id="tracer" value="Tracer&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Trace / Span / 脱敏 / 隔离&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffedd5;strokeColor=#ea580c;strokeWidth=2;fontSize=15;fontStyle=1;" parent="band-observe" vertex="1">
+                    <mxGeometry x="255" y="140" width="190" height="78" as="geometry"/>
+                </mxCell>
+                <mxCell id="trace-store" value="进程内 TraceStore&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;有界事件 + 订阅&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffedd5;strokeColor=#ea580c;strokeWidth=2;fontSize=14;fontStyle=1;" parent="band-observe" vertex="1">
+                    <mxGeometry x="565" y="140" width="190" height="78" as="geometry"/>
+                </mxCell>
+                <mxCell id="tap-server" value="Web Tap Server&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;HTTP 历史 + SSE 实时&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fed7aa;strokeColor=#c2410c;strokeWidth=2;fontSize=14;fontStyle=1;" parent="band-observe" vertex="1">
+                    <mxGeometry x="865" y="140" width="200" height="78" as="geometry"/>
+                </mxCell>
+                <mxCell id="viewer" value="React Web Viewer&lt;br&gt;&lt;font style=&quot;font-size:11px&quot;&gt;Turn / Step / Node / 指标&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fed7aa;strokeColor=#c2410c;strokeWidth=2;fontSize=14;fontStyle=1;" parent="band-observe" vertex="1">
+                    <mxGeometry x="1175" y="140" width="210" height="78" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-tracer-store" value="安全事件" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#ea580c;strokeWidth=2;fontSize=11;" parent="band-observe" source="tracer" target="trace-store" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-store-server" value="list / subscribe" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#c2410c;strokeWidth=2;fontSize=11;" parent="band-observe" source="trace-store" target="tap-server" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-server-viewer" value="HTTP + SSE" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#c2410c;strokeWidth=2;fontSize=11;" parent="band-observe" source="tap-server" target="viewer" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-loop-dispatch" value="Tool Call" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#16a34a;strokeWidth=2;fontSize=11;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.75;entryY=0;entryDx=0;entryDy=0;" parent="1" source="agent-loop" target="dispatcher" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="629.93" y="436" as="sourcePoint"/>
+                        <mxPoint x="575" y="710" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="575" y="550"/>
+                            <mxPoint x="390" y="550"/>
+                            <mxPoint x="390" y="720"/>
+                            <mxPoint x="210" y="720"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

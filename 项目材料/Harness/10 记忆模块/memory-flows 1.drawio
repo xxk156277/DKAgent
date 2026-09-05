@@ -1,0 +1,423 @@
+<mxfile host="embed.diagrams.net" pages="3">
+  <diagram id="memory-overview" name="01 Memory 总流程">
+    <mxGraphModel dx="1830" dy="2310" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="o-title" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" value="DKAgent Memory：跨 Session 写入与召回" vertex="1">
+          <mxGeometry height="40" width="880" x="460" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="o-write-lane" parent="1" style="swimlane;html=1;startSize=42;horizontal=1;rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=16;" value="Session A：提取并持久化长期记忆" vertex="1">
+          <mxGeometry height="310" width="1700" x="50" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="o-a-input" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" value="&lt;b&gt;用户输入&lt;/b&gt;" vertex="1">
+          <mxGeometry height="60" width="150" x="90" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="o-a-loop" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;" value="&lt;b&gt;AgentLoop&lt;/b&gt;&lt;br&gt;模型 / Tool 循环" vertex="1">
+          <mxGeometry height="80" width="190" x="290" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="o-answer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" value="&lt;b&gt;最终完整回答&lt;/b&gt;&lt;br&gt;stopReason = end_turn" vertex="1">
+          <mxGeometry height="80" width="210" x="530" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="o-extractor" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;" value="&lt;b&gt;MemoryExtractor&lt;/b&gt;&lt;br&gt;提出 0～3 条候选" vertex="1">
+          <mxGeometry height="80" width="210" x="790" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="o-validate" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=13;" value="&lt;b&gt;程序校验&lt;/b&gt;&lt;br&gt;结构 / 语义 / 凭据 / 去重" vertex="1">
+          <mxGeometry height="110" width="220" x="1050" y="175" as="geometry" />
+        </mxCell>
+        <mxCell id="o-store" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" value="&lt;b&gt;MemoryStore.upsert&lt;/b&gt;&lt;br&gt;显式记忆优先" vertex="1">
+          <mxGeometry height="80" width="200" x="1320" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="o-db" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;" value="&lt;b&gt;SQLite&lt;/b&gt;&lt;br&gt;.dkagent/memory.db" vertex="1">
+          <mxGeometry height="100" width="140" x="1570" y="180" as="geometry" />
+        </mxCell>
+        <mxCell id="o-drop" parent="1" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" value="不保存：临时信息 / 非法候选 / 凭据" vertex="1">
+          <mxGeometry height="55" width="220" x="1050" y="315" as="geometry" />
+        </mxCell>
+        <mxCell id="oe1" edge="1" parent="1" source="o-a-input" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="o-a-loop">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe2" edge="1" parent="1" source="o-a-loop" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="o-answer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe3" edge="1" parent="1" source="o-answer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="o-extractor" value="回答完成后">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe4" edge="1" parent="1" source="o-extractor" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="o-validate" value="候选">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe5" edge="1" parent="1" source="o-validate" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="o-store" value="合法">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe6" edge="1" parent="1" source="o-validate" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="o-drop" value="非法">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe7" edge="1" parent="1" source="o-store" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="o-db" value="持久化">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="o-recall-lane" parent="1" style="swimlane;html=1;startSize=42;horizontal=1;rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=16;" value="Session B：程序重启后召回长期记忆" vertex="1">
+          <mxGeometry height="330" width="1700" x="60" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="o-formatter" parent="o-recall-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" value="&lt;b&gt;MemoryFormatter&lt;/b&gt;&lt;br&gt;安全标签 + 字符预算" vertex="1">
+          <mxGeometry height="80" width="220" x="550" y="115" as="geometry" />
+        </mxCell>
+        <mxCell id="o-context" parent="o-recall-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" value="&lt;b&gt;ContextManager&lt;/b&gt;&lt;br&gt;注入 System Prompt&lt;br&gt;统一计算 Token" vertex="1">
+          <mxGeometry height="100" width="220" x="880" y="105" as="geometry" />
+        </mxCell>
+        <mxCell id="oe10" edge="1" parent="o-recall-lane" source="o-formatter" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="o-context" value="recalled_memory">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="o-b-loop" parent="o-recall-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;" value="&lt;b&gt;AgentLoop&lt;/b&gt;&lt;br&gt;同一 Turn 多 Step&lt;br&gt;复用同一份 Memory" vertex="1">
+          <mxGeometry height="100" width="220" x="1230" y="105" as="geometry" />
+        </mxCell>
+        <mxCell id="oe11" edge="1" parent="o-recall-lane" source="o-context" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="o-b-loop" value="ContextSnapshot">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="o-b-answer" parent="o-recall-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" value="&lt;b&gt;最终回答&lt;/b&gt;&lt;br&gt;完成后再次提取" vertex="1">
+          <mxGeometry height="80" width="220" x="1480" y="115" as="geometry" />
+        </mxCell>
+        <mxCell id="oe12" edge="1" parent="o-recall-lane" source="o-b-loop" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="o-b-answer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="o-b-input" parent="o-recall-lane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" value="&lt;b&gt;新用户输入&lt;/b&gt;" vertex="1">
+          <mxGeometry height="60" width="160" x="20" y="125" as="geometry" />
+        </mxCell>
+        <mxCell id="o-retriever" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;" value="&lt;b&gt;MemoryRetriever&lt;/b&gt;&lt;br&gt;读取、筛选、排序" vertex="1">
+          <mxGeometry height="80" width="210" x="310" y="565" as="geometry" />
+        </mxCell>
+        <mxCell id="oe8" edge="1" parent="1" source="o-b-input" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="o-retriever">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe9" edge="1" parent="1" source="o-retriever" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="o-formatter" value="召回结果">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe-db-read" edge="1" parent="1" source="o-db" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;strokeColor=#b85450;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="o-retriever" value="跨进程读取">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1640" y="425" />
+              <mxPoint x="415" y="425" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="o-note" parent="1" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;align=left;" value="&lt;b&gt;说明&lt;/b&gt;&lt;br&gt;Memory 只保存跨 Session 仍有价值的稳定信息。它对单轮 AgentLoop 的影响只有两个扩展点：Turn 开始前召回，完整回答结束后提取。召回内容只进入本轮 Context，不进入 canonical messages，也不是 Session 历史副本。" vertex="1">
+          <mxGeometry height="130" width="1040" x="380" y="840" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="memory-extractor" name="02 MemoryExtractor">
+    <mxGraphModel dx="3660" dy="4620" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1050" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="x-title" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" value="MemoryExtractor：从完整 Turn 提出候选记忆" vertex="1">
+          <mxGeometry height="40" width="900" x="450" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="x-input" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" value="&lt;b&gt;本轮数据&lt;/b&gt;&lt;br&gt;userInput&lt;br&gt;assistantAnswer" vertex="1">
+          <mxGeometry height="90" width="190" x="70" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="x-stop" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=13;" value="stopReason = end_turn？" vertex="1">
+          <mxGeometry height="110" width="200" x="320" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="x-json" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" value="&lt;b&gt;JSON.stringify&lt;/b&gt;&lt;br&gt;把两段原文作为&lt;br&gt;不可信 JSON 字段值" vertex="1">
+          <mxGeometry height="110" width="220" x="590" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="x-query" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;" value="&lt;b&gt;QueryEngine&lt;/b&gt;&lt;br&gt;temperature = 0&lt;br&gt;maxTokens = 500" vertex="1">
+          <mxGeometry height="110" width="200" x="880" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="x-tool" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;" value="&lt;b&gt;唯一 Tool Schema&lt;/b&gt;&lt;br&gt;submit_memory_candidates&lt;br&gt;memories: []" vertex="1">
+          <mxGeometry height="110" width="230" x="1150" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="x-response" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=13;" value="校验工具&lt;br&gt;是记忆提取Tool" vertex="1">
+          <mxGeometry height="100" width="190" x="1170" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="x-array" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=13;" value="校验入参&lt;br&gt;input.memories 是数组？" vertex="1">
+          <mxGeometry height="100" width="190" x="1170" y="530" as="geometry" />
+        </mxCell>
+        <mxCell id="x-candidate" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" value="&lt;b&gt;逐条读取候选&lt;/b&gt;&lt;br&gt;type + key + content" vertex="1">
+          <mxGeometry height="80" width="240" x="1145" y="680" as="geometry" />
+        </mxCell>
+        <mxCell id="x-validator" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;" value="&lt;b&gt;进入程序校验&lt;/b&gt;&lt;br&gt;模型只有提议权&lt;br&gt;没有写库权" vertex="1">
+          <mxGeometry height="100" width="240" x="1145" y="810" as="geometry" />
+        </mxCell>
+        <mxCell id="x-empty" parent="1" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=14;" value="返回 []&lt;br&gt;不写 Memory" vertex="1">
+          <mxGeometry height="80" width="190" x="325" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="xe1" edge="1" parent="1" source="x-input" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="x-stop">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xe2" edge="1" parent="1" source="x-stop" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="x-json" value="是">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xe3" edge="1" parent="1" source="x-json" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="x-query">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xe4" edge="1" parent="1" source="x-query" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="x-tool">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xe5" edge="1" parent="1" source="x-tool" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="x-response">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xe6" edge="1" parent="1" source="x-response" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="x-array" value="是">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xe7" edge="1" parent="1" source="x-array" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="x-candidate" value="是">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xe8" edge="1" parent="1" source="x-candidate" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="x-validator">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xe9" edge="1" parent="1" source="x-stop" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="x-empty" value="否">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="420" y="370" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xe10" edge="1" parent="1" source="x-response" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;exitX=0;exitY=0.5;entryX=1;entryY=0.5;exitDx=0;exitDy=0;" target="x-empty" value="文本 / 其他 Tool">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="960" y="440" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="xe11" edge="1" parent="1" source="x-array" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;exitX=0;exitY=0.5;entryX=0.5;entryY=1;exitDx=0;exitDy=0;entryDx=0;entryDy=0;" target="x-empty" value="否">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="420" y="580" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="x-note" parent="1" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;align=left;" value="&lt;b&gt;说明&lt;/b&gt;&lt;br&gt;Extractor 只接收当前 Turn 的用户输入和最终回答，不读取完整 Session。普通文本、错误 Tool、非法 Tool 参数都等价于“没有候选”。真正的类型、凭据和数量约束仍由程序执行。" vertex="1">
+          <mxGeometry height="195" width="450" x="515" y="700" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-1" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" value="MemoryCandidate：程序校验与写入决策" vertex="1">
+          <mxGeometry height="40" width="900" x="1570" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" value="模型返回的 unknown" vertex="1">
+          <mxGeometry height="60" width="200" x="1840" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" value="&lt;b&gt;第一层：结构校验&lt;/b&gt;&lt;br&gt;普通对象&lt;br&gt;仅 type / key / content&lt;br&gt;三个字段都是字符串" vertex="1">
+          <mxGeometry height="120" width="260" x="1810" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" value="结构非法&lt;br&gt;丢弃候选" vertex="1">
+          <mxGeometry height="70" width="180" x="2140" y="215" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;" value="&lt;b&gt;第二层：语义校验&lt;/b&gt;&lt;br&gt;type 白名单&lt;br&gt;移除零宽字符并 trim&lt;br&gt;key 格式 / content 1～500&lt;br&gt;key + content 凭据检测" vertex="1">
+          <mxGeometry height="150" width="260" x="1810" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" value="语义非法或凭据&lt;br&gt;丢弃候选" vertex="1">
+          <mxGeometry height="70" width="180" x="2140" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-7" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;" value="&lt;b&gt;第三层：批次规则&lt;/b&gt;&lt;br&gt;type:key 去重&lt;br&gt;本轮最多保留 3 条" vertex="1">
+          <mxGeometry height="100" width="260" x="1810" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-8" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" value="重复或超过上限&lt;br&gt;丢弃候选" vertex="1">
+          <mxGeometry height="70" width="180" x="2140" y="635" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-9" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;" value="合法 MemoryCandidate" vertex="1">
+          <mxGeometry height="60" width="220" x="1830" y="800" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-10" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;fontStyle=1;" value="MemoryStore.upsert" vertex="1">
+          <mxGeometry height="60" width="220" x="1830" y="920" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-11" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=13;" value="已有相同 type:key？" vertex="1">
+          <mxGeometry height="100" width="220" x="1830" y="1040" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-12" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" value="不存在&lt;br&gt;&lt;b&gt;INSERT&lt;/b&gt;" vertex="1">
+          <mxGeometry height="70" width="180" x="1570" y="1200" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-13" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" value="existing = explicit&lt;br&gt;new = automatic&lt;br&gt;&lt;b&gt;IGNORE&lt;/b&gt;" vertex="1">
+          <mxGeometry height="90" width="200" x="1840" y="1190" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-14" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" value="其他组合&lt;br&gt;&lt;b&gt;UPDATE&lt;/b&gt;" vertex="1">
+          <mxGeometry height="70" width="180" x="2130" y="1200" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-15" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="Zs0FXJ79xIbjfqhjbsNW-3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-16" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="Zs0FXJ79xIbjfqhjbsNW-5" value="通过">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-17" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;" target="Zs0FXJ79xIbjfqhjbsNW-4" value="失败">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-18" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="Zs0FXJ79xIbjfqhjbsNW-7" value="通过">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-19" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;" target="Zs0FXJ79xIbjfqhjbsNW-6" value="失败">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-20" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="Zs0FXJ79xIbjfqhjbsNW-9" value="通过">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-21" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;" target="Zs0FXJ79xIbjfqhjbsNW-8" value="失败">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-22" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="Zs0FXJ79xIbjfqhjbsNW-10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-23" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="Zs0FXJ79xIbjfqhjbsNW-11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-24" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="Zs0FXJ79xIbjfqhjbsNW-12" value="否">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1660" y="1200" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-25" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#666666;" target="Zs0FXJ79xIbjfqhjbsNW-13" value="是：显式保护">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-26" edge="1" parent="1" source="Zs0FXJ79xIbjfqhjbsNW-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="Zs0FXJ79xIbjfqhjbsNW-14" value="是：允许覆盖">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Zs0FXJ79xIbjfqhjbsNW-27" parent="1" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;align=left;" value="&lt;b&gt;说明&lt;/b&gt;&lt;br&gt;程序校验不是相信模型，而是把模型输出从 unknown 一层层收窄。&lt;div&gt;1. 单条失败只影响该候选；&lt;/div&gt;&lt;div&gt;2. Writer 会继续处理同批其他候选。&lt;/div&gt;&lt;div&gt;3. Store 最后执行显式记忆优先规则，自动提取不能覆盖用户通过 /remember 保存的内容。&lt;/div&gt;" vertex="1">
+          <mxGeometry height="180" width="480" x="2480" y="375" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="memory-retriever" name="03 MemoryRetriever">
+    <mxGraphModel dx="2745" dy="3465" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1150" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="r-title" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" value="MemoryRetriever：确定性召回、排序与 Context 注入" vertex="1">
+          <mxGeometry height="40" width="940" x="480" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="r-query" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" value="&lt;b&gt;当前用户 query&lt;/b&gt;" vertex="1">
+          <mxGeometry height="60" width="210" x="70" y="620" as="geometry" />
+        </mxCell>
+        <mxCell id="r-store" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;" value="&lt;b&gt;MemoryStore.list&lt;/b&gt;&lt;br&gt;读取最近 100 条" vertex="1">
+          <mxGeometry height="95" width="210" x="70" y="297.5" as="geometry" />
+        </mxCell>
+        <mxCell id="r-split" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;fontStyle=1;" value="按 type 分组" vertex="1">
+          <mxGeometry height="70" width="190" x="350" y="310" as="geometry" />
+        </mxCell>
+        <mxCell id="r-profile" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" value="&lt;b&gt;profile&lt;/b&gt;&lt;br&gt;按更新时间&lt;br&gt;最多 4 条" vertex="1">
+          <mxGeometry height="90" width="190" x="630" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="r-preference" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" value="&lt;b&gt;preference&lt;/b&gt;&lt;br&gt;按更新时间&lt;br&gt;最多 4 条" vertex="1">
+          <mxGeometry height="90" width="190" x="630" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="r-decision" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;" value="&lt;b&gt;decision&lt;/b&gt;&lt;br&gt;计算当前相关度" vertex="1">
+          <mxGeometry height="80" width="190" x="630" y="480" as="geometry" />
+        </mxCell>
+        <mxCell id="r-token" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" value="query 与 key + content 分词&lt;br&gt;ASCII 单词 + 中文双字" vertex="1">
+          <mxGeometry height="90" width="240" x="890" y="475" as="geometry" />
+        </mxCell>
+        <mxCell id="r-score" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=13;" value="词元交集 score &gt; 0？" vertex="1">
+          <mxGeometry height="90" width="200" x="1190" y="475" as="geometry" />
+        </mxCell>
+        <mxCell id="r-sort" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;" value="score ↓ / updatedAt ↓ / id ↑&lt;br&gt;最多 3 条" vertex="1">
+          <mxGeometry height="90" width="220" x="1460" y="475" as="geometry" />
+        </mxCell>
+        <mxCell id="r-drop" parent="1" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" value="score = 0&lt;br&gt;不召回" vertex="1">
+          <mxGeometry height="60" width="180" x="1200" y="640" as="geometry" />
+        </mxCell>
+        <mxCell id="r-merge" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;" value="&lt;b&gt;合并结果&lt;/b&gt;&lt;br&gt;profile → preference → decision&lt;br&gt;总数最多 10 条" vertex="1">
+          <mxGeometry height="100" width="260" x="1440" y="295" as="geometry" />
+        </mxCell>
+        <mxCell id="r-format" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" value="&lt;b&gt;MemoryFormatter&lt;/b&gt;&lt;br&gt;清理换行&lt;br&gt;转义 &amp;amp; / &amp;lt; / &amp;gt;" vertex="1">
+          <mxGeometry height="110" width="220" x="1750" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="jTlnhMbb2CmX-A1Oewd1-1" edge="1" parent="1" source="r-budget" style="edgeStyle=none;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="r-skip">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="jTlnhMbb2CmX-A1Oewd1-2" edge="1" parent="1" source="r-budget" style="edgeStyle=none;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="r-block">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r-budget" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=13;" value="加入整条后&lt;br&gt;超过 2000 字符？" vertex="1">
+          <mxGeometry height="100" width="190" x="2020" y="295" as="geometry" />
+        </mxCell>
+        <mxCell id="r-skip" parent="1" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=13;" value="超过：跳过整条" vertex="1">
+          <mxGeometry height="55" width="200" x="2250" y="317.5" as="geometry" />
+        </mxCell>
+        <mxCell id="r-block" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" value="&lt;b&gt;&amp;lt;recalled_memory&amp;gt;&lt;/b&gt;&lt;br&gt;可能陈旧，只作为事实参考&lt;br&gt;&lt;b&gt;&amp;lt;/recalled_memory&amp;gt;&lt;/b&gt;" vertex="1">
+          <mxGeometry height="110" width="270" x="1980" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="r-context" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;" value="&lt;b&gt;ContextManager&lt;/b&gt;&lt;br&gt;追加到 System Prompt&lt;br&gt;统一计算 Token" vertex="1">
+          <mxGeometry height="100" width="270" x="1980" y="580" as="geometry" />
+        </mxCell>
+        <mxCell id="re1" edge="1" parent="1" source="r-query" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;dashed=1;" target="r-token" value="相关度条件">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1010" y="650" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="re2" edge="1" parent="1" source="r-store" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-split">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re3" edge="1" parent="1" source="r-split" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-profile">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="580" y="345" />
+              <mxPoint x="580" y="175" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="re4" edge="1" parent="1" source="r-split" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-preference">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re5" edge="1" parent="1" source="r-split" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-decision">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="580" y="345" />
+              <mxPoint x="580" y="520" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="re6" edge="1" parent="1" source="r-decision" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-token">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re7" edge="1" parent="1" source="r-token" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-score">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re8" edge="1" parent="1" source="r-score" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="r-sort" value="是">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re9" edge="1" parent="1" source="r-score" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#b85450;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="r-drop" value="否">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re10" edge="1" parent="1" source="r-profile" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-merge">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re11" edge="1" parent="1" source="r-preference" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-merge">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re12" edge="1" parent="1" source="r-sort" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-merge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1570" y="420" />
+              <mxPoint x="1570" y="420" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="re13" edge="1" parent="1" source="r-merge" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-format">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re14" edge="1" parent="1" source="r-format" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-budget">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="re17" edge="1" parent="1" source="r-block" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" target="r-context">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r-note" parent="1" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;align=left;" value="&lt;b&gt;说明&lt;/b&gt;&lt;br&gt;profile 和 preference 使用最近更新时间；decision 只有与当前 query 存在词元交集才召回。最终条目只能整条加入或整条跳过，不截断单条事实。格式化结果只进入本轮 Context，不写入 Session。" vertex="1">
+          <mxGeometry height="140" width="380" x="320" y="770" as="geometry" />
+        </mxCell>
+        <UserObject label="1. 英文/数字按完整单词切分：小写化后整体匹配，提取英文，忽略标点符号&lt;br&gt;2. 中文用双字 bigram 切分：中文没有天然的空格分词，用相邻两个字组成一个词元。比如「打开飞书文档」会被切成「打开」「开飞」「飞书」「书文」「文档」。&lt;br&gt;3. 返回 `Set` 而不是数组：自动去重，查找效率高&lt;br&gt;4. 跨词边界不会粘连：因为中文字符是用单独的正则 `match` 提取的（不含英文和数字），所以双字窗口只在中文字符之间滑动，不会把中文和英文数字混在一起切。" link="1. **英文/数字按完整单词切分**：小写化后整体匹配，`&quot;MemoryStore&quot;` 会变成 `memorystore`，保证大小写不敏感。&#xa;2. **中文用双字 bigram 切分**：中文没有天然的空格分词，用相邻两个字组成一个词元。比如「打开飞书文档」会被切成「打开」「开飞」「飞书」「书文」「文档」，这样即使查询用词和记忆里的用词不完全一致，只要有一两个相邻字重叠就能命中。&#xa;3. **返回 `Set` 而不是数组**：自动去重，后续在 `relevanceScore` 里遍历查询词元时，只需判断 `entryTokens.has(token)` 即可，效率更高。&#xa;4. **跨词边界不会粘连**：因为中文字符是用单独的正则 `match` 提取的（不含英文和数字），所以双字窗口只在中文字符之间滑动，不会把中文和英文数字混在一起切。" id="jeSL4TKNnLTmNftQejYJ-1">
+          <mxCell parent="1" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;align=left;" vertex="1">
+            <mxGeometry height="270" width="390" x="890" y="760" as="geometry" />
+          </mxCell>
+        </UserObject>
+        <mxCell id="jeSL4TKNnLTmNftQejYJ-3" edge="1" parent="1" source="jeSL4TKNnLTmNftQejYJ-1" style="endArrow=none;dashed=1;html=1;dashPattern=1 3;strokeWidth=2;entryX=0.75;entryY=1;entryDx=0;entryDy=0;exitX=0;exitY=0;exitDx=180;exitDy=0;exitPerimeter=0;" target="r-token" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="790" y="1080" as="sourcePoint" />
+            <mxPoint x="840" y="1030" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

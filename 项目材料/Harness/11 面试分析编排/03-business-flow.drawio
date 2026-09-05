@@ -1,0 +1,85 @@
+<mxfile host="app.diagrams.net" modified="2026-08-17T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="business-flow" name="业务流程">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="DKAgent 面试分析业务流程（V1）" style="text;html=1;fontSize=24;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="480" y="20" width="640" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend-user" value="用户/Agent交互" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#82b366;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="70" width="140" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend-skill" value="Skill控制" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="70" width="120" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend-cap" value="Tool / LLM能力" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2f6;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="70" width="140" height="34" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n1" value="1. 用户提交文字稿路径" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="60" y="130" width="210" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n2" value="2. Agent提取并确认&#xa;公司、岗位、日期、轮次、可选JD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="320" y="130" width="250" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n3" value="3. Skill创建诊断任务&#xa;校验输入并保存Session阶段" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="620" y="130" width="250" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n4" value="4. Tool读取原始文字稿&#xa;保留原文和全部表达痕迹" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2f6;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="920" y="130" width="260" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n5" value="5. LLM结构化文字稿&#xa;问题簇、全部问题、题型、项目事实" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="1230" y="130" width="270" height="64" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n6" value="6. Skill遍历全部问题&#xa;过程性问题保留但不评分" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="1230" y="290" width="270" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n7" value="7. Tool按需检索知识库&#xa;仅核验八股题和技术事实" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2f6;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="920" y="290" width="260" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n8" value="8. LLM按题型Rubric分析&#xa;输出问题、改进、分数、证据与置信度" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#d79b00;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="600" y="290" width="270" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n9" value="9. Skill汇总初步分析&#xa;保存检查点并暂停" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="310" y="290" width="240" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n10" value="10. Agent集中询问&#xa;3～5个高影响事实" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="50" y="290" width="210" height="64" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n11" value="11. 用户补充或确认事实" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="50" y="460" width="210" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n12" value="12. Skill只重跑&#xa;受影响的问题" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e8ff;strokeColor=#9673a6;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="310" y="460" width="240" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n13" value="13. Tool＋LLM生成最终报告&#xa;固定权重算分＋两层内容" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eef2f6;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="600" y="460" width="270" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n14" value="14. Session标记完成&#xa;最终表现写入Memory时间线" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="920" y="460" width="260" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n15" value="15. Agent交付报告&#xa;面试分析＋全部具体问题" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#82b366;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1230" y="460" width="270" height="64" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n1" target="n2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n2" target="n3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n3" target="n4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n4" target="n5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n5" target="n6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n6" target="n7"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n7" target="n8"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n8" target="n9"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n9" target="n10"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n10" target="n11"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n11" target="n12"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n12" target="n13"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n13" target="n14"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="n14" target="n15"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
